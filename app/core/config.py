@@ -15,12 +15,15 @@ class Settings(BaseSettings):
         "http://localhost:5174",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
+        "https://blackcathostal.com",
+        "https://www.blackcathostal.com",
+        "https://admin.blackcathostal.com",
         "https://www.tripadvisor.cl",
         "https://www.tripadvisor.com",
         "https://tripadvisor.cl",
         "https://tripadvisor.com",
     ]
-    database_url: str = "mysql+pymysql://blackcathostal:BlackCat2026@127.0.0.1:3306/blackcat_api"
+    database_url: str
     secret_key: str = "blackcat-dev-secret-change-me"
     access_token_expire_minutes: int = 60 * 12
     admin_email: str = "admin@blackcathostal.com"
@@ -51,7 +54,11 @@ class Settings(BaseSettings):
     tripadvisor_reviews_cache_seconds: int = 1800
     tripadvisor_photos_cache_seconds: int = 1800
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=BASE_DIR / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()
