@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     app_name: str = "BlackCat API"
     api_prefix: str = "/api"
     app_host: str = "127.0.0.1"
-    app_port: int = 9080
+    app_port: int = 9456
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://localhost:5174",
