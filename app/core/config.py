@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         "https://tripadvisor.cl",
         "https://tripadvisor.com",
     ]
-    database_url: str = "mysql+pymysql://root@127.0.0.1:3306/bc"
+    database_url: str = "mysql+pymysql://blackcathostal:BlackCat2026@127.0.0.1:3306/blackcat_api"
     secret_key: str = "blackcat-dev-secret-change-me"
     access_token_expire_minutes: int = 60 * 12
     admin_email: str = "admin@blackcathostal.com"
