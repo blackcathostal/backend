@@ -18,6 +18,8 @@ class Settings(BaseSettings):
         "https://blackcathostal.com",
         "https://www.blackcathostal.com",
         "https://admin.blackcathostal.com",
+        "https://blackcathostal-admin-frontend.web.app",
+        "https://blackcathostal-admin-frontend.firebaseapp.com",
         "https://www.tripadvisor.cl",
         "https://www.tripadvisor.com",
         "https://tripadvisor.cl",
