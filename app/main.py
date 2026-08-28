@@ -11,6 +11,9 @@ from app.api import api_router
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.models import (  # noqa: F401
+    AiGenerationRuns,
+    AiSources,
+    AiUsage,
     Campaigns,
     ContactGroups,
     Contacts,
@@ -23,6 +26,7 @@ from app.models import (  # noqa: F401
     Sliders,
     Users,
 )
+from app.services.mcp_sources import protected_mcp_app
 from app.services.seed import seed_database
 
 logger = logging.getLogger(__name__)
@@ -62,6 +66,10 @@ def _ensure_schema_patches() -> None:
                     """
                 )
             )
+        if not column_exists("posts", "keywords"):
+            conn.execute(
+                text("ALTER TABLE posts ADD COLUMN keywords VARCHAR(500) NOT NULL DEFAULT ''")
+            )
 
 
 @asynccontextmanager
@@ -91,6 +99,7 @@ app.add_middleware(
 
 app.include_router(api_router, prefix=settings.api_prefix)
 app.mount("/uploads", StaticFiles(directory=str(settings.uploads_dir)), name="uploads")
+app.mount("/mcp", protected_mcp_app())
 
 
 @app.get("/")

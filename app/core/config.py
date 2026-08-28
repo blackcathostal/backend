@@ -57,6 +57,26 @@ class Settings(BaseSettings):
     tripadvisor_api_key: str = ""
     tripadvisor_reviews_cache_seconds: int = 1800
     tripadvisor_photos_cache_seconds: int = 1800
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_timeout_seconds: float = 45.0
+    deepseek_max_input_tokens: int = 8000
+    deepseek_max_output_tokens: int = 1200
+    deepseek_cooldown_seconds: int = 1800
+    deepseek_daily_budget_usd: float = 5.0
+    deepseek_max_sources: int = 6
+    deepseek_source_char_limit: int = 4000
+    deepseek_source_timeout_seconds: float = 15.0
+    deepseek_source_max_bytes: int = 1_000_000
+    deepseek_fallback_image_url: str = "/cappa/img/santiago/6.webp"
+    deepseek_pricing_mode: str = "peak"
+    deepseek_cache_hit_price_per_million: float = 0.014
+    deepseek_cache_miss_price_per_million: float = 0.44
+    deepseek_output_price_per_million: float = 1.32
+    deepseek_offpeak_cache_hit_price_per_million: float = 0.007
+    deepseek_offpeak_cache_miss_price_per_million: float = 0.22
+    deepseek_offpeak_output_price_per_million: float = 0.66
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

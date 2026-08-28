@@ -1,3 +1,6 @@
+from app.models.ai_generation_runs import AiGenerationRuns
+from app.models.ai_sources import AiSources
+from app.models.ai_usage import AiUsage
 from app.models.campaigns import Campaigns
 from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
@@ -11,6 +14,9 @@ from app.models.sliders import Sliders
 from app.models.users import Users
 
 __all__ = [
+    "AiSources",
+    "AiGenerationRuns",
+    "AiUsage",
     "Roles",
     "Users",
     "Sliders",

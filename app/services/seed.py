@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -7,7 +5,6 @@ from app.core.security import hash_password
 from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
 from app.models.medias import Medias
-from app.models.posts import Posts
 from app.models.roles import Roles
 from app.models.rooms import Rooms
 from app.models.services import Services
@@ -43,69 +40,6 @@ DEFAULT_SLIDERS = [
         "image_url": "/uploads/sliders/frontend-santiago-4.webp",
         "overlay": 3,
         "sort_order": 4,
-    },
-]
-
-DEFAULT_POSTS = [
-    {
-        "slug": "descubre-el-historico-barrio-brasil",
-        "title": "Descubre el histórico Barrio Brasil",
-        "excerpt": (
-            "Uno de los barrios con más historia y personalidad de Santiago. "
-            "Sus calles esconden mansiones patrimoniales, arte urbano, cafés y una vida cultural "
-            "que enamora a cada viajero que lo recorre."
-        ),
-        "body": (
-            "El Barrio Brasil es uno de los sectores con más personalidad e historia de Santiago. "
-            "Sus calles conservan mansiones patrimoniales de principios del siglo XX, hoy convertidas "
-            "en cafés, restaurantes, galerías y espacios culturales que conviven con un vibrante arte urbano.\n\n"
-            "A pasos de Black Cat Hostal encontrarás la Plaza Brasil, la Basílica del Salvador y una "
-            "variada oferta gastronómica. Es el punto de partida ideal para explorar el casco antiguo de la ciudad."
-        ),
-        "category": "Barrio",
-        "image_url": "/cappa/img/barrio/bb-plaza-1.webp",
-        "author": "Black Cat Hostal",
-        "sort_order": 1,
-        "published_at": datetime(2026, 12, 2, tzinfo=timezone.utc),
-    },
-    {
-        "slug": "que-hacer-en-santiago-en-3-dias",
-        "title": "Qué hacer en Santiago en 3 días",
-        "excerpt": (
-            "Desde el cerro San Cristóbal hasta el centro histórico y sus museos, "
-            "te contamos cómo aprovechar al máximo tu estadía en la capital chilena."
-        ),
-        "body": (
-            "Santiago concentra cultura, gastronomía y naturaleza a poca distancia. "
-            "En tres días puedes recorrer el centro histórico, subir al San Cristóbal, "
-            "visitar museos y disfrutar de barrios como Lastarria, Brasil y Bellavista.\n\n"
-            "Desde Black Cat Hostal te armamos un itinerario simple para que no pierdas tiempo "
-            "y vivas lo mejor de la ciudad."
-        ),
-        "category": "Turismo",
-        "image_url": "/cappa/img/santiago/teleferico.webp",
-        "author": "Black Cat Hostal",
-        "sort_order": 2,
-        "published_at": datetime(2026, 12, 4, tzinfo=timezone.utc),
-    },
-    {
-        "slug": "excursiones-a-la-nieve-cerca-de-la-ciudad",
-        "title": "Excursiones a la nieve cerca de la ciudad",
-        "excerpt": (
-            "A pocas horas de Santiago encontrarás centros de montaña y valles nevados "
-            "perfectos para vivir la magia de la nieve durante tu visita."
-        ),
-        "body": (
-            "En temporada de invierno, Valle Nevado, Farellones y La Parva están a pocas horas "
-            "del centro. Son opciones ideales para una escapada de día o un fin de semana en la nieve.\n\n"
-            "Te ayudamos con tipología de traslados, horarios y recomendaciones para que salgas "
-            "temprano y regreses a descansar en el hostal."
-        ),
-        "category": "Nieve",
-        "image_url": "/cappa/img/santiago/2.webp",
-        "author": "Black Cat Hostal",
-        "sort_order": 3,
-        "published_at": datetime(2026, 12, 6, tzinfo=timezone.utc),
     },
 ]
 
@@ -167,10 +101,6 @@ def seed_database(db: Session) -> None:
                     alt_text=item["title"],
                 )
             )
-
-    if db.query(Posts).count() == 0:
-        for item in DEFAULT_POSTS:
-            db.add(Posts(**item, is_active=True))
 
     # Always keep the known frontend homepage sliders synced into DB + uploads.
     sync_frontend_sliders(db)

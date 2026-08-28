@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from sqlalchemy import inspect, text
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.database import Base, SessionLocal, engine
 from app.main import _ensure_schema_patches
 from app.models import (  # noqa: F401
+    AiGenerationRuns,
+    AiSources,
+    AiUsage,
     Campaigns,
     ContactGroups,
     Contacts,
@@ -61,6 +69,7 @@ def main() -> None:
         checks = [
             ("mail_accounts", "signature"),
             ("contacts", "group_id"),
+            ("posts", "keywords"),
         ]
         for table, column in checks:
             exists = conn.execute(

@@ -12,6 +12,7 @@ class Posts(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     slug: Mapped[str] = mapped_column(String(220), unique=True, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(220), nullable=False)
+    keywords: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     excerpt: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
     category: Mapped[str] = mapped_column(String(80), nullable=False, default="Blog")
