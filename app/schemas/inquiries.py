@@ -2,11 +2,11 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class ContactInquiryCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
+    name: str
     email: EmailStr
-    phone: str = Field(default='', max_length=40)
-    subject: str = Field(min_length=2, max_length=180)
-    message: str = Field(max_length=5000)
+    phone: str = Field(default="", pattern=r"^[0-9]*$")
+    subject: str
+    message: str
 
 
 class ContactInquiryOut(BaseModel):
