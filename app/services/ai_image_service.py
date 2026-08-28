@@ -46,20 +46,7 @@ async def download_free_image(
 
 
 async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
-    query = _search_query(relevance_text)
-    params = {
-        "action": "query",
-        "generator": "search",
-        "gsrsearch": f"File:{query}",
-        "gsrnamespace": "6",
-        "gsrlimit": "30",
-        "prop": "imageinfo",
-        "iiprop": "url|mime|timestamp|extmetadata",
-        "iiurlwidth": "1600",
-        "format": "json",
-        "formatversion": "2",
-        "origin": "*",
-    }
+    queries = _search_queries(relevance_text)
     headers = {
         "User-Agent": (
             "BlackCatTourismBot/1.0 "
@@ -68,15 +55,39 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         "Accept": "application/json",
         "Accept-Language": "es,en;q=0.8",
     }
+    pages: list[dict[str, object]] = []
     try:
         async with httpx.AsyncClient(timeout=settings.deepseek_source_timeout_seconds) as client:
-            response = await client.get(settings.image_search_api_url, params=params, headers=headers)
-            response.raise_for_status()
-            payload = response.json()
+            for query in queries:
+                params = {
+                    "action": "query",
+                    "generator": "search",
+                    "gsrsearch": f"File:{query}",
+                    "gsrnamespace": "6",
+                    "gsrlimit": "30",
+                    "prop": "imageinfo",
+                    "iiprop": "url|mime|timestamp|extmetadata",
+                    "iiurlwidth": "1600",
+                    "format": "json",
+                    "formatversion": "2",
+                    "origin": "*",
+                }
+                response = await client.get(
+                    settings.image_search_api_url,
+                    params=params,
+                    headers=headers,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                pages.extend(
+                    page
+                    for page in (payload.get("query", {}).get("pages", []) or [])
+                    if isinstance(page, dict)
+                )
     except (httpx.HTTPError, ValueError) as exc:
         raise SourceFetchError("No se pudo buscar una fotografía libre.") from exc
 
-    query_words = _content_words(query)
+    query_words = _content_words(" ".join(queries))
     title_words = _title_words(relevance_text)
     anchor_words = _title_anchor_words(relevance_text)
     coastal_topic = bool(
@@ -95,7 +106,7 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         "actriz", "actor", "mujer", "woman", "man", "person", "people",
         "crowd", "programa", "festival", "concierto",
     )
-    for page in (payload.get("query", {}).get("pages", []) or []):
+    for page in pages:
         title = str(page.get("title") or "")
         normalized_title = title.lower()
         if any(term in normalized_title for term in blocked_terms):
@@ -148,6 +159,23 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
             )
         )
     return [candidate for _, candidate in sorted(candidates, key=lambda item: item[0], reverse=True)]
+
+
+def _search_queries(value: str) -> list[str]:
+    primary = _search_query(value)
+    queries = [primary]
+    places_match = re.search(r"lugares:\s*([^\n]+)", value, flags=re.IGNORECASE)
+    if places_match:
+        place_words = [
+            word
+            for word in re.findall(r"[a-záéíóúñ]{3,}", places_match.group(1).lower())
+            if word not in {"para", "desde", "entre", "sobre", "santiago", "chile"}
+        ]
+        if place_words:
+            alternate = " ".join(place_words[:3] + ["Santiago"])
+            if alternate not in queries:
+                queries.append(alternate)
+    return queries
 
 
 def _search_query(value: str) -> str:
