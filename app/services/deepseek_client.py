@@ -75,6 +75,7 @@ async def generate_article(
     source_context: str,
     *,
     avoid_articles: list[str] | None = None,
+    revision_note: str = "",
 ) -> tuple[str, dict[str, Any]]:
     if not settings.deepseek_api_key.strip():
         raise DeepSeekError("DEEPSEEK_API_KEY no está configurada en el backend.")
@@ -105,10 +106,11 @@ async def generate_article(
         "el enfoque principal de los artículos anteriores y elige otro lugar, experiencia "
         "o ángulo. No uses la misma introducción, orden de ideas, ejemplos, consejos, "
         "conclusión ni frases características, aunque cambies algunas palabras. "
-        "No vuelvas a utilizar atractivos, cerros, barrios, museos, plazas, parques, "
-        "miradores, rutas ni restaurantes que aparezcan en los artículos anteriores. "
-        "Si un lugar ya fue mencionado, elige otro destino respaldado por FUENTES; si "
-        "las fuentes no permiten un tema nuevo, no fuerces la redacción ni inventes datos. "
+        "No vuelvas a convertir en tema principal un atractivo, cerro, barrio, museo, "
+        "plaza, parque, mirador, ruta o restaurante ya tratado. Puedes mencionarlo "
+        "brevemente como contexto si es imprescindible, pero el artículo debe aportar "
+        "un enfoque y contenido nuevos. Si las fuentes no permiten un tema nuevo, no "
+        "fuerces la redacción ni inventes datos. "
         "No comiences con fórmulas repetidas como 'Santiago, la capital chilena...' ni "
         "termines con frases vacías como 'una experiencia inolvidable' o 'un destino "
         "imperdible'. Si el título promete una cantidad de rutas, días o lugares, el "
@@ -133,6 +135,8 @@ async def generate_article(
             "resumas ni los imites):\n"
             + "\n".join(f"- {article}" for article in avoid_articles[:20])
         )
+    if revision_note:
+        user_prompt += f"\n\nINSTRUCCIÓN DE REVISIÓN:\n{revision_note}"
     payload = {
         "model": settings.deepseek_model,
         "messages": [

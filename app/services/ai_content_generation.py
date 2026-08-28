@@ -85,6 +85,26 @@ def _limit_words(value: str, maximum: int) -> str:
     return truncated
 
 
+def _merge_usage(total: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    if not total:
+        return dict(current)
+    merged = dict(current)
+    for key in (
+        "prompt_tokens",
+        "prompt_cache_hit_tokens",
+        "prompt_cache_miss_tokens",
+        "completion_tokens",
+        "total_tokens",
+    ):
+        merged[key] = int(total.get(key) or 0) + int(current.get(key) or 0)
+    merged["estimated_cost_usd"] = round(
+        float(total.get("estimated_cost_usd") or 0)
+        + float(current.get("estimated_cost_usd") or 0),
+        8,
+    )
+    return merged
+
+
 def _is_repeated(
     article: dict[str, str],
     existing: list[tuple[str, str, str, str]],
@@ -94,7 +114,6 @@ def _is_repeated(
     new_body = article["body"].lower()
     new_opening = " ".join(re.findall(r"\w{4,}", new_body)[:14])
     new_phrases = _word_ngrams(new_body)
-    new_landmarks = _landmark_phrases(article["title"] + " " + new_body)
     new_text = " ".join(
         [article["body"], article["excerpt"], article.get("keywords", "")]
     ).lower()
@@ -110,7 +129,7 @@ def _is_repeated(
         if (
             normalized_title == old_title
             or SequenceMatcher(None, normalized_title, old_title).ratio() >= 0.78
-            or title_overlap >= 0.60
+            or (len(new_title_words & old_title_words) >= 2 and title_overlap >= 0.75)
         ):
             return True
         old_body = (body or "").lower()
@@ -122,8 +141,6 @@ def _is_repeated(
         ):
             return True
         if len(new_phrases & _word_ngrams(old_body)) >= 3:
-            return True
-        if new_landmarks & _landmark_phrases(f"{title} {old_body}"):
             return True
         old_text = " ".join([body or "", excerpt or "", keywords or ""]).lower()
         old_words = set(re.findall(r"\w{4,}", old_text))
@@ -149,24 +166,6 @@ def _has_template_language(value: str) -> bool:
         "un destino imperdible",
     )
     return any(phrase in normalized for phrase in forbidden_phrases)
-
-
-def _landmark_phrases(value: str) -> set[str]:
-    words = re.findall(r"[a-záéíóúñ]+", value.lower())
-    landmark_prefixes = {
-        "cerro", "barrio", "palacio", "museo", "plaza", "parque",
-        "mercado", "mirador",
-    }
-    standalone_landmarks = {"costanera", "lastarria", "yungay"}
-    phrases: set[str] = set()
-    for index, word in enumerate(words):
-        if word in standalone_landmarks:
-            phrases.add(word)
-        elif word in landmark_prefixes:
-            for size in (2, 3, 4):
-                if index + size <= len(words):
-                    phrases.add(" ".join(words[index : index + size]))
-    return phrases
 
 
 def _context(materials: list[dict[str, Any]]) -> str:
@@ -244,21 +243,39 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             existing_articles = [
                 (row[0], row[1], row[2] or "", row[3] or "") for row in existing_rows
             ]
-            raw_article, usage = await generate_article(
-                _context(materials),
-                avoid_articles=[
-                    f"TÍTULO: {row[0]} | EXTRACTO: {row[2] or ''} | "
-                    f"PALABRAS CLAVE: {row[3] or ''} | FRAGMENTO: {(row[1] or '')[:900]}"
-                    for row in existing_rows[:12]
-                ],
-            )
-            article = _parse_article(raw_article)
-            if _has_template_language(article["body"]):
-                raise DeepSeekError(
-                    "El artículo generado contiene frases promocionales o una plantilla repetida."
+            avoid_articles = [
+                f"TÍTULO: {row[0]} | EXTRACTO: {row[2] or ''} | "
+                f"PALABRAS CLAVE: {row[3] or ''} | FRAGMENTO: {(row[1] or '')[:900]}"
+                for row in existing_rows[:12]
+            ]
+            article = None
+            usage: dict[str, Any] = {}
+            revision_note = ""
+            for attempt in range(2):
+                raw_article, attempt_usage = await generate_article(
+                    _context(materials),
+                    avoid_articles=avoid_articles,
+                    revision_note=revision_note,
                 )
-            if _is_repeated(article, existing_articles):
-                raise DeepSeekError("El artículo generado repite contenido publicado anteriormente.")
+                usage = _merge_usage(usage, attempt_usage)
+                candidate = _parse_article(raw_article)
+                if not _has_template_language(candidate["body"]) and not _is_repeated(
+                    candidate, existing_articles
+                ):
+                    article = candidate
+                    break
+                if attempt == 1:
+                    raise DeepSeekError(
+                        "DeepSeek no logró redactar un artículo suficientemente diferente."
+                    )
+                revision_note = (
+                    "El borrador anterior fue descartado por parecerse demasiado a un artículo "
+                    "publicado. Reescribe desde cero con otro enfoque, otros ejemplos y otra "
+                    "estructura. Las palabras comunes pueden repetirse, pero no las frases, "
+                    "párrafos ni la idea central."
+                )
+            if article is None:
+                raise DeepSeekError("No se pudo validar el artículo generado.")
             article["slug"] = _unique_slug(db, article["slug"])
             article["image_url"], article["image_source_url"] = await download_source_image(
                 materials,
