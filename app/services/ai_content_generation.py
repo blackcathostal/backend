@@ -53,7 +53,14 @@ def _parse_article(raw: str) -> dict[str, Any]:
     try:
         article = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise DeepSeekError("DeepSeek no devolvió el JSON esperado.") from exc
+        start = content.find("{")
+        end = content.rfind("}")
+        if start < 0 or end <= start:
+            raise DeepSeekError("DeepSeek no devolvió el JSON esperado.") from exc
+        try:
+            article = json.loads(content[start : end + 1])
+        except json.JSONDecodeError as nested_exc:
+            raise DeepSeekError("DeepSeek no devolvió el JSON esperado.") from nested_exc
     if not isinstance(article, dict):
         raise DeepSeekError("La respuesta de DeepSeek no tiene formato de artículo.")
 
