@@ -22,6 +22,7 @@ from app.schemas.ai import (
 from app.services.ai_content_generation import generate_and_publish
 from app.core.config import settings
 from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content, validate_source_url
+from app.services.deepseek_client import DeepSeekError
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -184,6 +185,8 @@ async def refresh_content(
         result = await generate_and_publish(db)
     except ValueError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return AiGenerationOut(

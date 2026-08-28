@@ -300,7 +300,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             article = None
             usage: dict[str, Any] = draft_usage
             revision_note = ""
-            for attempt in range(2):
+            for attempt in range(3):
                 raw_article, attempt_usage = await generate_article(
                     generation_context,
                     avoid_articles=avoid_articles,
@@ -313,15 +313,17 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 ):
                     article = candidate
                     break
-                if attempt == 1:
+                if attempt == 2:
                     raise DeepSeekError(
                         "DeepSeek no logró redactar un artículo suficientemente diferente."
                     )
                 revision_note = (
-                    "El borrador anterior fue descartado por parecerse demasiado a un artículo "
-                    "publicado. Reescribe desde cero con otro enfoque, otros ejemplos y otra "
-                    "estructura. Las palabras comunes pueden repetirse, pero no las frases, "
-                    "párrafos ni la idea central."
+                    f"El borrador anterior ('{candidate['title']}') fue descartado por parecerse "
+                    "demasiado a un artículo publicado. Descarta por completo ese enfoque: "
+                    "reescribe desde cero con otro tema concreto, otros lugares, otros ejemplos "
+                    "y otra estructura. No reutilices su apertura, párrafos ni conclusión. "
+                    "Las palabras comunes pueden repetirse, pero no las frases, párrafos ni "
+                    "la idea central."
                 )
             if article is None:
                 raise DeepSeekError("No se pudo validar el artículo generado.")
