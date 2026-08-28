@@ -54,7 +54,7 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         "gsrnamespace": "6",
         "gsrlimit": "30",
         "prop": "imageinfo",
-        "iiprop": "url|mime",
+        "iiprop": "url|mime|extmetadata",
         "iiurlwidth": "1600",
         "format": "json",
         "formatversion": "2",
@@ -77,6 +77,11 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         raise SourceFetchError("No se pudo buscar una fotografía libre.") from exc
 
     query_words = _content_words(query)
+    title_words = _title_words(relevance_text)
+    coastal_topic = bool(
+        {"playa", "playas", "costa", "costero", "mar", "oceano", "océano", "beach"}
+        & _content_words(relevance_text)
+    )
     candidates: list[tuple[int, dict[str, str]]] = []
     blocked_terms = (
         "logo", "logotipo", "emblema", "bandera", "flag", "mapa", "map ",
@@ -93,7 +98,29 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         source_url = str(info.get("descriptionurl") or "")
         if mime not in {"image/jpeg", "image/png", "image/webp"} or not image_url or not source_url:
             continue
-        score = len(query_words & _content_words(title))
+        metadata = info.get("extmetadata") or {}
+        metadata_text = " ".join(
+            str(metadata.get(key, {}).get("value") or "")
+            for key in ("ImageDescription", "ObjectName", "Categories")
+            if isinstance(metadata.get(key), dict)
+        )
+        image_title_words = _content_words(title)
+        metadata_words = _content_words(metadata_text)
+        title_matches = len(title_words & image_title_words)
+        if title_words and title_matches < 1:
+            continue
+        candidate_text = f"{title} {metadata_text}"
+        if not coastal_topic and _contains_any(
+            candidate_text,
+            ("playa", "playas", "beach", "mar", "ocean", "océano", "oceanfront"),
+        ):
+            continue
+        score = (
+            title_matches * 20
+            + len(query_words & image_title_words) * 3
+            + len(query_words & metadata_words)
+            + (10 if _normalized_phrase_match(relevance_text, title) else 0)
+        )
         candidates.append(
             (
                 score,
@@ -104,13 +131,20 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
 
 
 def _search_query(value: str) -> str:
-    words = re.findall(r"[a-záéíóúñ]{4,}", value.lower())
+    title_match = re.search(r"título:\s*([^\n]+)", value, flags=re.IGNORECASE)
+    search_value = title_match.group(1) if title_match else value
+    words = re.findall(r"[a-záéíóúñ]{3,}", search_value.lower())
     ignored = {
         "para", "desde", "entre", "sobre", "este", "esta", "como", "donde",
         "hacia", "hasta", "también", "puede", "pueden", "artículo", "articulos",
         "turismo", "guía", "guia", "días", "dias",
+        "vista", "vistas", "panoramica", "panorámica", "visitar", "visita",
+        "descubre", "conoce", "experiencia", "recorrido", "ruta",
     }
     unique = list(dict.fromkeys(word for word in words if word not in ignored))
+    if title_match:
+        topical = [word for word in unique if word != "santiago"][:3]
+        return " ".join(topical + ["Santiago"]) if topical else "Santiago Chile turismo"
     prefixes = {
         "barrio", "cerro", "cerros", "museo", "palacio", "plaza",
         "parque", "mercado", "mirador", "costanera",
@@ -118,7 +152,7 @@ def _search_query(value: str) -> str:
     for index, word in enumerate(unique):
         if word in prefixes and index + 1 < len(unique):
             return f"{word} {unique[index + 1]} Santiago"
-    topical = unique[:3]
+    topical = unique[:5]
     return " ".join(topical + ["Santiago"]) if topical else "Santiago Chile turismo"
 
 
@@ -126,12 +160,35 @@ def _content_words(value: str) -> set[str]:
     stopwords = {
         "para", "desde", "entre", "sobre", "este", "esta", "como", "donde",
         "hacia", "hasta", "también", "puede", "pueden", "santiago", "chile",
+        "sobre", "donde", "cómo", "como", "guía", "guia", "visita", "visitar",
+        "descubre", "conoce", "mejor", "lugares", "lugar", "turístico", "turismo",
     }
     return {
         word
-        for word in re.findall(r"[a-záéíóúñ]{5,}", value.lower())
+        for word in re.findall(r"[a-záéíóúñ]{3,}", value.lower())
         if word not in stopwords
     }
+
+
+def _title_words(value: str) -> set[str]:
+    match = re.search(r"título:\s*([^\n]+)", value, flags=re.IGNORECASE)
+    title = match.group(1) if match else value
+    return _content_words(title)
+
+
+def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
+    normalized = value.lower()
+    return any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in terms)
+
+
+def _normalized_phrase_match(relevance_text: str, value: str) -> bool:
+    title_match = re.search(r"título:\s*([^\n]+)", relevance_text, flags=re.IGNORECASE)
+    if not title_match:
+        return False
+    title_words = re.findall(r"[a-záéíóúñ]{3,}", title_match.group(1).lower())
+    phrase = " ".join(title_words[:5])
+    normalized = re.sub(r"[^a-záéíóúñ ]+", " ", value.lower())
+    return len(title_words) >= 2 and phrase in normalized
 
 
 def _image_fingerprint(content: bytes) -> str:

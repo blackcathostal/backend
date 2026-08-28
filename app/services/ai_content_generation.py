@@ -334,7 +334,8 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 {row[4] for row in existing_rows if row[4]},
                 {row[5] for row in existing_rows if row[5]},
                 (
-                    f"{article['title']} {article['keywords']} "
+                    f"TÍTULO: {article['title']}\n"
+                    f"PALABRAS CLAVE: {article['keywords']}\n"
                     f"{article['excerpt']} {article['body']}"
                 ),
             )
