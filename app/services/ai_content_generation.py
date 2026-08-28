@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any
 
 from sqlalchemy import func
@@ -71,9 +72,32 @@ def _parse_article(raw: str) -> dict[str, str]:
         "slug": _slugify(str(article.get("slug") or title))[:220],
         "keywords": keywords[:500],
         "excerpt": excerpt[:500],
-        "body": body[:50_000],
+        "body": _limit_words(body, settings.deepseek_article_max_words),
         "category": str(article.get("category") or "Turismo")[:80],
     }
+
+
+def _limit_words(value: str, maximum: int) -> str:
+    words = value.split()
+    if len(words) <= maximum:
+        return value
+    truncated = " ".join(words[:maximum]).rstrip(" .,;:") + "…"
+    return truncated
+
+
+def _is_repeated(article: dict[str, str], existing: list[tuple[str, str]]) -> bool:
+    normalized_title = re.sub(r"\W+", " ", article["title"].lower()).strip()
+    new_words = set(re.findall(r"\w{4,}", article["body"].lower()))
+    for title, body in existing:
+        old_title = re.sub(r"\W+", " ", (title or "").lower()).strip()
+        if normalized_title == old_title or SequenceMatcher(None, normalized_title, old_title).ratio() >= 0.86:
+            return True
+        old_words = set(re.findall(r"\w{4,}", (body or "").lower()))
+        if new_words and old_words:
+            overlap = len(new_words & old_words) / len(new_words | old_words)
+            if overlap >= 0.78:
+                return True
+    return False
 
 
 def _context(materials: list[dict[str, Any]]) -> str:
@@ -142,8 +166,20 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             if not materials:
                 raise ValueError("No hay fuentes activas con contenido legible.")
 
-            raw_article, usage = await generate_article(_context(materials))
+            existing_rows = (
+                db.query(Posts.title, Posts.body)
+                .order_by(Posts.created_at.desc(), Posts.id.desc())
+                .limit(20)
+                .all()
+            )
+            existing_articles = [(row[0], row[1]) for row in existing_rows]
+            raw_article, usage = await generate_article(
+                _context(materials),
+                avoid_titles=[title for title, _ in existing_articles],
+            )
             article = _parse_article(raw_article)
+            if _is_repeated(article, existing_articles):
+                raise DeepSeekError("El artículo generado repite contenido publicado anteriormente.")
             article["slug"] = _unique_slug(db, article["slug"])
             article["image_url"] = (
                 await download_source_image(materials) or settings.deepseek_fallback_image_url

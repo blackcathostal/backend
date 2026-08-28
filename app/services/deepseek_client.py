@@ -71,7 +71,11 @@ def _extract_content(payload: dict[str, Any]) -> str:
     return content.strip()
 
 
-async def generate_article(source_context: str) -> tuple[str, dict[str, Any]]:
+async def generate_article(
+    source_context: str,
+    *,
+    avoid_titles: list[str] | None = None,
+) -> tuple[str, dict[str, Any]]:
     if not settings.deepseek_api_key.strip():
         raise DeepSeekError("DEEPSEEK_API_KEY no está configurada en el backend.")
 
@@ -79,7 +83,10 @@ async def generate_article(source_context: str) -> tuple[str, dict[str, Any]]:
         "Eres el editor de turismo de Black Cat Hostal Boutique en Santiago de Chile. "
         "Usa únicamente los datos incluidos en FUENTES. No inventes precios, horarios, "
         "distancias ni hechos que no estén respaldados. Redacta un solo artículo útil "
-        "en español, con tono cercano y claro. Devuelve exclusivamente JSON válido con "
+        "en español, con tono cercano y claro. Debe ser breve y fácil de leer: entre "
+        f"350 y {settings.deepseek_article_max_words} palabras, en 4 a 6 párrafos. "
+        "El título debe tener máximo 70 caracteres y el extracto entre 140 y 200 caracteres. "
+        "Devuelve exclusivamente JSON válido con "
         'las claves "title", "slug", "keywords", "excerpt", "category" y "body". '
         "keywords debe ser una lista de entre 3 y 8 frases SEO relevantes. "
         "El body debe ser texto plano con párrafos separados por saltos de línea, sin HTML."
@@ -89,6 +96,11 @@ async def generate_article(source_context: str) -> tuple[str, dict[str, Any]]:
         "No menciones que eres una IA ni describas el proceso de investigación.\n\n"
         f"FUENTES:\n{source_context}"
     )
+    if avoid_titles:
+        user_prompt += (
+            "\n\nARTÍCULOS YA PUBLICADOS (no repitas sus títulos ni su enfoque principal):\n"
+            + "\n".join(f"- {title}" for title in avoid_titles[:20])
+        )
     payload = {
         "model": settings.deepseek_model,
         "messages": [
