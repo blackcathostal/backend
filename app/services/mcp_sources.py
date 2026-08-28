@@ -12,11 +12,15 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.ai_sources import AiSources
 from app.models.users import Users
+from app.services.ai_api_sources import collect_external_api_materials
 from app.services.ai_source_fetcher import fetch_source_content
 
 mcp = FastMCP(
     "Black Cat Tourism Sources",
-    instructions="Consulta únicamente las fuentes web HTTPS activadas por el administrador.",
+    instructions=(
+        "Consulta únicamente las fuentes web HTTPS activadas y las APIs REST "
+        "configuradas por el administrador."
+    ),
     streamable_http_path="/",
 )
 
@@ -224,6 +228,7 @@ async def collect_source_material() -> tuple[list[dict[str, Any]], list[int]]:
         if result_payload.get("ok"):
             materials.append(result_payload)
             source_ids.append(int(source["id"]))
+    materials.extend(await collect_external_api_materials())
     return materials, source_ids
 
 

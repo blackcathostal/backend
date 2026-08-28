@@ -72,6 +72,12 @@ def main() -> None:
             ("posts", "keywords"),
             ("posts", "image_source_url"),
             ("ai_usage", "api_requests"),
+            ("ai_usage", "platform_cost_usd"),
+            ("ai_usage", "platform_balance_usd"),
+            ("ai_generation_runs", "generated_title"),
+            ("ai_generation_runs", "generated_excerpt"),
+            ("ai_generation_runs", "generated_keywords"),
+            ("ai_generation_runs", "generated_body"),
         ]
         for table, column in checks:
             exists = conn.execute(

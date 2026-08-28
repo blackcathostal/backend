@@ -77,6 +77,7 @@ async def generate_article(
     *,
     avoid_articles: list[str] | None = None,
     revision_note: str = "",
+    editorial_direction: str = "",
 ) -> tuple[str, dict[str, Any]]:
     if not settings.deepseek_api_key.strip():
         raise DeepSeekError("DEEPSEEK_API_KEY no está configurada en el backend.")
@@ -85,13 +86,17 @@ async def generate_article(
         "Eres un guía de turismo profesional especializado en Santiago de Chile. "
         "Redacta un artículo de blog turístico detallista, práctico y completo, "
         "pero condensado y entretenido para una persona: elimina relleno, repeticiones "
-        "y frases genéricas. Usa únicamente los datos incluidos en FUENTES y DATOS "
-        "VERIFICADOS DE GOOGLE MAPS. No inventes "
+        "y frases genéricas. Usa únicamente los datos incluidos en FUENTES, DATOS "
+        "VERIFICADOS DE GOOGLE MAPS y APIs REST. No inventes "
         "precios, horarios, distancias, direcciones, nombres ni recomendaciones. Si un "
         "dato no está en las fuentes, omítelo. Explica el contexto del lugar, qué puede "
         "hacer el visitante y cómo planificar la visita solo cuando las fuentes lo permitan. "
-        "Cada afirmación debe poder verificarse directamente en FUENTES; no uses memoria "
-        "ni conocimiento general para completar vacíos. "
+        "Cada afirmación debe poder verificarse directamente en las fuentes; no uses memoria "
+        "ni conocimiento general para completar vacíos. Cuando hables de eventos culturales, "
+        "conciertos, exposiciones o actividades, usa únicamente eventos que aparezcan en "
+        "las APIs REST con fecha futura, lugar y enlace o fuente verificable. No presentes "
+        "catálogos, lugares turísticos o datos meteorológicos como si fueran eventos. Si una "
+        "API no está configurada o no devuelve eventos, no inventes una agenda alternativa. "
         "Los nombres, direcciones, enlaces, calificaciones y horarios de lugares deben "
         "salir de DATOS VERIFICADOS DE GOOGLE MAPS. Si Google Maps no entrega un horario "
         "o un dato, no lo completes ni lo supongas. "
@@ -133,7 +138,7 @@ async def generate_article(
         "sobre transporte, clima o alojamiento si no son necesarios para el tema."
     )
     user_prompt = (
-        "Crea un artículo original sobre turismo en Santiago usando estas fuentes. "
+        "Crea un artículo original sobre turismo en Santiago usando estas fuentes y APIs REST. "
         "No menciones que eres una IA ni describas el proceso de investigación. "
         "No repitas ningún artículo, título, introducción, conclusión ni lista de consejos "
         "anterior. Escribe con verbos concretos, escenas observables y detalles útiles, "
@@ -143,8 +148,15 @@ async def generate_article(
         "artículo sea realmente diferente de los anteriores y que no tenga relleno. "
         "No repitas la fórmula 'Santiago es una metrópolis vibrante', 'a los pies de la "
         "Cordillera de los Andes' ni cierres como 'una experiencia inolvidable'.\n\n"
-        f"FUENTES Y DATOS VERIFICADOS:\n{source_context}"
+        f"FUENTES, APIS REST Y DATOS VERIFICADOS:\n{source_context}"
     )
+    if editorial_direction:
+        user_prompt += (
+            "\n\nDIRECCIÓN EDITORIAL DE ESTA REDACCIÓN:\n"
+            f"Explora preferentemente {editorial_direction}. Úsala solo si las fuentes "
+            "la respaldan; si no, elige otro ángulo concreto y documentado. No copies "
+            "la apertura ni la estructura de los artículos anteriores."
+        )
     if avoid_articles:
         user_prompt += (
             "\n\nARTÍCULOS YA PUBLICADOS (úsalos solo para evitar coincidencias; no los "

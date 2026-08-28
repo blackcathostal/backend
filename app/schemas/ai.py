@@ -50,6 +50,8 @@ class AiUsageOut(BaseModel):
     completion_tokens: int
     total_tokens: int
     estimated_cost_usd: float
+    platform_cost_usd: float | None = None
+    platform_balance_usd: float | None = None
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
@@ -59,6 +61,9 @@ class AiUsageSummary(BaseModel):
     from_date: datetime | None = None
     to_date: datetime | None = None
     total_cost_usd: float = 0.0
+    estimated_cost_usd: float = 0.0
+    platform_balance_usd: float | None = None
+    platform_synced_runs: int = 0
     prompt_tokens: int = 0
     prompt_cache_hit_tokens: int = 0
     prompt_cache_miss_tokens: int = 0

@@ -25,4 +25,6 @@ class AiUsage(Base):
     cache_miss_price_per_million: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     output_price_per_million: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     estimated_cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    platform_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    platform_balance_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

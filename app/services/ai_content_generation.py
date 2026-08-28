@@ -15,6 +15,7 @@ from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_usage import AiUsage
 from app.models.posts import Posts
 from app.services.ai_image_service import download_free_image
+from app.services.deepseek_billing import calculate_platform_cost, get_deepseek_balance
 from app.services.deepseek_client import DeepSeekError, generate_article
 from app.services.mcp_sources import collect_google_places, collect_source_material
 
@@ -208,6 +209,20 @@ def _fallback_place_queries(article: dict[str, Any]) -> list[str]:
     ]
 
 
+def _editorial_direction(run_id: int) -> str:
+    directions = (
+        "vida cultural local y espacios de creación",
+        "arquitectura, patrimonio y memoria del lugar",
+        "música, espectáculos y programación verificable",
+        "recorrido práctico para una primera visita",
+        "oficios, diseño, mercados y comercio de barrio",
+        "parques, miradores y actividades al aire libre",
+        "gastronomía local vinculada con el recorrido",
+        "museos, exposiciones y experiencias familiares",
+    )
+    return directions[(max(run_id, 1) - 1) % len(directions)]
+
+
 def _maps_context(places: list[dict[str, Any]]) -> str:
     if not places:
         return (
@@ -233,7 +248,14 @@ def _maps_context(places: list[dict[str, Any]]) -> str:
 def _budget_used_today(db: Session) -> float:
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     value = (
-        db.query(func.coalesce(func.sum(AiUsage.estimated_cost_usd), 0.0))
+        db.query(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(AiUsage.platform_cost_usd, AiUsage.estimated_cost_usd)
+                ),
+                0.0,
+            )
+        )
         .filter(AiUsage.created_at >= today, AiUsage.status == "success")
         .scalar()
     )
@@ -270,6 +292,8 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
         db.refresh(run)
         started = now
         usage: dict[str, Any] = {}
+        billing_before = await get_deepseek_balance()
+        editorial_direction = _editorial_direction(run.id)
 
         try:
             materials, source_ids = await collect_source_material()
@@ -292,15 +316,42 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             existing_articles = [
                 (row[0], row[1], row[2] or "", row[3] or "") for row in existing_rows
             ]
-            avoid_articles = [
+            post_history = [
                 f"TÍTULO: {row[0]} | EXTRACTO: {row[2] or ''} | "
                 f"PALABRAS CLAVE: {row[3] or ''} | FRAGMENTO: {(row[1] or '')[:900]}"
                 for row in existing_rows[:12]
             ]
+            historical_runs = (
+                db.query(
+                    AiGenerationRuns.generated_title,
+                    AiGenerationRuns.generated_body,
+                    AiGenerationRuns.generated_excerpt,
+                    AiGenerationRuns.generated_keywords,
+                )
+                .filter(
+                    AiGenerationRuns.status == "success",
+                    AiGenerationRuns.generated_title.isnot(None),
+                    AiGenerationRuns.id != run.id,
+                )
+                .order_by(AiGenerationRuns.created_at.desc(), AiGenerationRuns.id.desc())
+                .limit(20)
+                .all()
+            )
+            historical_articles = [
+                f"TÍTULO: {row[0]} | EXTRACTO: {row[2] or ''} | "
+                f"PALABRAS CLAVE: {row[3] or ''} | FRAGMENTO: {(row[1] or '')[:900]}"
+                for row in historical_runs
+            ]
+            avoid_articles = (post_history + historical_articles)[:20]
+            existing_articles.extend(
+                (row[0], row[1] or "", row[2] or "", row[3] or "")
+                for row in historical_runs
+            )
             source_context = _context(materials)
             draft_raw, draft_usage = await generate_article(
                 source_context,
                 avoid_articles=avoid_articles,
+                editorial_direction=editorial_direction,
             )
             draft = _parse_article(draft_raw)
             place_queries = draft.get("place_queries") or _fallback_place_queries(draft)
@@ -314,6 +365,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                     generation_context,
                     avoid_articles=avoid_articles,
                     revision_note=revision_note,
+                    editorial_direction=editorial_direction,
                 )
                 usage = _merge_usage(usage, attempt_usage)
                 candidate = _parse_article(raw_article)
@@ -346,6 +398,8 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                     f"{article['excerpt']} {article['body']}"
                 ),
             )
+            billing_after = await get_deepseek_balance()
+            platform_cost = calculate_platform_cost(billing_before, billing_after)
 
             usage_row = AiUsage(
                 run_id=run.id,
@@ -363,6 +417,10 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 cache_miss_price_per_million=usage["pricing"][1],
                 output_price_per_million=usage["pricing"][2],
                 estimated_cost_usd=usage["estimated_cost_usd"],
+                platform_cost_usd=platform_cost,
+                platform_balance_usd=(
+                    billing_after.get("usd") if billing_after else None
+                ),
             )
             post = Posts(
                 slug=article["slug"],
@@ -384,6 +442,10 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             run.status = "success"
             run.post_id = post.id
             run.source_ids = ",".join(str(item) for item in source_ids)
+            run.generated_title = article["title"]
+            run.generated_excerpt = article["excerpt"]
+            run.generated_keywords = article["keywords"]
+            run.generated_body = article["body"]
             run.completed_at = datetime.now(timezone.utc)
             run.duration_ms = int((run.completed_at - started).total_seconds() * 1000)
             db.commit()
@@ -398,6 +460,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 failed_run.completed_at = datetime.now(timezone.utc)
                 failed_run.duration_ms = int((failed_run.completed_at - started).total_seconds() * 1000)
                 pricing = usage.get("pricing") or (0.0, 0.0, 0.0)
+                billing_after = await get_deepseek_balance()
                 db.add(
                     AiUsage(
                         run_id=failed_run.id,
@@ -415,6 +478,12 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                         cache_miss_price_per_million=pricing[1],
                         output_price_per_million=pricing[2],
                         estimated_cost_usd=float(usage.get("estimated_cost_usd") or 0),
+                        platform_cost_usd=calculate_platform_cost(
+                            billing_before, billing_after
+                        ),
+                        platform_balance_usd=(
+                            billing_after.get("usd") if billing_after else None
+                        ),
                     )
                 )
                 db.commit()

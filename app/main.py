@@ -83,6 +83,30 @@ def _ensure_schema_patches() -> None:
                     "ALTER TABLE ai_usage ADD COLUMN api_requests INT NOT NULL DEFAULT 1"
                 )
             )
+        if not column_exists("ai_usage", "platform_cost_usd"):
+            conn.execute(
+                text("ALTER TABLE ai_usage ADD COLUMN platform_cost_usd FLOAT NULL")
+            )
+        if not column_exists("ai_usage", "platform_balance_usd"):
+            conn.execute(
+                text("ALTER TABLE ai_usage ADD COLUMN platform_balance_usd FLOAT NULL")
+            )
+        if not column_exists("ai_generation_runs", "generated_title"):
+            conn.execute(
+                text("ALTER TABLE ai_generation_runs ADD COLUMN generated_title VARCHAR(220) NULL")
+            )
+        if not column_exists("ai_generation_runs", "generated_excerpt"):
+            conn.execute(
+                text("ALTER TABLE ai_generation_runs ADD COLUMN generated_excerpt TEXT NULL")
+            )
+        if not column_exists("ai_generation_runs", "generated_keywords"):
+            conn.execute(
+                text("ALTER TABLE ai_generation_runs ADD COLUMN generated_keywords VARCHAR(500) NULL")
+            )
+        if not column_exists("ai_generation_runs", "generated_body"):
+            conn.execute(
+                text("ALTER TABLE ai_generation_runs ADD COLUMN generated_body TEXT NULL")
+            )
 
 
 @asynccontextmanager

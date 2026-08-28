@@ -54,7 +54,7 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         "gsrnamespace": "6",
         "gsrlimit": "30",
         "prop": "imageinfo",
-        "iiprop": "url|mime|extmetadata",
+        "iiprop": "url|mime|timestamp|extmetadata",
         "iiurlwidth": "1600",
         "format": "json",
         "formatversion": "2",
@@ -104,6 +104,14 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         if mime not in {"image/jpeg", "image/png", "image/webp"} or not image_url or not source_url:
             continue
         metadata = info.get("extmetadata") or {}
+        if not _is_recent_enough(info.get("timestamp")):
+            continue
+        original_date = str(
+            (metadata.get("DateTimeOriginal") or {}).get("value") or ""
+        )
+        original_year = re.match(r"(\d{4})", original_date)
+        if original_year and int(original_year.group(1)) < settings.ai_image_min_year:
+            continue
         metadata_text = " ".join(
             str(metadata.get(key, {}).get("value") or "")
             for key in ("ImageDescription", "ObjectName", "Categories")
@@ -207,6 +215,11 @@ def _title_anchor_words(value: str) -> set[str]:
 def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
     normalized = value.lower()
     return any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in terms)
+
+
+def _is_recent_enough(value: str | None) -> bool:
+    match = re.match(r"(\d{4})", str(value or ""))
+    return bool(match and int(match.group(1)) >= settings.ai_image_min_year)
 
 
 def _normalized_phrase_match(relevance_text: str, value: str) -> bool:
