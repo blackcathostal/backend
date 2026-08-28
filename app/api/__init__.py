@@ -6,6 +6,7 @@ from app.api import (
     contact_groups,
     contacts,
     health,
+    inquiries,
     items,
     mail_accounts,
     media,

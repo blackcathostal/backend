@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from app.api import api_router
 from app.core.config import settings
@@ -22,6 +24,8 @@ from app.models import (  # noqa: F401
     Users,
 )
 from app.services.seed import seed_database
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_schema_patches() -> None:
@@ -62,13 +66,16 @@ def _ensure_schema_patches() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    _ensure_schema_patches()
-    db = SessionLocal()
     try:
-        seed_database(db)
-    finally:
-        db.close()
+        Base.metadata.create_all(bind=engine)
+        _ensure_schema_patches()
+        db = SessionLocal()
+        try:
+            seed_database(db)
+        finally:
+            db.close()
+    except OperationalError:
+        logger.warning("Database unavailable at startup; API will run without MySQL.")
     yield
 
 
