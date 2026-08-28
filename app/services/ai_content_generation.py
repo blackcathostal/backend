@@ -395,6 +395,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 (
                     f"TÍTULO: {article['title']}\n"
                     f"PALABRAS CLAVE: {article['keywords']}\n"
+                    f"LUGARES: {', '.join(place_queries)}\n"
                     f"{article['excerpt']} {article['body']}"
                 ),
             )

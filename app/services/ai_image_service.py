@@ -91,6 +91,9 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         "politico", "político", "discurso", "speech", "portrait", "retrato",
         "election", "elección", "senator", "senador", "diputado", "ministro",
         "alcalde", "parliament", "parlamento", "congreso", "speaker",
+        "espectaculo", "espectáculo", "musical", "performer", "performers",
+        "actriz", "actor", "mujer", "woman", "man", "person", "people",
+        "crowd", "programa", "festival", "concierto",
     )
     for page in (payload.get("query", {}).get("pages", []) or []):
         title = str(page.get("title") or "")
@@ -149,6 +152,7 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
 
 def _search_query(value: str) -> str:
     title_match = re.search(r"título:\s*([^\n]+)", value, flags=re.IGNORECASE)
+    places_match = re.search(r"lugares:\s*([^\n]+)", value, flags=re.IGNORECASE)
     search_value = title_match.group(1) if title_match else value
     words = re.findall(r"[a-záéíóúñ]{3,}", search_value.lower())
     ignored = {
@@ -167,6 +171,13 @@ def _search_query(value: str) -> str:
         ]
         if anchors:
             return " ".join(anchors[:3] + ["Santiago"])
+        if places_match:
+            place_words = [
+                word for word in re.findall(r"[a-záéíóúñ]{3,}", places_match.group(1).lower())
+                if word not in ignored and word != "santiago"
+            ]
+            if place_words:
+                return " ".join(place_words[:3] + ["Santiago"])
         topical = [word for word in unique if word != "santiago"][:3]
         return " ".join(topical + ["Santiago"]) if topical else "Santiago Chile turismo"
     prefixes = {
@@ -202,13 +213,25 @@ def _title_words(value: str) -> set[str]:
 
 def _title_anchor_words(value: str) -> set[str]:
     match = re.search(r"título:\s*([^\n]+)", value, flags=re.IGNORECASE)
-    if not match:
+    places_match = re.search(r"lugares:\s*([^\n]+)", value, flags=re.IGNORECASE)
+    if not match and not places_match:
         return set()
     ignored = {"santiago", "chile", "día", "dia"}
+    title_anchors = (
+        {
+            word.lower()
+            for word in re.findall(r"\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b", match.group(1))
+            if word.lower() not in ignored
+        }
+        if match
+        else set()
+    )
+    if title_anchors:
+        return title_anchors
     return {
-        word.lower()
-        for word in re.findall(r"\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b", match.group(1))
-        if word.lower() not in ignored
+        word
+        for word in _content_words(places_match.group(1))
+        if word not in ignored
     }
 
 
