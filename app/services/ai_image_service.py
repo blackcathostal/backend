@@ -78,6 +78,7 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
 
     query_words = _content_words(query)
     title_words = _title_words(relevance_text)
+    anchor_words = _title_anchor_words(relevance_text)
     coastal_topic = bool(
         {"playa", "playas", "costa", "costero", "mar", "oceano", "océano", "beach"}
         & _content_words(relevance_text)
@@ -86,6 +87,10 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
     blocked_terms = (
         "logo", "logotipo", "emblema", "bandera", "flag", "mapa", "map ",
         "icono", "icon", "escudo", "seal", "poster", "afiche", "diagrama",
+        "ceremonia", "protocolaria", "conmemorar", "politician", "political",
+        "politico", "político", "discurso", "speech", "portrait", "retrato",
+        "election", "elección", "senator", "senador", "diputado", "ministro",
+        "alcalde", "parliament", "parlamento", "congreso", "speaker",
     )
     for page in (payload.get("query", {}).get("pages", []) or []):
         title = str(page.get("title") or "")
@@ -107,7 +112,10 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         image_title_words = _content_words(title)
         metadata_words = _content_words(metadata_text)
         title_matches = len(title_words & image_title_words)
+        anchor_matches = len(anchor_words & image_title_words)
         if title_words and title_matches < 1:
+            continue
+        if anchor_words and anchor_matches < 1:
             continue
         candidate_text = f"{title} {metadata_text}"
         if not coastal_topic and _contains_any(
@@ -117,6 +125,7 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
             continue
         score = (
             title_matches * 20
+            + anchor_matches * 40
             + len(query_words & image_title_words) * 3
             + len(query_words & metadata_words)
             + (10 if _normalized_phrase_match(relevance_text, title) else 0)
@@ -143,6 +152,13 @@ def _search_query(value: str) -> str:
     }
     unique = list(dict.fromkeys(word for word in words if word not in ignored))
     if title_match:
+        anchors = [
+            word.lower()
+            for word in re.findall(r"\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b", title_match.group(1))
+            if word.lower() not in {"santiago", "chile", "día", "dia"}
+        ]
+        if anchors:
+            return " ".join(anchors[:3] + ["Santiago"])
         topical = [word for word in unique if word != "santiago"][:3]
         return " ".join(topical + ["Santiago"]) if topical else "Santiago Chile turismo"
     prefixes = {
@@ -174,6 +190,18 @@ def _title_words(value: str) -> set[str]:
     match = re.search(r"título:\s*([^\n]+)", value, flags=re.IGNORECASE)
     title = match.group(1) if match else value
     return _content_words(title)
+
+
+def _title_anchor_words(value: str) -> set[str]:
+    match = re.search(r"título:\s*([^\n]+)", value, flags=re.IGNORECASE)
+    if not match:
+        return set()
+    ignored = {"santiago", "chile", "día", "dia"}
+    return {
+        word.lower()
+        for word in re.findall(r"\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}\b", match.group(1))
+        if word.lower() not in ignored
+    }
 
 
 def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
