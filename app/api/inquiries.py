@@ -13,7 +13,12 @@ router = APIRouter(prefix="/inquiries", tags=["inquiries"])
 
 
 def _pick_mail_account(db: Session) -> MailAccounts | None:
-    accounts = db.query(MailAccounts).order_by(MailAccounts.id.asc()).all()
+    accounts = (
+        db.query(MailAccounts)
+        .filter(MailAccounts.is_active.is_(True))
+        .order_by(MailAccounts.is_default.desc(), MailAccounts.id.asc())
+        .all()
+    )
     if not accounts:
         return None
     for account in accounts:
@@ -53,6 +58,7 @@ def submit_contact_inquiry(payload: ContactInquiryCreate, db: Session = Depends(
             to_email=inbox,
             subject=f'[Black Cat Hostal] {payload.subject.strip()}',
             html_body=html_body,
+            reply_to=str(payload.email),
         )
     except MailSendError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
