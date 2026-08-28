@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     deepseek_source_timeout_seconds: float = 15.0
     deepseek_source_max_bytes: int = 1_000_000
     deepseek_image_max_bytes: int = 3_000_000
+    image_search_api_url: str = "https://commons.wikimedia.org/w/api.php"
     deepseek_pricing_mode: str = "peak"
     deepseek_cache_hit_price_per_million: float = 0.014
     deepseek_cache_miss_price_per_million: float = 0.44

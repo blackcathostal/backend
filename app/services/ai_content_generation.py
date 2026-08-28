@@ -14,9 +14,9 @@ from app.core.config import settings
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_usage import AiUsage
 from app.models.posts import Posts
-from app.services.ai_image_service import download_source_image
+from app.services.ai_image_service import download_free_image
 from app.services.deepseek_client import DeepSeekError, generate_article
-from app.services.mcp_sources import collect_source_material
+from app.services.mcp_sources import collect_google_places, collect_source_material
 
 generation_lock = asyncio.Lock()
 
@@ -45,7 +45,7 @@ def _unique_slug(db: Session, value: str) -> str:
     return candidate
 
 
-def _parse_article(raw: str) -> dict[str, str]:
+def _parse_article(raw: str) -> dict[str, Any]:
     content = raw.strip()
     if content.startswith("```"):
         content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE)
@@ -67,6 +67,13 @@ def _parse_article(raw: str) -> dict[str, str]:
         keywords = ", ".join(str(item).strip() for item in raw_keywords if str(item).strip())
     else:
         keywords = str(raw_keywords).strip()
+    raw_queries = article.get("place_queries") or []
+    if isinstance(raw_queries, list):
+        place_queries = [
+            str(item).strip()[:180] for item in raw_queries if str(item).strip()
+        ][:4]
+    else:
+        place_queries = []
     return {
         "title": title[:220],
         "slug": _slugify(str(article.get("slug") or title))[:220],
@@ -74,6 +81,7 @@ def _parse_article(raw: str) -> dict[str, str]:
         "excerpt": excerpt[:500],
         "body": _limit_words(body, settings.deepseek_article_max_words),
         "category": str(article.get("category") or "Turismo")[:80],
+        "place_queries": place_queries,
     }
 
 
@@ -106,7 +114,7 @@ def _merge_usage(total: dict[str, Any], current: dict[str, Any]) -> dict[str, An
 
 
 def _is_repeated(
-    article: dict[str, str],
+    article: dict[str, Any],
     existing: list[tuple[str, str, str, str]],
 ) -> bool:
     normalized_title = re.sub(r"\W+", " ", article["title"].lower()).strip()
@@ -182,6 +190,38 @@ def _context(materials: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts)[:max_chars]
 
 
+def _fallback_place_queries(article: dict[str, Any]) -> list[str]:
+    title = str(article.get("title") or "").strip()
+    if not title:
+        return ["sitios turísticos Santiago de Chile"]
+    return [
+        f"{title} Santiago de Chile",
+        f"restaurantes y cafés {title} Santiago de Chile",
+    ]
+
+
+def _maps_context(places: list[dict[str, Any]]) -> str:
+    if not places:
+        return (
+            "DATOS DE GOOGLE MAPS: No se encontraron resultados verificables. "
+            "No incluyas direcciones, horarios ni nombres de establecimientos."
+        )
+    parts = ["DATOS VERIFICADOS DE GOOGLE MAPS:"]
+    for place in places[:20]:
+        lines = [
+            f"LUGAR: {place.get('name', '')}",
+            f"DIRECCIÓN: {place.get('address', '')}",
+        ]
+        if place.get("opening_hours"):
+            lines.append("HORARIOS: " + " | ".join(place["opening_hours"]))
+        if place.get("rating") is not None:
+            lines.append(f"CALIFICACIÓN: {place['rating']}")
+        if place.get("maps_url"):
+            lines.append(f"ENLACE: {place['maps_url']}")
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)[:8_000]
+
+
 def _budget_used_today(db: Session) -> float:
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     value = (
@@ -248,12 +288,21 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 f"PALABRAS CLAVE: {row[3] or ''} | FRAGMENTO: {(row[1] or '')[:900]}"
                 for row in existing_rows[:12]
             ]
+            source_context = _context(materials)
+            draft_raw, draft_usage = await generate_article(
+                source_context,
+                avoid_articles=avoid_articles,
+            )
+            draft = _parse_article(draft_raw)
+            place_queries = draft.get("place_queries") or _fallback_place_queries(draft)
+            maps_places = await collect_google_places(place_queries)
+            generation_context = f"{source_context}\n\n{_maps_context(maps_places)}"
             article = None
-            usage: dict[str, Any] = {}
+            usage: dict[str, Any] = draft_usage
             revision_note = ""
             for attempt in range(2):
                 raw_article, attempt_usage = await generate_article(
-                    _context(materials),
+                    generation_context,
                     avoid_articles=avoid_articles,
                     revision_note=revision_note,
                 )
@@ -277,8 +326,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             if article is None:
                 raise DeepSeekError("No se pudo validar el artículo generado.")
             article["slug"] = _unique_slug(db, article["slug"])
-            article["image_url"], article["image_source_url"] = await download_source_image(
-                materials,
+            article["image_url"], article["image_source_url"] = await download_free_image(
                 {row[4] for row in existing_rows if row[4]},
                 {row[5] for row in existing_rows if row[5]},
                 (

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 import jwt
 from mcp.server.fastmcp import FastMCP
 from starlette.responses import JSONResponse
@@ -47,6 +48,104 @@ def list_active_sources(limit: int = 6) -> dict[str, Any]:
                 for row in rows
             ]
         }
+
+
+@mcp.tool(
+    name="search_google_places",
+    description=(
+        "Busca lugares reales en Google Maps para enriquecer una guía turística de Santiago. "
+        "Devuelve solo nombres, direcciones y horarios entregados por Google."
+    ),
+    structured_output=True,
+)
+async def search_google_places(query: str, max_results: int = 5) -> dict[str, Any]:
+    if not settings.google_places_api_key.strip():
+        return {"ok": False, "query": query, "error": "GOOGLE_PLACES_API_KEY no está configurada."}
+
+    text_query = str(query or "").strip()[:180]
+    if not text_query:
+        return {"ok": False, "query": query, "error": "La consulta de Google Maps está vacía."}
+
+    field_mask = ",".join(
+        (
+            "places.displayName",
+            "places.formattedAddress",
+            "places.googleMapsUri",
+            "places.types",
+            "places.rating",
+            "places.regularOpeningHours",
+        )
+    )
+    try:
+        async with httpx.AsyncClient(timeout=settings.deepseek_source_timeout_seconds) as client:
+            response = await client.post(
+                "https://places.googleapis.com/v1/places:searchText",
+                headers={
+                    "X-Goog-Api-Key": settings.google_places_api_key,
+                    "X-Goog-FieldMask": field_mask,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "textQuery": f"{text_query}, Santiago de Chile",
+                    "languageCode": "es",
+                    "regionCode": "CL",
+                    "maxResultCount": max(1, min(int(max_results), 10)),
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"ok": False, "query": text_query, "error": f"No se pudo consultar Google Maps: {exc}"}
+
+    places = []
+    for place in payload.get("places", []):
+        name = str(place.get("displayName", {}).get("text") or "").strip()
+        address = str(place.get("formattedAddress") or "").strip()
+        if not name or not address:
+            continue
+        hours = place.get("regularOpeningHours") or {}
+        places.append(
+            {
+                "name": name,
+                "address": address,
+                "maps_url": place.get("googleMapsUri") or "",
+                "types": place.get("types") or [],
+                "rating": place.get("rating"),
+                "opening_hours": hours.get("weekdayDescriptions") or [],
+            }
+        )
+    return {"ok": True, "query": text_query, "places": places}
+
+
+async def collect_google_places(queries: list[str]) -> list[dict[str, Any]]:
+    """Run the Google Maps MCP tool for unique article-related queries."""
+    def payload_from_result(result: Any) -> dict[str, Any]:
+        if isinstance(result, dict):
+            return result
+        if isinstance(result, tuple) and len(result) > 1 and isinstance(result[1], dict):
+            return result[1]
+        structured = getattr(result, "structured_content", None)
+        return structured if isinstance(structured, dict) else {}
+
+    places: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for query in queries[:4]:
+        normalized = str(query or "").strip()
+        if not normalized or normalized.lower() in seen:
+            continue
+        seen.add(normalized.lower())
+        result = await mcp.call_tool("search_google_places", {"query": normalized, "max_results": 5})
+        payload = payload_from_result(result)
+        if payload.get("ok"):
+            places.extend(payload.get("places", []))
+    unique_places: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for place in places:
+        key = str(place.get("name") or "").strip().lower()
+        if key and key not in seen_names:
+            seen_names.add(key)
+            unique_places.append(place)
+    return unique_places
 
 
 @mcp.tool(

@@ -84,12 +84,16 @@ async def generate_article(
         "Eres un guía de turismo profesional especializado en Santiago de Chile. "
         "Redacta un artículo de blog turístico detallista, práctico y completo, "
         "pero condensado y entretenido para una persona: elimina relleno, repeticiones "
-        "y frases genéricas. Usa únicamente los datos incluidos en FUENTES. No inventes "
+        "y frases genéricas. Usa únicamente los datos incluidos en FUENTES y DATOS "
+        "VERIFICADOS DE GOOGLE MAPS. No inventes "
         "precios, horarios, distancias, direcciones, nombres ni recomendaciones. Si un "
         "dato no está en las fuentes, omítelo. Explica el contexto del lugar, qué puede "
         "hacer el visitante y cómo planificar la visita solo cuando las fuentes lo permitan. "
         "Cada afirmación debe poder verificarse directamente en FUENTES; no uses memoria "
         "ni conocimiento general para completar vacíos. "
+        "Los nombres, direcciones, enlaces, calificaciones y horarios de lugares deben "
+        "salir de DATOS VERIFICADOS DE GOOGLE MAPS. Si Google Maps no entrega un horario "
+        "o un dato, no lo completes ni lo supongas. "
         "Escribe como un redactor nativo de turismo: lenguaje natural, preciso y fluido, "
         "con transiciones variadas y sin sonar a plantilla de IA. Cada párrafo debe aportar "
         "un dato o recomendación distinta; no repitas el nombre de Santiago, la cordillera "
@@ -98,9 +102,14 @@ async def generate_article(
         f"350 y {settings.deepseek_article_max_words} palabras, en 4 a 6 párrafos. "
         "El título debe tener máximo 70 caracteres y el extracto entre 140 y 200 caracteres. "
         "Devuelve exclusivamente JSON válido con "
-        'las claves "title", "slug", "keywords", "excerpt", "category" y "body". '
+        'las claves "title", "slug", "keywords", "excerpt", "category", "body" y '
+        '"place_queries". '
         "keywords debe ser una lista de entre 3 y 8 frases SEO relevantes. "
-        "El body debe ser texto plano con párrafos separados por saltos de línea, sin HTML. "
+        "place_queries debe ser una lista de 1 a 4 búsquedas concretas para Google Maps, "
+        "relacionadas con los lugares, restaurantes, cafés, talleres o servicios que "
+        "realmente quieras mencionar. El body debe usar Markdown sencillo, sin HTML: "
+        "párrafos separados por líneas en blanco, **negrita** para nombres, direcciones, "
+        "horarios y datos clave, y listas con guiones cuando haya varios lugares o pasos. "
         "Cada nuevo artículo debe tener un tema, título, estructura, enfoque y vocabulario "
         "claramente diferentes de los artículos ya publicados. Antes de escribir, identifica "
         "el enfoque principal de los artículos anteriores y elige otro lugar, experiencia "
@@ -127,7 +136,7 @@ async def generate_article(
         "artículo sea realmente diferente de los anteriores y que no tenga relleno. "
         "No repitas la fórmula 'Santiago es una metrópolis vibrante', 'a los pies de la "
         "Cordillera de los Andes' ni cierres como 'una experiencia inolvidable'.\n\n"
-        f"FUENTES:\n{source_context}"
+        f"FUENTES Y DATOS VERIFICADOS:\n{source_context}"
     )
     if avoid_articles:
         user_prompt += (
