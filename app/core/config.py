@@ -71,7 +71,6 @@ class Settings(BaseSettings):
     deepseek_source_timeout_seconds: float = 15.0
     deepseek_source_max_bytes: int = 1_000_000
     deepseek_image_max_bytes: int = 3_000_000
-    deepseek_fallback_image_url: str = "/cappa/img/santiago/6.webp"
     deepseek_pricing_mode: str = "peak"
     deepseek_cache_hit_price_per_million: float = 0.014
     deepseek_cache_miss_price_per_million: float = 0.44

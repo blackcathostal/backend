@@ -70,6 +70,13 @@ def _ensure_schema_patches() -> None:
             conn.execute(
                 text("ALTER TABLE posts ADD COLUMN keywords VARCHAR(500) NOT NULL DEFAULT ''")
             )
+        if not column_exists("posts", "image_source_url"):
+            conn.execute(
+                text(
+                    "ALTER TABLE posts ADD COLUMN image_source_url VARCHAR(500) "
+                    "NOT NULL DEFAULT ''"
+                )
+            )
 
 
 @asynccontextmanager

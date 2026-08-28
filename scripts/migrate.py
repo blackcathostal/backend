@@ -70,6 +70,7 @@ def main() -> None:
             ("mail_accounts", "signature"),
             ("contacts", "group_id"),
             ("posts", "keywords"),
+            ("posts", "image_source_url"),
         ]
         for table, column in checks:
             exists = conn.execute(

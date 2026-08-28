@@ -7,6 +7,7 @@ class PostsBase(BaseModel):
     slug: str = Field(min_length=1, max_length=220)
     title: str = Field(min_length=1, max_length=220)
     keywords: str = Field(default="", max_length=500)
+    image_source_url: str = Field(default="", max_length=500)
     excerpt: str = ""
     body: str = ""
     category: str = "Blog"
@@ -25,6 +26,7 @@ class PostsUpdate(BaseModel):
     slug: str | None = Field(default=None, min_length=1, max_length=220)
     title: str | None = Field(default=None, min_length=1, max_length=220)
     keywords: str | None = Field(default=None, max_length=500)
+    image_source_url: str | None = Field(default=None, max_length=500)
     excerpt: str | None = None
     body: str | None = None
     category: str | None = None

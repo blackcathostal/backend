@@ -98,6 +98,7 @@ async def read_source(source_id: int) -> dict[str, Any]:
         "title": material["title"],
         "text": material["text"][: settings.deepseek_source_char_limit],
         "image_url": material.get("image_url", ""),
+        "image_urls": material.get("image_urls", []),
     }
 
 

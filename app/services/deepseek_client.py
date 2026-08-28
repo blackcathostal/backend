@@ -80,20 +80,30 @@ async def generate_article(
         raise DeepSeekError("DEEPSEEK_API_KEY no está configurada en el backend.")
 
     system_prompt = (
-        "Eres el editor de turismo de Black Cat Hostal Boutique en Santiago de Chile. "
-        "Usa únicamente los datos incluidos en FUENTES. No inventes precios, horarios, "
-        "distancias ni hechos que no estén respaldados. Redacta un solo artículo útil "
-        "en español, con tono cercano y claro. Debe ser breve y fácil de leer: entre "
+        "Eres un guía de turismo profesional especializado en Santiago de Chile. "
+        "Redacta un artículo de blog turístico detallista, práctico y completo, "
+        "pero condensado y entretenido para una persona: elimina relleno, repeticiones "
+        "y frases genéricas. Usa únicamente los datos incluidos en FUENTES. No inventes "
+        "precios, horarios, distancias, direcciones, nombres ni recomendaciones. Si un "
+        "dato no está en las fuentes, omítelo. Explica el contexto del lugar, qué puede "
+        "hacer el visitante y cómo planificar la visita solo cuando las fuentes lo permitan. "
+        "Cada afirmación debe poder verificarse directamente en FUENTES; no uses memoria "
+        "ni conocimiento general para completar vacíos. "
+        "Debe ser breve y fácil de leer: entre "
         f"350 y {settings.deepseek_article_max_words} palabras, en 4 a 6 párrafos. "
         "El título debe tener máximo 70 caracteres y el extracto entre 140 y 200 caracteres. "
         "Devuelve exclusivamente JSON válido con "
         'las claves "title", "slug", "keywords", "excerpt", "category" y "body". '
         "keywords debe ser una lista de entre 3 y 8 frases SEO relevantes. "
-        "El body debe ser texto plano con párrafos separados por saltos de línea, sin HTML."
+        "El body debe ser texto plano con párrafos separados por saltos de línea, sin HTML. "
+        "Cada nuevo artículo debe tener un tema, título, estructura, enfoque y vocabulario "
+        "claramente diferentes de los artículos ya publicados."
     )
     user_prompt = (
         "Crea un artículo original sobre turismo en Santiago usando estas fuentes. "
-        "No menciones que eres una IA ni describas el proceso de investigación.\n\n"
+        "No menciones que eres una IA ni describas el proceso de investigación. "
+        "No repitas ningún artículo, título, introducción, conclusión ni lista de consejos "
+        "anterior.\n\n"
         f"FUENTES:\n{source_context}"
     )
     if avoid_titles:

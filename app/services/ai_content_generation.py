@@ -14,8 +14,8 @@ from app.core.config import settings
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_usage import AiUsage
 from app.models.posts import Posts
-from app.services.deepseek_client import DeepSeekError, generate_article
 from app.services.ai_image_service import download_source_image
+from app.services.deepseek_client import DeepSeekError, generate_article
 from app.services.mcp_sources import collect_source_material
 
 generation_lock = asyncio.Lock()
@@ -85,17 +85,36 @@ def _limit_words(value: str, maximum: int) -> str:
     return truncated
 
 
-def _is_repeated(article: dict[str, str], existing: list[tuple[str, str]]) -> bool:
+def _is_repeated(
+    article: dict[str, str],
+    existing: list[tuple[str, str, str, str]],
+) -> bool:
     normalized_title = re.sub(r"\W+", " ", article["title"].lower()).strip()
-    new_words = set(re.findall(r"\w{4,}", article["body"].lower()))
-    for title, body in existing:
+    new_title_words = set(re.findall(r"\w{4,}", normalized_title))
+    new_text = " ".join(
+        [article["body"], article["excerpt"], article.get("keywords", "")]
+    ).lower()
+    new_words = set(re.findall(r"\w{4,}", new_text))
+    for title, body, excerpt, keywords in existing:
         old_title = re.sub(r"\W+", " ", (title or "").lower()).strip()
-        if normalized_title == old_title or SequenceMatcher(None, normalized_title, old_title).ratio() >= 0.86:
+        old_title_words = set(re.findall(r"\w{4,}", old_title))
+        title_overlap = (
+            len(new_title_words & old_title_words) / len(new_title_words | old_title_words)
+            if new_title_words and old_title_words
+            else 0
+        )
+        if (
+            normalized_title == old_title
+            or SequenceMatcher(None, normalized_title, old_title).ratio() >= 0.78
+            or title_overlap >= 0.60
+        ):
             return True
-        old_words = set(re.findall(r"\w{4,}", (body or "").lower()))
+        old_text = " ".join([body or "", excerpt or "", keywords or ""]).lower()
+        old_words = set(re.findall(r"\w{4,}", old_text))
         if new_words and old_words:
             overlap = len(new_words & old_words) / len(new_words | old_words)
-            if overlap >= 0.78:
+            sequence = SequenceMatcher(None, new_text, old_text).ratio()
+            if overlap >= 0.70 or sequence >= 0.72:
                 return True
     return False
 
@@ -167,22 +186,37 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 raise ValueError("No hay fuentes activas con contenido legible.")
 
             existing_rows = (
-                db.query(Posts.title, Posts.body)
+                db.query(
+                    Posts.title,
+                    Posts.body,
+                    Posts.excerpt,
+                    Posts.keywords,
+                    Posts.image_source_url,
+                    Posts.image_url,
+                )
                 .order_by(Posts.created_at.desc(), Posts.id.desc())
-                .limit(20)
+                .limit(50)
                 .all()
             )
-            existing_articles = [(row[0], row[1]) for row in existing_rows]
+            existing_articles = [
+                (row[0], row[1], row[2] or "", row[3] or "") for row in existing_rows
+            ]
             raw_article, usage = await generate_article(
                 _context(materials),
-                avoid_titles=[title for title, _ in existing_articles],
+                avoid_titles=[
+                    f"TÍTULO: {row[0]} | EXTRACTO: {row[2] or ''} | "
+                    f"PALABRAS CLAVE: {row[3] or ''}"
+                    for row in existing_rows
+                ],
             )
             article = _parse_article(raw_article)
             if _is_repeated(article, existing_articles):
                 raise DeepSeekError("El artículo generado repite contenido publicado anteriormente.")
             article["slug"] = _unique_slug(db, article["slug"])
-            article["image_url"] = (
-                await download_source_image(materials) or settings.deepseek_fallback_image_url
+            article["image_url"], article["image_source_url"] = await download_source_image(
+                materials,
+                {row[4] for row in existing_rows if row[4]},
+                {row[5] for row in existing_rows if row[5]},
             )
 
             usage_row = AiUsage(
@@ -209,6 +243,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 body=article["body"],
                 category=article["category"],
                 image_url=article["image_url"],
+                image_source_url=article["image_source_url"],
                 author="Black Cat Hostal",
                 sort_order=0,
                 is_active=True,

@@ -4,6 +4,7 @@ import ipaddress
 import re
 import socket
 from html.parser import HTMLParser
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -33,8 +34,18 @@ class _ReadableTextParser(HTMLParser):
                 image = attributes.get("content")
                 if image:
                     self.image_candidates.append(image.strip())
-        elif tag == "img" and attributes.get("src"):
-            self.image_candidates.append(attributes["src"].strip())
+        elif tag == "img":
+            for attribute in ("src", "data-src", "data-lazy-src"):
+                image = attributes.get(attribute)
+                if image:
+                    self.image_candidates.append(image.strip())
+            for attribute in ("srcset", "data-srcset"):
+                srcset = attributes.get(attribute)
+                if srcset:
+                    for item in srcset.split(","):
+                        image = item.strip().split(" ", 1)[0]
+                        if image:
+                            self.image_candidates.append(image)
         if tag in self.ignored_tags:
             self._ignored_depth += 1
         if tag == "title":
@@ -91,7 +102,7 @@ def validate_source_url(url: str) -> str:
     return value
 
 
-def _extract_text(content: bytes, content_type: str, base_url: str) -> tuple[str, str, str]:
+def _extract_text(content: bytes, content_type: str, base_url: str) -> tuple[str, str, list[str]]:
     encoding_match = re.search(r"charset=([\w-]+)", content_type, re.IGNORECASE)
     encoding = encoding_match.group(1) if encoding_match else "utf-8"
     text = content.decode(encoding, errors="replace")
@@ -105,15 +116,16 @@ def _extract_text(content: bytes, content_type: str, base_url: str) -> tuple[str
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not text:
         raise SourceFetchError("La fuente no contiene texto legible.")
-    image_url = ""
+    image_urls: list[str] = []
     if "html" in content_type.lower():
-        for candidate in parser.image_candidates:
+        for candidate in parser.image_candidates[:16]:
             try:
                 image_url = validate_source_url(urljoin(base_url, candidate))
-                break
+                if image_url not in image_urls:
+                    image_urls.append(image_url)
             except SourceFetchError:
                 continue
-    return title[:240], text, image_url
+    return title[:240], text, image_urls
 
 
 async def fetch_source_content(
@@ -121,7 +133,7 @@ async def fetch_source_content(
     *,
     timeout_seconds: float = 15.0,
     max_bytes: int = 1_000_000,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     current_url = validate_source_url(url)
     headers = {
         "User-Agent": "BlackCatTourismBot/1.0 (+https://blackcathostal.com)",
@@ -149,12 +161,15 @@ async def fetch_source_content(
                     if total > max_bytes:
                         raise SourceFetchError("La fuente supera el tamaño máximo permitido.")
                     chunks.append(chunk)
-                title, text, image_url = _extract_text(b"".join(chunks), content_type, current_url)
+                title, text, image_urls = _extract_text(
+                    b"".join(chunks), content_type, current_url
+                )
                 return {
                     "url": current_url,
                     "title": title,
                     "text": text[:max_bytes],
-                    "image_url": image_url,
+                    "image_url": image_urls[0] if image_urls else "",
+                    "image_urls": image_urls,
                 }
 
     raise SourceFetchError("La fuente tuvo demasiadas redirecciones.")
