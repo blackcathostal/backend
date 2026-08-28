@@ -158,13 +158,6 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         if recent and recent.status == "running":
             raise ValueError("Ya hay una generación de contenido en curso.")
-        if recent and recent.created_at:
-            recent_at = recent.created_at
-            if recent_at.tzinfo is None:
-                recent_at = recent_at.replace(tzinfo=timezone.utc)
-            remaining = settings.deepseek_cooldown_seconds - int((now - recent_at).total_seconds())
-            if remaining > 0:
-                raise ValueError(f"Debes esperar {remaining // 60 + 1} minutos antes de generar otro artículo.")
         if _budget_used_today(db) >= settings.deepseek_daily_budget_usd:
             raise ValueError("Se alcanzó el presupuesto diario configurado para DeepSeek.")
 
@@ -203,10 +196,10 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             ]
             raw_article, usage = await generate_article(
                 _context(materials),
-                avoid_titles=[
+                avoid_articles=[
                     f"TÍTULO: {row[0]} | EXTRACTO: {row[2] or ''} | "
-                    f"PALABRAS CLAVE: {row[3] or ''}"
-                    for row in existing_rows
+                    f"PALABRAS CLAVE: {row[3] or ''} | FRAGMENTO: {(row[1] or '')[:900]}"
+                    for row in existing_rows[:12]
                 ],
             )
             article = _parse_article(raw_article)

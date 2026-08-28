@@ -74,7 +74,7 @@ def _extract_content(payload: dict[str, Any]) -> str:
 async def generate_article(
     source_context: str,
     *,
-    avoid_titles: list[str] | None = None,
+    avoid_articles: list[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if not settings.deepseek_api_key.strip():
         raise DeepSeekError("DEEPSEEK_API_KEY no está configurada en el backend.")
@@ -97,7 +97,10 @@ async def generate_article(
         "keywords debe ser una lista de entre 3 y 8 frases SEO relevantes. "
         "El body debe ser texto plano con párrafos separados por saltos de línea, sin HTML. "
         "Cada nuevo artículo debe tener un tema, título, estructura, enfoque y vocabulario "
-        "claramente diferentes de los artículos ya publicados."
+        "claramente diferentes de los artículos ya publicados. Antes de escribir, identifica "
+        "el enfoque principal de los artículos anteriores y elige otro lugar, experiencia "
+        "o ángulo. No uses la misma introducción, orden de ideas, ejemplos, consejos, "
+        "conclusión ni frases características, aunque cambies algunas palabras."
     )
     user_prompt = (
         "Crea un artículo original sobre turismo en Santiago usando estas fuentes. "
@@ -106,10 +109,11 @@ async def generate_article(
         "anterior.\n\n"
         f"FUENTES:\n{source_context}"
     )
-    if avoid_titles:
+    if avoid_articles:
         user_prompt += (
-            "\n\nARTÍCULOS YA PUBLICADOS (no repitas sus títulos ni su enfoque principal):\n"
-            + "\n".join(f"- {title}" for title in avoid_titles[:20])
+            "\n\nARTÍCULOS YA PUBLICADOS (úsalos solo para evitar coincidencias; no los "
+            "resumas ni los imites):\n"
+            + "\n".join(f"- {article}" for article in avoid_articles[:20])
         )
     payload = {
         "model": settings.deepseek_model,
