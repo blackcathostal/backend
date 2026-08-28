@@ -77,6 +77,12 @@ def _ensure_schema_patches() -> None:
                     "NOT NULL DEFAULT ''"
                 )
             )
+        if not column_exists("ai_usage", "api_requests"):
+            conn.execute(
+                text(
+                    "ALTER TABLE ai_usage ADD COLUMN api_requests INT NOT NULL DEFAULT 1"
+                )
+            )
 
 
 @asynccontextmanager

@@ -48,6 +48,7 @@ def normalize_usage(payload: dict[str, Any]) -> dict[str, Any]:
     completion = int(raw.get("completion_tokens") or 0)
     total = int(raw.get("total_tokens") or prompt + completion)
     normalized = {
+        "api_requests": 1,
         "prompt_tokens": prompt,
         "prompt_cache_hit_tokens": hit,
         "prompt_cache_miss_tokens": miss,

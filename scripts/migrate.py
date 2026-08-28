@@ -71,6 +71,7 @@ def main() -> None:
             ("contacts", "group_id"),
             ("posts", "keywords"),
             ("posts", "image_source_url"),
+            ("ai_usage", "api_requests"),
         ]
         for table, column in checks:
             exists = conn.execute(

@@ -43,6 +43,7 @@ class AiUsageOut(BaseModel):
     model: str
     operation: str
     status: str
+    api_requests: int = 1
     prompt_tokens: int
     prompt_cache_hit_tokens: int
     prompt_cache_miss_tokens: int
@@ -66,6 +67,7 @@ class AiUsageSummary(BaseModel):
     runs: int = 0
     successful_runs: int = 0
     failed_runs: int = 0
+    api_requests: int = 0
     cache_hit_ratio: float = 0.0
     entries: list[AiUsageOut] = Field(default_factory=list)
 

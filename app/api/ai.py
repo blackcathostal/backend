@@ -147,6 +147,7 @@ def usage_report(
     entries = query.order_by(AiUsage.created_at.desc(), AiUsage.id.desc()).limit(limit).all()
     values = query.with_entities(
         func.coalesce(func.sum(AiUsage.estimated_cost_usd), 0.0),
+        func.coalesce(func.sum(AiUsage.api_requests), 0),
         func.coalesce(func.sum(AiUsage.prompt_tokens), 0),
         func.coalesce(func.sum(AiUsage.prompt_cache_hit_tokens), 0),
         func.coalesce(func.sum(AiUsage.prompt_cache_miss_tokens), 0),
@@ -157,17 +158,18 @@ def usage_report(
     runs = runs_query.count()
     successful_runs = runs_query.filter(AiGenerationRuns.status == "success").count()
     failed_runs = runs_query.filter(AiGenerationRuns.status == "failed").count()
-    hit = int(values[2] or 0)
-    miss = int(values[3] or 0)
+    hit = int(values[3] or 0)
+    miss = int(values[4] or 0)
     return AiUsageSummary(
         from_date=from_date,
         to_date=to_date,
         total_cost_usd=float(values[0] or 0.0),
-        prompt_tokens=int(values[1] or 0),
+        api_requests=int(values[1] or 0),
+        prompt_tokens=int(values[2] or 0),
         prompt_cache_hit_tokens=hit,
         prompt_cache_miss_tokens=miss,
-        completion_tokens=int(values[4] or 0),
-        total_tokens=int(values[5] or 0),
+        completion_tokens=int(values[5] or 0),
+        total_tokens=int(values[6] or 0),
         runs=runs,
         successful_runs=successful_runs,
         failed_runs=failed_runs,

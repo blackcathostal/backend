@@ -15,6 +15,7 @@ class AiUsage(Base):
     model: Mapped[str] = mapped_column(String(120), nullable=False)
     operation: Mapped[str] = mapped_column(String(80), nullable=False, default="refresh_content")
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="success")
+    api_requests: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     prompt_cache_hit_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     prompt_cache_miss_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -98,6 +98,7 @@ def _merge_usage(total: dict[str, Any], current: dict[str, Any]) -> dict[str, An
         return dict(current)
     merged = dict(current)
     for key in (
+        "api_requests",
         "prompt_tokens",
         "prompt_cache_hit_tokens",
         "prompt_cache_miss_tokens",
@@ -261,6 +262,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
         db.commit()
         db.refresh(run)
         started = now
+        usage: dict[str, Any] = {}
 
         try:
             materials, source_ids = await collect_source_material()
@@ -298,7 +300,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             maps_places = await collect_google_places(place_queries)
             generation_context = f"{source_context}\n\n{_maps_context(maps_places)}"
             article = None
-            usage: dict[str, Any] = draft_usage
+            usage = draft_usage
             revision_note = ""
             for attempt in range(3):
                 raw_article, attempt_usage = await generate_article(
@@ -343,6 +345,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 model=settings.deepseek_model,
                 operation="refresh_content",
                 status="success",
+                api_requests=usage["api_requests"],
                 prompt_tokens=usage["prompt_tokens"],
                 prompt_cache_hit_tokens=usage["prompt_cache_hit_tokens"],
                 prompt_cache_miss_tokens=usage["prompt_cache_miss_tokens"],
@@ -386,6 +389,7 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 failed_run.error = str(exc)[:2000]
                 failed_run.completed_at = datetime.now(timezone.utc)
                 failed_run.duration_ms = int((failed_run.completed_at - started).total_seconds() * 1000)
+                pricing = usage.get("pricing") or (0.0, 0.0, 0.0)
                 db.add(
                     AiUsage(
                         run_id=failed_run.id,
@@ -393,6 +397,16 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                         model=settings.deepseek_model,
                         operation="refresh_content",
                         status="failed",
+                        api_requests=int(usage.get("api_requests") or 0),
+                        prompt_tokens=int(usage.get("prompt_tokens") or 0),
+                        prompt_cache_hit_tokens=int(usage.get("prompt_cache_hit_tokens") or 0),
+                        prompt_cache_miss_tokens=int(usage.get("prompt_cache_miss_tokens") or 0),
+                        completion_tokens=int(usage.get("completion_tokens") or 0),
+                        total_tokens=int(usage.get("total_tokens") or 0),
+                        cache_hit_price_per_million=pricing[0],
+                        cache_miss_price_per_million=pricing[1],
+                        output_price_per_million=pricing[2],
+                        estimated_cost_usd=float(usage.get("estimated_cost_usd") or 0),
                     )
                 )
                 db.commit()
