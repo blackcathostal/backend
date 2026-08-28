@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +12,7 @@ from starlette.responses import JSONResponse
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.ai_sources import AiSources
+from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.users import Users
 from app.services.ai_api_sources import collect_external_api_materials
 from app.services.ai_source_fetcher import fetch_source_content
@@ -33,13 +35,24 @@ mcp = FastMCP(
 def list_active_sources(limit: int = 6) -> dict[str, Any]:
     safe_limit = max(1, min(int(limit), settings.deepseek_max_sources))
     with SessionLocal() as db:
-        rows = (
-            db.query(AiSources)
-            .filter(AiSources.is_active.is_(True))
-            .order_by(AiSources.priority.desc(), AiSources.id.asc())
-            .limit(safe_limit)
+        rows = db.query(AiSources).filter(AiSources.is_active.is_(True)).all()
+        recent_runs = (
+            db.query(AiGenerationRuns.source_ids)
+            .filter(
+                AiGenerationRuns.status == "success",
+                AiGenerationRuns.source_ids != "",
+            )
+            .order_by(AiGenerationRuns.created_at.desc(), AiGenerationRuns.id.desc())
+            .limit(20)
             .all()
         )
+        usage_count: Counter[int] = Counter()
+        for (source_ids,) in recent_runs:
+            for source_id in str(source_ids or "").split(","):
+                if source_id.strip().isdigit():
+                    usage_count[int(source_id)] += 1
+        rows.sort(key=lambda row: (-row.priority, usage_count[row.id], row.id))
+        rows = rows[:safe_limit]
         return {
             "sources": [
                 {
