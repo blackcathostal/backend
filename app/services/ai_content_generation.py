@@ -91,6 +91,10 @@ def _is_repeated(
 ) -> bool:
     normalized_title = re.sub(r"\W+", " ", article["title"].lower()).strip()
     new_title_words = set(re.findall(r"\w{4,}", normalized_title))
+    new_body = article["body"].lower()
+    new_opening = " ".join(re.findall(r"\w{4,}", new_body)[:14])
+    new_phrases = _word_ngrams(new_body)
+    new_landmarks = _landmark_phrases(article["title"] + " " + new_body)
     new_text = " ".join(
         [article["body"], article["excerpt"], article.get("keywords", "")]
     ).lower()
@@ -109,6 +113,18 @@ def _is_repeated(
             or title_overlap >= 0.60
         ):
             return True
+        old_body = (body or "").lower()
+        old_opening = " ".join(re.findall(r"\w{4,}", old_body)[:14])
+        if (
+            new_opening
+            and old_opening
+            and SequenceMatcher(None, new_opening, old_opening).ratio() >= 0.82
+        ):
+            return True
+        if len(new_phrases & _word_ngrams(old_body)) >= 3:
+            return True
+        if new_landmarks & _landmark_phrases(f"{title} {old_body}"):
+            return True
         old_text = " ".join([body or "", excerpt or "", keywords or ""]).lower()
         old_words = set(re.findall(r"\w{4,}", old_text))
         if new_words and old_words:
@@ -117,6 +133,40 @@ def _is_repeated(
             if overlap >= 0.70 or sequence >= 0.72:
                 return True
     return False
+
+
+def _word_ngrams(value: str, size: int = 6) -> set[tuple[str, ...]]:
+    words = re.findall(r"\w{4,}", value)
+    return {tuple(words[index : index + size]) for index in range(len(words) - size + 1)}
+
+
+def _has_template_language(value: str) -> bool:
+    normalized = re.sub(r"\s+", " ", value.lower())
+    forbidden_phrases = (
+        "metrópolis vibrante",
+        "a los pies de la cordillera",
+        "una experiencia inolvidable",
+        "un destino imperdible",
+    )
+    return any(phrase in normalized for phrase in forbidden_phrases)
+
+
+def _landmark_phrases(value: str) -> set[str]:
+    words = re.findall(r"[a-záéíóúñ]+", value.lower())
+    landmark_prefixes = {
+        "cerro", "barrio", "palacio", "museo", "plaza", "parque",
+        "mercado", "mirador",
+    }
+    standalone_landmarks = {"costanera", "lastarria", "yungay"}
+    phrases: set[str] = set()
+    for index, word in enumerate(words):
+        if word in standalone_landmarks:
+            phrases.add(word)
+        elif word in landmark_prefixes:
+            for size in (2, 3, 4):
+                if index + size <= len(words):
+                    phrases.add(" ".join(words[index : index + size]))
+    return phrases
 
 
 def _context(materials: list[dict[str, Any]]) -> str:
@@ -203,6 +253,10 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 ],
             )
             article = _parse_article(raw_article)
+            if _has_template_language(article["body"]):
+                raise DeepSeekError(
+                    "El artículo generado contiene frases promocionales o una plantilla repetida."
+                )
             if _is_repeated(article, existing_articles):
                 raise DeepSeekError("El artículo generado repite contenido publicado anteriormente.")
             article["slug"] = _unique_slug(db, article["slug"])

@@ -21,7 +21,7 @@ class _ReadableTextParser(HTMLParser):
         super().__init__()
         self.title_parts: list[str] = []
         self.text_parts: list[str] = []
-        self.image_candidates: list[tuple[str, str]] = []
+        self.image_candidates: list[tuple[str, str, bool]] = []
         self._ignored_depth = 0
         self._in_title = False
 
@@ -33,19 +33,19 @@ class _ReadableTextParser(HTMLParser):
             if property_name in {"og:image", "twitter:image", "twitter:image:src"}:
                 image = attributes.get("content")
                 if image:
-                    self.image_candidates.append((image.strip(), ""))
+                    self.image_candidates.append((image.strip(), "", True))
         elif tag == "img":
             for attribute in ("src", "data-src", "data-lazy-src"):
                 image = attributes.get(attribute)
                 if image:
-                    self.image_candidates.append((image.strip(), attributes.get("alt") or ""))
+                    self.image_candidates.append((image.strip(), attributes.get("alt") or "", False))
             for attribute in ("srcset", "data-srcset"):
                 srcset = attributes.get(attribute)
                 if srcset:
                     for item in srcset.split(","):
                         image = item.strip().split(" ", 1)[0]
                         if image:
-                            self.image_candidates.append((image, attributes.get("alt") or ""))
+                            self.image_candidates.append((image, attributes.get("alt") or "", False))
         if tag in self.ignored_tags:
             self._ignored_depth += 1
         if tag == "title":
@@ -123,12 +123,14 @@ def _extract_text(
     image_urls: list[str] = []
     image_candidates: list[dict[str, str]] = []
     if "html" in content_type.lower():
-        for candidate, alt in parser.image_candidates[:16]:
+        for candidate, alt, is_meta in parser.image_candidates[:16]:
             try:
                 image_url = validate_source_url(urljoin(base_url, candidate))
                 if image_url not in image_urls:
                     image_urls.append(image_url)
-                    image_candidates.append({"url": image_url, "alt": alt[:240]})
+                    image_candidates.append(
+                        {"url": image_url, "alt": alt[:240], "is_meta": str(is_meta)}
+                    )
             except SourceFetchError:
                 continue
     return title[:240], text, image_urls, image_candidates

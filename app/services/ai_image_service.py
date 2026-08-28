@@ -25,41 +25,49 @@ async def download_source_image(
     excluded = excluded_urls or set()
     existing_fingerprints = _existing_image_fingerprints(excluded_paths or set())
     relevance_words = _content_words(relevance_text)
+    ranked_candidates: list[tuple[int, dict[str, str]]] = []
     for material in materials:
         candidates = material.get("image_candidates") or [
             {"url": candidate, "alt": ""} for candidate in (material.get("image_urls") or [])
         ]
         if not candidates and material.get("image_url"):
             candidates = [{"url": material["image_url"], "alt": ""}]
-        candidates = sorted(
-            candidates,
-            key=lambda candidate: len(
+        for candidate in candidates:
+            candidate = candidate if isinstance(candidate, dict) else {"url": candidate, "alt": ""}
+            score = len(
                 relevance_words
                 & _content_words(
                     f"{candidate.get('url', '')} {candidate.get('alt', '')} "
                     f"{material.get('title', '')}"
                 )
-            ),
-            reverse=True,
-        )
-        for candidate in candidates:
-            image_url = str(candidate.get("url") if isinstance(candidate, dict) else candidate).strip()
-            if not image_url or image_url in excluded:
+            )
+            ranked_candidates.append((score, candidate))
+
+    for _, candidate in sorted(
+        ranked_candidates,
+        key=lambda item: (
+            item[0] + (2 if item[1].get("is_meta") == "False" else 0),
+            item[0],
+        ),
+        reverse=True,
+    ):
+        image_url = str(candidate.get("url") or "").strip()
+        if not image_url or image_url in excluded:
+            continue
+        try:
+            content, _ = await download_image(
+                image_url,
+                timeout_seconds=settings.deepseek_source_timeout_seconds,
+                max_bytes=settings.deepseek_image_max_bytes,
+            )
+            if _image_fingerprint(content) in existing_fingerprints:
                 continue
-            try:
-                content, _ = await download_image(
-                    image_url,
-                    timeout_seconds=settings.deepseek_source_timeout_seconds,
-                    max_bytes=settings.deepseek_image_max_bytes,
-                )
-                if _image_fingerprint(content) in existing_fingerprints:
-                    continue
-                filename = f"ai-post-{uuid4().hex}.webp"
-                destination = settings.uploads_dir / "posts" / filename
-                save_upload_as_webp(content, destination)
-                return f"/uploads/posts/{filename}", image_url
-            except (SourceFetchError, OSError, ValueError, httpx.HTTPError):
-                continue
+            filename = f"ai-post-{uuid4().hex}.webp"
+            destination = settings.uploads_dir / "posts" / filename
+            save_upload_as_webp(content, destination)
+            return f"/uploads/posts/{filename}", image_url
+        except (SourceFetchError, OSError, ValueError, httpx.HTTPError):
+            continue
     raise SourceFetchError("No se encontró una imagen nueva y válida en las fuentes.")
 
 
