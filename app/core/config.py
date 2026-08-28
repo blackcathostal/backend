@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_timeout_seconds: float = 45.0
     deepseek_max_input_tokens: int = 8000
-    deepseek_max_output_tokens: int = 1200
-    deepseek_article_max_words: int = 550
+    deepseek_max_output_tokens: int = 1500
+    deepseek_article_max_words: int = 700
     deepseek_daily_budget_usd: float = 5.0
     deepseek_max_sources: int = 6
     deepseek_source_char_limit: int = 4000
