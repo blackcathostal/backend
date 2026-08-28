@@ -10,6 +10,7 @@ from app.api import (
     items,
     mail_accounts,
     media,
+    places,
     posts,
     reviews,
     rooms,
@@ -31,3 +32,4 @@ api_router.include_router(services.router)
 api_router.include_router(rooms.router)
 api_router.include_router(items.router)
 api_router.include_router(reviews.router)
+api_router.include_router(places.router)
