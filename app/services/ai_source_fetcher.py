@@ -21,7 +21,7 @@ class _ReadableTextParser(HTMLParser):
         super().__init__()
         self.title_parts: list[str] = []
         self.text_parts: list[str] = []
-        self.image_candidates: list[str] = []
+        self.image_candidates: list[tuple[str, str]] = []
         self._ignored_depth = 0
         self._in_title = False
 
@@ -33,19 +33,19 @@ class _ReadableTextParser(HTMLParser):
             if property_name in {"og:image", "twitter:image", "twitter:image:src"}:
                 image = attributes.get("content")
                 if image:
-                    self.image_candidates.append(image.strip())
+                    self.image_candidates.append((image.strip(), ""))
         elif tag == "img":
             for attribute in ("src", "data-src", "data-lazy-src"):
                 image = attributes.get(attribute)
                 if image:
-                    self.image_candidates.append(image.strip())
+                    self.image_candidates.append((image.strip(), attributes.get("alt") or ""))
             for attribute in ("srcset", "data-srcset"):
                 srcset = attributes.get(attribute)
                 if srcset:
                     for item in srcset.split(","):
                         image = item.strip().split(" ", 1)[0]
                         if image:
-                            self.image_candidates.append(image)
+                            self.image_candidates.append((image, attributes.get("alt") or ""))
         if tag in self.ignored_tags:
             self._ignored_depth += 1
         if tag == "title":
@@ -102,7 +102,11 @@ def validate_source_url(url: str) -> str:
     return value
 
 
-def _extract_text(content: bytes, content_type: str, base_url: str) -> tuple[str, str, list[str]]:
+def _extract_text(
+    content: bytes,
+    content_type: str,
+    base_url: str,
+) -> tuple[str, str, list[str], list[dict[str, str]]]:
     encoding_match = re.search(r"charset=([\w-]+)", content_type, re.IGNORECASE)
     encoding = encoding_match.group(1) if encoding_match else "utf-8"
     text = content.decode(encoding, errors="replace")
@@ -117,15 +121,17 @@ def _extract_text(content: bytes, content_type: str, base_url: str) -> tuple[str
     if not text:
         raise SourceFetchError("La fuente no contiene texto legible.")
     image_urls: list[str] = []
+    image_candidates: list[dict[str, str]] = []
     if "html" in content_type.lower():
-        for candidate in parser.image_candidates[:16]:
+        for candidate, alt in parser.image_candidates[:16]:
             try:
                 image_url = validate_source_url(urljoin(base_url, candidate))
                 if image_url not in image_urls:
                     image_urls.append(image_url)
+                    image_candidates.append({"url": image_url, "alt": alt[:240]})
             except SourceFetchError:
                 continue
-    return title[:240], text, image_urls
+    return title[:240], text, image_urls, image_candidates
 
 
 async def fetch_source_content(
@@ -161,7 +167,7 @@ async def fetch_source_content(
                     if total > max_bytes:
                         raise SourceFetchError("La fuente supera el tamaño máximo permitido.")
                     chunks.append(chunk)
-                title, text, image_urls = _extract_text(
+                title, text, image_urls, image_candidates = _extract_text(
                     b"".join(chunks), content_type, current_url
                 )
                 return {
@@ -170,6 +176,7 @@ async def fetch_source_content(
                     "text": text[:max_bytes],
                     "image_url": image_urls[0] if image_urls else "",
                     "image_urls": image_urls,
+                    "image_candidates": image_candidates,
                 }
 
     raise SourceFetchError("La fuente tuvo demasiadas redirecciones.")
