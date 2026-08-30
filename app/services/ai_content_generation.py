@@ -54,14 +54,20 @@ def _parse_article(raw: str) -> dict[str, Any]:
     try:
         article = json.loads(content)
     except json.JSONDecodeError as exc:
-        start = content.find("{")
-        end = content.rfind("}")
-        if start < 0 or end <= start:
+        article = None
+        decoder = json.JSONDecoder()
+        for start, character in enumerate(content):
+            if character != "{":
+                continue
+            try:
+                candidate, _ = decoder.raw_decode(content[start:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                article = candidate
+                break
+        if article is None:
             raise DeepSeekError("DeepSeek no devolvió el JSON esperado.") from exc
-        try:
-            article = json.loads(content[start : end + 1])
-        except json.JSONDecodeError as nested_exc:
-            raise DeepSeekError("DeepSeek no devolvió el JSON esperado.") from nested_exc
     if not isinstance(article, dict):
         raise DeepSeekError("La respuesta de DeepSeek no tiene formato de artículo.")
 
@@ -348,13 +354,30 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 for row in historical_runs
             )
             source_context = _context(materials)
-            draft_raw, draft_usage = await generate_article(
-                source_context,
-                avoid_articles=avoid_articles,
-                editorial_direction=editorial_direction,
-            )
-            usage = draft_usage
-            draft = _parse_article(draft_raw)
+            draft = None
+            for draft_attempt in range(2):
+                try:
+                    draft_raw, draft_usage = await generate_article(
+                        source_context,
+                        avoid_articles=avoid_articles,
+                        revision_note=(
+                            "Devuelve exclusivamente un objeto JSON válido, sin texto "
+                            "antes ni después. No uses bloques Markdown para envolverlo."
+                            if draft_attempt
+                            else ""
+                        ),
+                        editorial_direction=editorial_direction,
+                    )
+                    usage = _merge_usage(usage, draft_usage)
+                    draft = _parse_article(draft_raw)
+                    break
+                except DeepSeekError as exc:
+                    if exc.usage:
+                        usage = _merge_usage(usage, exc.usage)
+                    if draft_attempt == 1:
+                        raise
+            if draft is None:
+                raise DeepSeekError("No se pudo interpretar el borrador generado.")
             place_queries = draft.get("place_queries") or _fallback_place_queries(draft)
             maps_places = await collect_google_places(place_queries)
             generation_context = f"{source_context}\n\n{_maps_context(maps_places)}"
