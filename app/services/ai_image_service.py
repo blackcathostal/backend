@@ -67,7 +67,7 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
                     "gsrlimit": "30",
                     "prop": "imageinfo",
                     "iiprop": "url|mime|timestamp|extmetadata",
-                    "iiurlwidth": "1600",
+                    "iiurlwidth": "1200",
                     "format": "json",
                     "formatversion": "2",
                     "origin": "*",
@@ -109,8 +109,6 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
     for page in pages:
         title = str(page.get("title") or "")
         normalized_title = title.lower()
-        if any(term in normalized_title for term in blocked_terms):
-            continue
         info = (page.get("imageinfo") or [{}])[0]
         mime = str(info.get("mime") or "").lower()
         image_url = str(info.get("thumburl") or info.get("url") or "")
@@ -133,13 +131,20 @@ async def _search_free_images(relevance_text: str) -> list[dict[str, str]]:
         )
         image_title_words = _content_words(title)
         metadata_words = _content_words(metadata_text)
-        title_matches = len(title_words & image_title_words)
-        anchor_matches = len(anchor_words & image_title_words)
+        candidate_text = f"{title} {metadata_text}"
+        normalized_candidate = candidate_text.lower()
+        if any(
+            _contains_any(normalized_candidate, (term,))
+            for term in blocked_terms
+        ):
+            continue
+        searchable_words = image_title_words | metadata_words
+        title_matches = len(title_words & searchable_words)
+        anchor_matches = len(anchor_words & searchable_words)
         if title_words and title_matches < 1:
             continue
         if anchor_words and anchor_matches < 1:
             continue
-        candidate_text = f"{title} {metadata_text}"
         if not coastal_topic and _contains_any(
             candidate_text,
             ("playa", "playas", "beach", "mar", "ocean", "océano", "oceanfront"),
@@ -175,6 +180,16 @@ def _search_queries(value: str) -> list[str]:
             alternate = " ".join(place_words[:3] + ["Santiago"])
             if alternate not in queries:
                 queries.append(alternate)
+    title_match = re.search(r"título:\s*([^\n]+)", value, flags=re.IGNORECASE)
+    topical_source = title_match.group(1) if title_match else value
+    topical_words = [
+        word
+        for word in re.findall(r"[a-záéíóúñ]{3,}", topical_source.lower())
+        if word not in {"santiago", "chile", "turismo"}
+    ]
+    topical_query = " ".join(["Santiago", "Chile"] + topical_words[:3])
+    if topical_query not in queries:
+        queries.append(topical_query)
     return queries
 
 
@@ -244,7 +259,11 @@ def _title_anchor_words(value: str) -> set[str]:
     places_match = re.search(r"lugares:\s*([^\n]+)", value, flags=re.IGNORECASE)
     if not match and not places_match:
         return set()
-    ignored = {"santiago", "chile", "día", "dia"}
+    ignored = {
+        "a", "al", "con", "de", "del", "el", "en", "la", "las", "los",
+        "por", "para", "un", "una", "y", "santiago", "chile", "día", "dia",
+        "descubre", "conoce", "guía", "guia", "ruta", "rutas", "recorrido",
+    }
     title_anchors = (
         {
             word.lower()
