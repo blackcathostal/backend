@@ -173,14 +173,12 @@ def usage_report(
     miss = int(values[4] or 0)
     platform_cost = None
     if first_synced and latest_synced:
-        platform_cost = round(
-            max(
-                float(first_synced.platform_balance_usd)
-                - float(latest_synced.platform_balance_usd),
-                0.0,
-            ),
-            8,
+        balance_delta = (
+            float(first_synced.platform_balance_usd)
+            - float(latest_synced.platform_balance_usd)
         )
+        if balance_delta > 0:
+            platform_cost = round(balance_delta, 8)
     return AiUsageSummary(
         from_date=from_date,
         to_date=to_date,

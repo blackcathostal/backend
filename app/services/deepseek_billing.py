@@ -53,4 +53,7 @@ def calculate_platform_cost(
     current = after.get("usd")
     if previous is None or current is None:
         return None
-    return round(max(float(previous) - float(current), 0.0), 8)
+    cost = max(float(previous) - float(current), 0.0)
+    # A zero delta usually means the balance endpoint rounded both snapshots
+    # to the same value; it does not prove that a token-consuming request was free.
+    return round(cost, 8) if cost > 0 else None
