@@ -9,7 +9,9 @@ from app.core.config import settings
 
 
 class DeepSeekError(RuntimeError):
-    pass
+    def __init__(self, message: str, usage: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.usage = usage or {}
 
 
 def _pricing() -> tuple[float, float, float]:
@@ -192,13 +194,31 @@ async def generate_article(
 
     if response.status_code >= 400:
         detail = response.text[:500]
-        raise DeepSeekError(f"DeepSeek respondió HTTP {response.status_code}: {detail}")
+        usage = {"api_requests": 1, "estimated_cost_usd": 0.0, "pricing": _pricing()}
+        try:
+            error_payload = response.json()
+            if isinstance(error_payload, dict):
+                usage.update(normalize_usage(error_payload))
+        except (ValueError, TypeError, AttributeError):
+            pass
+        raise DeepSeekError(
+            f"DeepSeek respondió HTTP {response.status_code}: {detail}",
+            usage=usage,
+        )
 
     try:
         result = response.json()
     except ValueError as exc:
-        raise DeepSeekError("DeepSeek devolvió una respuesta no válida.") from exc
-    return _extract_content(result), normalize_usage(result)
+        raise DeepSeekError(
+            "DeepSeek devolvió una respuesta no válida.",
+            usage={"api_requests": 1, "estimated_cost_usd": 0.0, "pricing": _pricing()},
+        ) from exc
+    usage = normalize_usage(result)
+    try:
+        content = _extract_content(result)
+    except DeepSeekError as exc:
+        raise DeepSeekError(str(exc), usage=usage) from exc
+    return content, usage
 
 
 def pricing_snapshot() -> dict[str, Any]:

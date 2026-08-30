@@ -353,12 +353,12 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
                 avoid_articles=avoid_articles,
                 editorial_direction=editorial_direction,
             )
+            usage = draft_usage
             draft = _parse_article(draft_raw)
             place_queries = draft.get("place_queries") or _fallback_place_queries(draft)
             maps_places = await collect_google_places(place_queries)
             generation_context = f"{source_context}\n\n{_maps_context(maps_places)}"
             article = None
-            usage = draft_usage
             revision_note = ""
             for attempt in range(3):
                 raw_article, attempt_usage = await generate_article(
@@ -453,6 +453,8 @@ async def generate_and_publish(db: Session) -> dict[str, Any]:
             db.refresh(usage_row)
             return {"post": post, "run": run, "usage": usage_row}
         except Exception as exc:
+            if isinstance(exc, DeepSeekError) and exc.usage:
+                usage = _merge_usage(usage, exc.usage)
             db.rollback()
             failed_run = db.query(AiGenerationRuns).filter(AiGenerationRuns.id == run.id).first()
             if failed_run:

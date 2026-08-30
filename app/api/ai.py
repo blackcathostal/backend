@@ -146,10 +146,6 @@ def usage_report(
     query = db.query(AiUsage).filter(AiUsage.created_at >= from_date)
     entries = query.order_by(AiUsage.created_at.desc(), AiUsage.id.desc()).limit(limit).all()
     values = query.with_entities(
-        func.coalesce(
-            func.sum(func.coalesce(AiUsage.platform_cost_usd, AiUsage.estimated_cost_usd)),
-            0.0,
-        ),
         func.coalesce(func.sum(AiUsage.estimated_cost_usd), 0.0),
         func.coalesce(func.sum(AiUsage.api_requests), 0),
         func.coalesce(func.sum(AiUsage.prompt_tokens), 0),
@@ -163,30 +159,47 @@ def usage_report(
         .order_by(AiUsage.created_at.desc(), AiUsage.id.desc())
         .first()
     )
+    first_synced = (
+        query.filter(AiUsage.platform_balance_usd.isnot(None))
+        .order_by(AiUsage.created_at.asc(), AiUsage.id.asc())
+        .first()
+    )
     synced_runs = query.filter(AiUsage.platform_cost_usd.isnot(None)).count()
     runs_query = db.query(AiGenerationRuns).filter(AiGenerationRuns.created_at >= from_date)
     runs = runs_query.count()
     successful_runs = runs_query.filter(AiGenerationRuns.status == "success").count()
     failed_runs = runs_query.filter(AiGenerationRuns.status == "failed").count()
-    hit = int(values[4] or 0)
-    miss = int(values[5] or 0)
+    hit = int(values[3] or 0)
+    miss = int(values[4] or 0)
+    platform_cost = None
+    if first_synced and latest_synced:
+        platform_cost = round(
+            max(
+                float(first_synced.platform_balance_usd)
+                - float(latest_synced.platform_balance_usd),
+                0.0,
+            ),
+            8,
+        )
     return AiUsageSummary(
         from_date=from_date,
         to_date=to_date,
-        total_cost_usd=float(values[0] or 0.0),
-        estimated_cost_usd=float(values[1] or 0.0),
+        total_cost_usd=(
+            platform_cost if platform_cost is not None else float(values[0] or 0.0)
+        ),
+        estimated_cost_usd=float(values[0] or 0.0),
         platform_balance_usd=(
             float(latest_synced.platform_balance_usd)
             if latest_synced and latest_synced.platform_balance_usd is not None
             else None
         ),
         platform_synced_runs=synced_runs,
-        api_requests=int(values[2] or 0),
-        prompt_tokens=int(values[3] or 0),
+        api_requests=int(values[1] or 0),
+        prompt_tokens=int(values[2] or 0),
         prompt_cache_hit_tokens=hit,
         prompt_cache_miss_tokens=miss,
-        completion_tokens=int(values[6] or 0),
-        total_tokens=int(values[7] or 0),
+        completion_tokens=int(values[5] or 0),
+        total_tokens=int(values[6] or 0),
         runs=runs,
         successful_runs=successful_runs,
         failed_runs=failed_runs,
