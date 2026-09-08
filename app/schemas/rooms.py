@@ -9,6 +9,7 @@ class RoomsCreate(BaseModel):
     capacity: int = Field(ge=1)
     price: int = Field(ge=0)
     status: str = Field(default="Disponible", max_length=40)
+    features: str = Field(default="", max_length=4000)
 
 
 class RoomsUpdate(BaseModel):
@@ -17,6 +18,7 @@ class RoomsUpdate(BaseModel):
     capacity: int | None = Field(default=None, ge=1)
     price: int | None = Field(default=None, ge=0)
     status: str | None = Field(default=None, max_length=40)
+    features: str | None = Field(default=None, max_length=4000)
 
 
 class RoomsOut(BaseModel):
@@ -26,6 +28,7 @@ class RoomsOut(BaseModel):
     capacity: int
     price: int
     status: str
+    features: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -6,6 +6,8 @@ from app.api import (
     contact_groups,
     contacts,
     health,
+    inquiries,
+    instagram,
     items,
     mail_accounts,
     media,
@@ -30,3 +32,4 @@ api_router.include_router(services.router)
 api_router.include_router(rooms.router)
 api_router.include_router(items.router)
 api_router.include_router(reviews.router)
+api_router.include_router(instagram.router)

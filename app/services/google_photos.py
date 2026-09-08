@@ -23,8 +23,20 @@ FRONTEND_DIR = (
     / "viajeros-google"
 )
 
+UPLOADS_DIR = settings.uploads_dir / "viajeros-google"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
 DEFAULT_ALBUM_URL = (
-    "https://www.google.com/maps/search/?api=1&query=Black+Cat+Hostal+Boutique+Santiago"
+    "https://www.google.com/maps/place/HOSTAL+BOUTIQUE+BLACK+CAT/"
+    "@-33.4397308,-70.6637911,17z/data=!4m9!3m8!1s0x9662c5b8477cf75b:0x9bc2ca30f81b6eff"
+    "!5m2!4m1!1i2!8m2!3d-33.4397308!4d-70.6637911!16s%2Fg%2F11h190x96c"
+)
+
+OWNER_NAME_HINTS = (
+    "black cat",
+    "blackcat",
+    "hostal boutique black cat",
+    "hostal black cat",
 )
 
 
@@ -37,22 +49,96 @@ def _album_url(place_id: str | None = None) -> str:
     return DEFAULT_ALBUM_URL
 
 
+def _is_owner_attribution(names: list[str], business_name: str = "") -> bool:
+    """True when the photo looks like a business/owner upload, not a guest."""
+    if not names:
+        return True
+    business = (business_name or "").strip().lower()
+    for raw in names:
+        name = (raw or "").strip().lower()
+        if not name:
+            continue
+        if business and business in name:
+            return True
+        if any(hint in name for hint in OWNER_NAME_HINTS):
+            return True
+    return False
+
+
 def _local_photos() -> list[dict[str, Any]]:
-    if not FRONTEND_DIR.exists():
-        return []
-    files = sorted(
-        [p for p in FRONTEND_DIR.glob("*.webp") if p.name != "local.webp"],
-        key=lambda p: p.name,
-    )
-    return [
-        {
-            "id": path.stem,
-            "url": f"/cappa/img/viajeros-google/{path.name}",
-            "local": f"img/viajeros-google/{path.name}",
-            "source": "Google",
-        }
-        for path in files
-    ]
+    """
+    Serve only the curated guest list in local.json when present.
+    That avoids accidentally exposing hostel marketing dumps left as *.webp.
+    """
+    photos: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    index = FRONTEND_DIR / "local.json"
+    if index.exists():
+        try:
+            listed = json.loads(index.read_text(encoding="utf-8"))
+        except Exception:
+            listed = None
+        if isinstance(listed, list):
+            for raw in listed:
+                name = Path(str(raw)).name
+                if not name.endswith(".webp") or name in seen:
+                    continue
+                path = FRONTEND_DIR / name
+                if not path.is_file():
+                    upload = UPLOADS_DIR / name
+                    if upload.is_file():
+                        photos.append(
+                            {
+                                "id": upload.stem,
+                                "url": f"/uploads/viajeros-google/{upload.name}",
+                                "local": f"/uploads/viajeros-google/{upload.name}",
+                                "source": "Google",
+                                "kind": "customer",
+                            }
+                        )
+                        seen.add(name)
+                    continue
+                seen.add(name)
+                photos.append(
+                    {
+                        "id": path.stem,
+                        "url": f"/cappa/img/viajeros-google/{path.name}",
+                        "local": f"img/viajeros-google/{path.name}",
+                        "source": "Google",
+                        "kind": "customer",
+                    }
+                )
+            return photos
+
+    def add_from(folder: Path, url_prefix: str, local_prefix: str) -> None:
+        if not folder.exists():
+            return
+        files = sorted(
+            [
+                p
+                for p in folder.glob("*.webp")
+                if p.is_file() and p.name not in {"local.webp", "favicon-preview.webp"}
+            ],
+            key=lambda p: p.name,
+        )
+        for path in files:
+            if path.name in seen:
+                continue
+            seen.add(path.name)
+            photos.append(
+                {
+                    "id": path.stem,
+                    "url": f"{url_prefix}/{path.name}",
+                    "local": f"{local_prefix}/{path.name}",
+                    "source": "Google",
+                    "kind": "customer",
+                }
+            )
+
+    add_from(UPLOADS_DIR, "/uploads/viajeros-google", "/uploads/viajeros-google")
+    add_from(FRONTEND_DIR, "/cappa/img/viajeros-google", "img/viajeros-google")
+    return photos
 
 
 def _payload(
@@ -93,10 +179,18 @@ def _write_cache(payload: dict[str, Any]) -> None:
     CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _write_local_index(photos: list[dict[str, Any]]) -> None:
+    FRONTEND_DIR.mkdir(parents=True, exist_ok=True)
+    locals_ = [p["local"] for p in photos if str(p.get("local", "")).startswith("img/viajeros-google/")]
+    if not locals_:
+        locals_ = [f"img/viajeros-google/{Path(p['url']).name}" for p in photos if p.get("url")]
+    (FRONTEND_DIR / "local.json").write_text(json.dumps(locals_, indent=2), encoding="utf-8")
+
+
 async def sync_places_api_photos() -> dict[str, Any] | None:
     """
-    Official Google Places (New) photos for this business only.
-    Uses the same Places API key as Google Reviews.
+    Google Places (New) photos attributed to customers/guests only.
+    Skips business/owner uploads (hostel marketing shots).
     """
     from app.services.google_places_client import (
         PLACES_V1,
@@ -109,6 +203,7 @@ async def sync_places_api_photos() -> dict[str, Any] | None:
         return None
 
     FRONTEND_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
     async with httpx.AsyncClient(timeout=40.0, follow_redirects=True) as client:
         place_id = await resolve_place_id(client)
@@ -121,15 +216,38 @@ async def sync_places_api_photos() -> dict[str, Any] | None:
             "id,displayName,googleMapsUri,photos",
         )
         refs = result.get("photos") or []
+        business_name = ((result.get("displayName") or {}).get("text") or "").strip()
         if not refs:
             return _payload([], "google_places_api_empty", live=True, place_id=place_id)
 
-        # Fresh sync: replace previous collage assets
+        customer_refs: list[dict[str, Any]] = []
+        for photo in refs:
+            attributions = [
+                a.get("displayName") or a.get("uri") or ""
+                for a in (photo.get("authorAttributions") or [])
+                if a
+            ]
+            if _is_owner_attribution(attributions, business_name):
+                continue
+            customer_refs.append({"photo": photo, "attributions": attributions})
+
+        if not customer_refs:
+            # Do not wipe existing customer sync with an empty/owner-only Places dump.
+            local = _local_photos()
+            if local:
+                payload = _payload(local, "local_viajeros_google_kept", live=False, place_id=place_id)
+                payload["note"] = "places_api_had_no_customer_attributed_photos"
+                return payload
+            return _payload([], "google_places_api_no_customers", live=True, place_id=place_id)
+
         for old in FRONTEND_DIR.glob("*.webp"):
+            old.unlink()
+        for old in UPLOADS_DIR.glob("*.webp"):
             old.unlink()
 
         saved: list[dict[str, Any]] = []
-        for index, photo in enumerate(refs, 1):
+        for index, item in enumerate(customer_refs, 1):
+            photo = item["photo"]
             resource = (photo.get("name") or "").strip()
             if not resource:
                 continue
@@ -150,41 +268,29 @@ async def sync_places_api_photos() -> dict[str, Any] | None:
                         Image.Resampling.LANCZOS,
                     )
                 name = f"{index:02d}.webp"
-                dest = FRONTEND_DIR / name
-                image.save(dest, "WEBP", quality=85, method=6)
-                attributions = [
-                    a.get("displayName") or a.get("uri") or ""
-                    for a in (photo.get("authorAttributions") or [])
-                    if a
-                ]
+                image.save(FRONTEND_DIR / name, "WEBP", quality=85, method=6)
+                image.save(UPLOADS_DIR / name, "WEBP", quality=85, method=6)
                 saved.append(
                     {
                         "id": name,
                         "url": f"/cappa/img/viajeros-google/{name}",
                         "local": f"img/viajeros-google/{name}",
                         "source": "Google",
-                        "attributions": attributions,
+                        "kind": "customer",
+                        "attributions": item["attributions"],
                     }
                 )
             except Exception:
                 continue
 
-        (FRONTEND_DIR / "local.json").write_text(
-            json.dumps([p["local"] for p in saved], indent=2),
-            encoding="utf-8",
-        )
-        return _payload(
-            saved,
-            "google_places_api",
-            live=True,
-            place_id=place_id,
-        )
+        _write_local_index(saved)
+        return _payload(saved, "google_places_api_customers", live=True, place_id=place_id)
 
 
 async def get_google_photos(force: bool = False) -> dict[str, Any]:
     """
-    Prefer official Places API photos when GOOGLE_PLACES_API_KEY is set.
-    Otherwise serve locally cached collage files if present.
+    Prefer Places customer-attributed photos when the API key works.
+    Otherwise serve locally synced Google Maps “De clientes” collage files.
     """
     if not force:
         cached = _read_cache()
@@ -193,12 +299,16 @@ async def get_google_photos(force: bool = False) -> dict[str, Any]:
 
     try:
         live = await sync_places_api_photos()
-        if live is not None:
+        if live is not None and (live.get("count") or 0) >= 1:
             _write_cache(live)
             return live
+        if live is not None and live.get("live") and (live.get("count") or 0) == 0:
+            # API worked but returned nothing useful — still try local customer sync.
+            pass
     except Exception:
         stale = _read_cache(allow_stale=True)
-        if stale:
+        if stale and (stale.get("count") or 0) >= 1:
+            stale = dict(stale)
             stale["live"] = False
             stale["source"] = "cache"
             return stale

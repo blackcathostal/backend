@@ -1,0 +1,51 @@
+{
+  "currency": "CLP",
+  "note": "Tarifas referenciales desde. Pueden variar por temporada y ocupación. Confirmación de fechas y pago con reservas.",
+  "includes": [
+    "Baño privado",
+    "Wi-Fi",
+    "Calefacción",
+    "Desayuno continental"
+  ],
+  "contact": {
+    "email": "reservas@blackcathostal.com",
+    "site": "https://blackcathostal.com"
+  },
+  "rooms": [
+    {
+      "slug": "family",
+      "name_es": "Familiar / Compartida",
+      "name_en": "Family / Shared",
+      "capacity": "Grupo / literas",
+      "price_from_clp": 19990
+    },
+    {
+      "slug": "king-queen",
+      "name_es": "Matrimonial / Queen",
+      "name_en": "Double / Queen",
+      "capacity": "2 personas",
+      "price_from_clp": 54990
+    },
+    {
+      "slug": "twin",
+      "name_es": "Twin o Triple",
+      "name_en": "Twin Room",
+      "capacity": "2–3 personas",
+      "price_from_clp": 72990
+    },
+    {
+      "slug": "superior-king",
+      "name_es": "King Superior",
+      "name_en": "Superior King",
+      "capacity": "2 personas",
+      "price_from_clp": 54990
+    },
+    {
+      "slug": "mobility",
+      "name_es": "Movilidad reducida",
+      "name_en": "Accessible Room",
+      "capacity": "2 personas",
+      "price_from_clp": 54990
+    }
+  ]
+}

@@ -5,15 +5,14 @@ import json
 import re
 import time
 from io import BytesIO
-from pathlib import Path
 from typing import Any
 
 import httpx
 from PIL import Image
 
-from app.core.config import settings
 from app.services.tripadvisor_photos import (
     FRONTEND_TA_DIR,
+    UPLOADS_TA_DIR,
     _album_url,
     _listing_url,
     _local_traveler_photos,
@@ -42,8 +41,10 @@ def _normalize_url(url: str) -> str:
 
 
 async def import_traveler_photo_urls(urls: list[str]) -> dict[str, Any]:
-    """Download Tripadvisor CDN traveler photos into viajeros-ta and refresh cache."""
+    """Download Tripadvisor CDN traveler photos into uploads/viajeros-ta and refresh cache."""
+    UPLOADS_TA_DIR.mkdir(parents=True, exist_ok=True)
     FRONTEND_TA_DIR.mkdir(parents=True, exist_ok=True)
+
     unique: list[str] = []
     seen: set[str] = set()
     for raw in urls:
@@ -54,7 +55,17 @@ async def import_traveler_photo_urls(urls: list[str]) -> dict[str, Any]:
             seen.add(normalized)
             unique.append(normalized)
 
-    existing = {p.name for p in FRONTEND_TA_DIR.glob("*.webp")}
+    existing = {p.name for p in UPLOADS_TA_DIR.glob("*.webp")} | {
+        p.name for p in FRONTEND_TA_DIR.glob("*.webp")
+    }
+    content_hashes: set[str] = set()
+    for folder in (UPLOADS_TA_DIR, FRONTEND_TA_DIR):
+        for path in folder.glob("*.webp"):
+            try:
+                content_hashes.add(hashlib.sha1(path.read_bytes()).hexdigest())
+            except OSError:
+                continue
+
     saved: list[dict[str, Any]] = []
     skipped = 0
 
@@ -64,14 +75,17 @@ async def import_traveler_photo_urls(urls: list[str]) -> dict[str, Any]:
         timeout=40.0,
     ) as client:
         for url in unique:
-            digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
-            name = f"ta-{digest}.webp"
-            if name in existing:
-                skipped += 1
-                continue
             try:
                 response = await client.get(f"{url}?w=1200&h=1200&s=1")
                 if response.status_code != 200 or len(response.content) < 4000:
+                    continue
+                content_hash = hashlib.sha1(response.content).hexdigest()
+                if content_hash in content_hashes:
+                    skipped += 1
+                    continue
+                name = f"ta-{content_hash[:10]}.webp"
+                if name in existing:
+                    skipped += 1
                     continue
                 image = Image.open(BytesIO(response.content)).convert("RGB")
                 width, height = image.size
@@ -81,21 +95,25 @@ async def import_traveler_photo_urls(urls: list[str]) -> dict[str, Any]:
                         (int(width * scale), int(height * scale)),
                         Image.Resampling.LANCZOS,
                     )
-                dest = FRONTEND_TA_DIR / name
+                dest = UPLOADS_TA_DIR / name
                 image.save(dest, "WEBP", quality=85, method=6)
+                try:
+                    image.save(FRONTEND_TA_DIR / name, "WEBP", quality=85, method=6)
+                except OSError:
+                    pass
                 existing.add(name)
+                content_hashes.add(content_hash)
                 saved.append(
                     {
-                        "id": digest,
-                        "url": f"{url}?w=1200&h=1200&s=1",
-                        "local": f"img/viajeros-ta/{name}",
+                        "id": content_hash[:10],
+                        "url": f"/uploads/viajeros-ta/{name}",
+                        "local": f"/uploads/viajeros-ta/{name}",
                         "source": "Traveler",
                     }
                 )
             except Exception:
                 continue
 
-    # Refresh local.json for stable ordering
     locals_now = _local_traveler_photos()
     (FRONTEND_TA_DIR / "local.json").write_text(
         json.dumps([p.get("local") for p in locals_now], indent=2),
@@ -110,7 +128,6 @@ async def import_traveler_photo_urls(urls: list[str]) -> dict[str, Any]:
     payload["synced_at"] = int(time.time())
     _write_cache(payload)
 
-    # Return fresh view
     fresh = await get_tripadvisor_photos(force=True)
     fresh["imported"] = len(saved)
     fresh["skipped"] = skipped

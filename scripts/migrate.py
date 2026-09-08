@@ -10,6 +10,8 @@ from app.models import (  # noqa: F401
     Campaigns,
     ContactGroups,
     Contacts,
+    CommonAnswers,
+    HostelInfo,
     MailAccounts,
     Medias,
     Posts,
@@ -61,6 +63,11 @@ def main() -> None:
         checks = [
             ("mail_accounts", "signature"),
             ("contacts", "group_id"),
+            ("rooms", "features"),
+            ("hostel_info", "whatsapp_url"),
+            ("hostel_info", "breakfast_hours"),
+            ("hostel_info", "has_parking"),
+            ("common_answers", "answer_guide"),
         ]
         for table, column in checks:
             exists = conn.execute(

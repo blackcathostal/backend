@@ -22,6 +22,10 @@ FRONTEND_TA_DIR = (
     / "viajeros-ta"
 )
 
+# Production-safe storage served by FastAPI /uploads
+UPLOADS_TA_DIR = settings.uploads_dir / "viajeros-ta"
+UPLOADS_TA_DIR.mkdir(parents=True, exist_ok=True)
+
 DEFAULT_ALBUM_URL = (
     "https://www.tripadvisor.cl/Hotel_Review-g294305-d18941046-Reviews-"
     "Hostal_Boutique_Black_Cat-Santiago_Santiago_Metropolitan_Region.html"
@@ -54,51 +58,36 @@ def _listing_url() -> str:
 
 
 def _local_traveler_photos() -> list[dict[str, Any]]:
-    """Serve locally synced Tripadvisor traveler photos (auto-grows as files are added)."""
+    """Serve synced Tripadvisor traveler photos from uploads and frontend public."""
     photos: list[dict[str, Any]] = []
-    if not FRONTEND_TA_DIR.exists():
-        return photos
-
-    manifest = FRONTEND_TA_DIR / "local.json"
-    names: list[str] = []
-    if manifest.exists():
-        try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                names = [str(x).split("/")[-1] for x in data]
-        except Exception:
-            names = []
-
-    files = sorted(
-        [
-            p
-            for p in FRONTEND_TA_DIR.glob("*.webp")
-            if p.is_file() and p.name not in {"favicon-preview.webp"}
-        ],
-        key=lambda p: p.name,
-    )
-    # Prefer numeric order from disk; append any missing from manifest.
-    by_name = {p.name: p for p in files}
-    ordered: list[Path] = []
     seen: set[str] = set()
-    for name in names:
-        if name in by_name and name not in seen:
-            ordered.append(by_name[name])
-            seen.add(name)
-    for p in files:
-        if p.name not in seen:
-            ordered.append(p)
-            seen.add(p.name)
 
-    for path in ordered:
-        photos.append(
-            {
-                "id": path.stem,
-                "url": f"/cappa/img/viajeros-ta/{path.name}",
-                "local": f"img/viajeros-ta/{path.name}",
-                "source": "Traveler",
-            }
+    def add_from(folder: Path, url_prefix: str, local_prefix: str) -> None:
+        if not folder.exists():
+            return
+        files = sorted(
+            [
+                p
+                for p in folder.glob("*.webp")
+                if p.is_file() and p.name not in {"favicon-preview.webp"}
+            ],
+            key=lambda p: p.name,
         )
+        for path in files:
+            if path.name in seen:
+                continue
+            seen.add(path.name)
+            photos.append(
+                {
+                    "id": path.stem,
+                    "url": f"{url_prefix}/{path.name}",
+                    "local": f"{local_prefix}/{path.name}",
+                    "source": "Traveler",
+                }
+            )
+
+    add_from(UPLOADS_TA_DIR, "/uploads/viajeros-ta", "/uploads/viajeros-ta")
+    add_from(FRONTEND_TA_DIR, "/cappa/img/viajeros-ta", "img/viajeros-ta")
     return photos
 
 

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     database_url: str
     secret_key: str = "blackcat-dev-secret-change-me"
     access_token_expire_minutes: int = 60 * 12
+    contact_inbox_email: str = "reservas@blackcathostal.com"
     admin_email: str = "admin@blackcathostal.com"
     admin_password: str = "admin123"
     admin_full_name: str = "Administrator"
@@ -38,8 +39,9 @@ class Settings(BaseSettings):
     google_place_query: str = "Black Cat Hostal Boutique Compañía de Jesús 1921 Santiago Chile"
     google_reviews_cache_seconds: int = 1800
     google_photos_url: str = (
-        "https://www.google.com/travel/search?q=black%20cat%20hostal"
-        "&hl=es-419&gl=cl&ap=MAC6AQZwaG90b3M"
+        "https://www.google.com/maps/place/HOSTAL+BOUTIQUE+BLACK+CAT/"
+        "@-33.4397308,-70.6637911,17z/data=!4m9!3m8!1s0x9662c5b8477cf75b:0x9bc2ca30f81b6eff"
+        "!5m2!4m1!1i2!8m2!3d-33.4397308!4d-70.6637911!16s%2Fg%2F11h190x96c"
     )
     google_photos_cache_seconds: int = 1800
     tripadvisor_location_url: str = (
@@ -55,6 +57,23 @@ class Settings(BaseSettings):
     tripadvisor_api_key: str = ""
     tripadvisor_reviews_cache_seconds: int = 1800
     tripadvisor_photos_cache_seconds: int = 1800
+    public_site_url: str = "https://blackcathostal.com"
+    reddit_client_id: str = ""
+    reddit_client_secret: str = ""
+    reddit_username: str = ""
+    reddit_password: str = ""
+    reddit_user_agent: str = "BlackCatHostalAdmin/1.0 (by /u/BlackCatHostal)"
+    reddit_default_subreddit: str = "Chile"
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_redirect_uri: str = "http://127.0.0.1:9456/api/instagram/callback"
+    instagram_admin_redirect: str = "http://localhost:5174/communications/instagram"
+    meta_webhook_verify_token: str = "blackcat-ig-verify"
+    graph_api_version: str = "v21.0"
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    instagram_auto_reply_enabled: bool = True
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

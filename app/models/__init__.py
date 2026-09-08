@@ -1,6 +1,7 @@
 from app.models.campaigns import Campaigns
 from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
+from app.models.hostel_info import CommonAnswers, HostelInfo
 from app.models.mail_accounts import MailAccounts
 from app.models.medias import Medias
 from app.models.posts import Posts
@@ -22,4 +23,6 @@ __all__ = [
     "Campaigns",
     "Services",
     "Rooms",
+    "HostelInfo",
+    "CommonAnswers",
 ]

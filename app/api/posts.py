@@ -2,6 +2,7 @@ import re
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -11,10 +12,27 @@ from app.models.posts import Posts
 from app.models.users import Users
 from app.schemas.post import PostsCreate, PostsOut, PostsUpdate
 from app.services.images import save_upload_as_webp
+from app.services.reddit_publisher import (
+    RedditConfigError,
+    RedditPublishError,
+    build_default_text,
+    build_post_url,
+    reddit_status,
+    submit_post,
+)
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+class RedditPublishBody(BaseModel):
+    subreddit: str = Field(default="", max_length=80)
+    title: str | None = Field(default=None, max_length=300)
+    kind: str = Field(default="link", description="link | self")
+    text: str | None = None
+    nsfw: bool = False
+    send_replies: bool = True
 
 
 def slugify(value: str) -> str:
@@ -49,6 +67,11 @@ def list_posts(active_only: bool = False, db: Session = Depends(get_db)) -> list
     if active_only:
         query = query.filter(Posts.is_active.is_(True))
     return query.order_by(Posts.published_at.desc(), Posts.sort_order.asc(), Posts.id.desc()).all()
+
+
+@router.get("/reddit/status")
+def get_reddit_status(_: Users = Depends(get_current_user)) -> dict:
+    return reddit_status()
 
 
 @router.get("/by-slug/{slug}", response_model=PostsOut)
@@ -144,3 +167,51 @@ async def upload_post_image(
     db.commit()
     db.refresh(post)
     return post
+
+
+@router.post("/{post_id}/reddit")
+async def publish_post_to_reddit(
+    post_id: int,
+    payload: RedditPublishBody,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> dict:
+    post = db.query(Posts).filter(Posts.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+    if not post.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="El artículo está en borrador. Actívalo antes de publicarlo en Reddit.",
+        )
+
+    article_url = build_post_url(post.slug)
+    title = (payload.title or post.title or "").strip()
+    subreddit = (payload.subreddit or settings.reddit_default_subreddit or "Chile").strip()
+    kind = (payload.kind or "link").strip().lower()
+    text = (payload.text or "").strip()
+    if kind == "self" and not text:
+        text = build_default_text(title=title, excerpt=post.excerpt or "", url=article_url)
+
+    try:
+        result = await submit_post(
+            subreddit=subreddit,
+            title=title,
+            kind=kind,
+            text=text,
+            url=article_url,
+            nsfw=payload.nsfw,
+            send_replies=payload.send_replies,
+        )
+    except RedditConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RedditPublishError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        **result,
+        "post_id": post.id,
+        "article_url": article_url,
+        "preview_title": title,
+        "preview_text": text if kind == "self" else None,
+    }

@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
+from app.models.hostel_info import CommonAnswers
 from app.models.medias import Medias
 from app.models.posts import Posts
 from app.models.roles import Roles
@@ -13,6 +14,7 @@ from app.models.rooms import Rooms
 from app.models.services import Services
 from app.models.sliders import Sliders
 from app.models.users import Users
+from app.services.instagram_knowledge import get_or_create_hostel_info
 from app.services.sync_sliders import sync_frontend_sliders
 
 DEFAULT_SLIDERS = [
@@ -118,11 +120,133 @@ DEFAULT_SERVICES = [
 ]
 
 DEFAULT_ROOMS = [
-    {"name": "Habitación Individual", "type": "Individual", "capacity": 1, "price": 35000, "status": "Disponible"},
-    {"name": "Habitación Doble", "type": "Doble", "capacity": 2, "price": 48000, "status": "Disponible"},
-    {"name": "Habitación Triple", "type": "Triple", "capacity": 3, "price": 62000, "status": "Ocupada"},
-    {"name": "Suite Boutique", "type": "Suite", "capacity": 2, "price": 79000, "status": "Disponible"},
-    {"name": "Habitación Familiar", "type": "Familiar", "capacity": 4, "price": 89000, "status": "Mantenimiento"},
+    {
+        "name": "Single Room",
+        "type": "Individual",
+        "capacity": 1,
+        "price": 35000,
+        "status": "Disponible",
+        "features": "Single bed, private bathroom, Wi-Fi, heating, continental breakfast included.",
+    },
+    {
+        "name": "Double Room",
+        "type": "Doble",
+        "capacity": 2,
+        "price": 48000,
+        "status": "Disponible",
+        "features": "Queen/double bed, private bathroom, Wi-Fi, heating, continental breakfast included.",
+    },
+    {
+        "name": "Triple Room",
+        "type": "Triple",
+        "capacity": 3,
+        "price": 62000,
+        "status": "Ocupada",
+        "features": "Twin/triple setup, private bathroom, Wi-Fi, heating, continental breakfast included.",
+    },
+    {
+        "name": "Boutique Suite",
+        "type": "Suite",
+        "capacity": 2,
+        "price": 79000,
+        "status": "Disponible",
+        "features": "Superior king bed, higher comfort, private bathroom, Wi-Fi, heating, continental breakfast included.",
+    },
+    {
+        "name": "Family Room",
+        "type": "Familiar",
+        "capacity": 4,
+        "price": 89000,
+        "status": "Mantenimiento",
+        "features": "Family/shared layout, multiple beds or bunks, private bathroom, Wi-Fi, heating, breakfast included.",
+    },
+]
+
+DEFAULT_COMMON_ANSWERS = [
+    {
+        "topic": "prices",
+        "keywords": "price,precio,cuanto,cuánto,rate,tarifa,cost,habitacion,habitación,room",
+        "question": "How much does a room cost?",
+        "answer_guide": "Call search_rooms and share from-prices in CLP by room type. Say rates are referential and may vary by season. Invite WhatsApp for exact dates.",
+        "sort_order": 1,
+    },
+    {
+        "topic": "checkin",
+        "keywords": "arrival,llegada,check-in,checkin,entrada",
+        "question": "What time is check-in?",
+        "answer_guide": "Use get_hostel_info.check_in_time. Mention arrival instructions are sent before check-in.",
+        "sort_order": 2,
+    },
+    {
+        "topic": "checkout",
+        "keywords": "departure,salida,check-out,checkout,mediodia,noon",
+        "question": "What time is check-out?",
+        "answer_guide": "Use check_out_time. Late check-out subject to availability; ask them to message WhatsApp.",
+        "sort_order": 3,
+    },
+    {
+        "topic": "breakfast",
+        "keywords": "breakfast,desayuno,included,incluido,horario desayuno",
+        "question": "Is breakfast included? What are the hours?",
+        "answer_guide": "Yes, continental breakfast included. Hours from breakfast_hours in hostel info.",
+        "sort_order": 4,
+    },
+    {
+        "topic": "parking",
+        "keywords": "parking,estacionamiento,auto,car,parqueo",
+        "question": "Do you have parking?",
+        "answer_guide": "Use has_parking and parking_notes. Do not invent space availability.",
+        "sort_order": 5,
+    },
+    {
+        "topic": "whatsapp",
+        "keywords": "whatsapp,wsp,contact,contacto,reservar,book",
+        "question": "How can I contact you / WhatsApp?",
+        "answer_guide": "Share whatsapp_url and email from get_hostel_info.",
+        "sort_order": 6,
+    },
+    {
+        "topic": "location",
+        "keywords": "where,donde,dónde,location,ubicacion,address,dirección,barrio brasil",
+        "question": "Where are you located?",
+        "answer_guide": "Share address and Barrio Brasil, Santiago. Offer WhatsApp for arrival help.",
+        "sort_order": 7,
+    },
+    {
+        "topic": "wifi",
+        "keywords": "wifi,wi-fi,internet",
+        "question": "Do you have Wi-Fi?",
+        "answer_guide": "Yes, fiber Wi-Fi in rooms and common areas.",
+        "sort_order": 8,
+    },
+    {
+        "topic": "groups",
+        "keywords": "group,grupo,crew,equipo,productora,corporate,corporativo",
+        "question": "Can you host groups / production crews?",
+        "answer_guide": "Yes, we work with groups and corporate stays. Ask for dates and headcount via WhatsApp to quote.",
+        "sort_order": 9,
+    },
+    {
+        "topic": "children",
+        "keywords": "children,kids,niños,ninos,family,familia,edades",
+        "question": "Until what age are guests considered children?",
+        "answer_guide": "Under 12 years old. Ask ages when booking to assign the best room.",
+        "sort_order": 10,
+    },
+    {
+        "topic": "cancellation",
+        "keywords": "cancel,cancelar,cancellation,cancelación,refund,reembolso",
+        "question": "Can I cancel my booking?",
+        "answer_guide": "Depends on booking terms. Escalate or ask them to write WhatsApp/email with booking code.",
+        "sort_order": 11,
+    },
+    {
+        "topic": "availability",
+        "keywords": "available,disponible,availability,disponibilidad,dates,fechas",
+        "question": "Do you have availability for these dates?",
+        "answer_guide": "Do not confirm exact inventory on Instagram. Ask for dates via WhatsApp for human review.",
+        "sort_order": 12,
+    },
 ]
 
 
@@ -204,5 +328,21 @@ def seed_database(db: Session) -> None:
     if db.query(Rooms).count() == 0:
         for item in DEFAULT_ROOMS:
             db.add(Rooms(**item))
+    else:
+        # Backfill empty features on existing rooms once.
+        for room in db.query(Rooms).all():
+            if not (getattr(room, "features", None) or "").strip():
+                match = next(
+                    (r for r in DEFAULT_ROOMS if r["type"] == room.type),
+                    None,
+                )
+                if match:
+                    room.features = match["features"]
+
+    get_or_create_hostel_info(db)
+
+    if db.query(CommonAnswers).count() == 0:
+        for item in DEFAULT_COMMON_ANSWERS:
+            db.add(CommonAnswers(**item, is_active=True))
 
     db.commit()

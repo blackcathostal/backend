@@ -21,6 +21,7 @@ from app.models import (  # noqa: F401
     Sliders,
     Users,
 )
+from app.models.hostel_info import CommonAnswers, HostelInfo  # noqa: F401
 from app.services.seed import seed_database
 
 
@@ -55,6 +56,20 @@ def _ensure_schema_patches() -> None:
                     ADD CONSTRAINT fk_contacts_group_id
                     FOREIGN KEY (group_id) REFERENCES contact_groups(id)
                     ON DELETE SET NULL
+                    """
+                )
+            )
+        if not column_exists("rooms", "features"):
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN features TEXT NULL"))
+        if column_exists("rooms", "caracteristicas") and column_exists("rooms", "features"):
+            conn.execute(
+                text(
+                    """
+                    UPDATE rooms
+                    SET features = caracteristicas
+                    WHERE (features IS NULL OR features = '')
+                      AND caracteristicas IS NOT NULL
+                      AND caracteristicas <> ''
                     """
                 )
             )
