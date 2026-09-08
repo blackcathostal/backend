@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from sqlalchemy import inspect, text
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.database import Base, SessionLocal, engine
 from app.main import _ensure_schema_patches
 from app.models import (  # noqa: F401
+    AiGenerationRuns,
+    AiSources,
+    AiUsage,
     Campaigns,
     ContactGroups,
     Contacts,
@@ -68,6 +76,15 @@ def main() -> None:
             ("hostel_info", "breakfast_hours"),
             ("hostel_info", "has_parking"),
             ("common_answers", "answer_guide"),
+            ("posts", "keywords"),
+            ("posts", "image_source_url"),
+            ("ai_usage", "api_requests"),
+            ("ai_usage", "platform_cost_usd"),
+            ("ai_usage", "platform_balance_usd"),
+            ("ai_generation_runs", "generated_title"),
+            ("ai_generation_runs", "generated_excerpt"),
+            ("ai_generation_runs", "generated_keywords"),
+            ("ai_generation_runs", "generated_body"),
         ]
         for table, column in checks:
             exists = conn.execute(

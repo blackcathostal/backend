@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api import (
+    ai,
     auth,
     campaigns,
     contact_groups,
@@ -11,6 +12,7 @@ from app.api import (
     items,
     mail_accounts,
     media,
+    places,
     posts,
     reviews,
     rooms,
@@ -19,6 +21,7 @@ from app.api import (
 )
 
 api_router = APIRouter()
+api_router.include_router(ai.router)
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(sliders.router)
@@ -32,4 +35,6 @@ api_router.include_router(services.router)
 api_router.include_router(rooms.router)
 api_router.include_router(items.router)
 api_router.include_router(reviews.router)
+api_router.include_router(places.router)
+api_router.include_router(inquiries.router)
 api_router.include_router(instagram.router)

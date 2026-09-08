@@ -44,6 +44,33 @@ class Settings(BaseSettings):
         "!5m2!4m1!1i2!8m2!3d-33.4397308!4d-70.6637911!16s%2Fg%2F11h190x96c"
     )
     google_photos_cache_seconds: int = 1800
+    sernatur_attractions_api_url: str = (
+        "https://ideserver.sma.gob.cl/arcgis/rest/services/IDE/Otros/MapServer/0/query"
+    )
+    sernatur_network_api_url: str = (
+        "https://services1.arcgis.com/PRbPsCbRWXrN5OXD/ArcGIS/rest/services/"
+        "Red_de_Turismo_SERNATUR_Chile/FeatureServer/1/query"
+    )
+    chile_open_data_api_url: str = "https://datos.gob.cl/api/3/action/package_search"
+    chile_open_data_query: str = "turismo OR cultura OR eventos"
+    ticketmaster_events_api_url: str = (
+        "https://app.ticketmaster.com/discovery/v2/events.json"
+    )
+    ticketmaster_api_key: str = ""
+    bandsintown_api_url: str = "https://rest.bandsintown.com"
+    bandsintown_app_id: str = ""
+    bandsintown_artists: list[str] = []
+    songkick_events_api_url: str = "https://api.songkick.com/api/3.0/events.json"
+    songkick_api_key: str = ""
+    songkick_location: str = "geo:-33.4489,-70.6693"
+    openstreetmap_overpass_api_url: str = "https://overpass-api.de/api/interpreter"
+    open_meteo_api_url: str = "https://api.open-meteo.com/v1/forecast"
+    ai_api_city: str = "Santiago"
+    ai_api_latitude: float = -33.4489
+    ai_api_longitude: float = -70.6693
+    ai_api_radius_meters: int = 25_000
+    ai_api_max_records: int = 20
+    ai_api_max_artists: int = 5
     tripadvisor_location_url: str = (
         "https://www.tripadvisor.cl/Hotel_Review-g294305-d18941046-Reviews-"
         "Hostal_Boutique_Black_Cat-Santiago_Santiago_Metropolitan_Region.html"
@@ -70,10 +97,29 @@ class Settings(BaseSettings):
     instagram_admin_redirect: str = "http://localhost:5174/communications/instagram"
     meta_webhook_verify_token: str = "blackcat-ig-verify"
     graph_api_version: str = "v21.0"
-    deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-chat"
-    deepseek_base_url: str = "https://api.deepseek.com"
     instagram_auto_reply_enabled: bool = True
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_timeout_seconds: float = 45.0
+    deepseek_max_input_tokens: int = 8000
+    deepseek_max_output_tokens: int = 3000
+    deepseek_article_max_words: int = 700
+    deepseek_daily_budget_usd: float = 5.0
+    deepseek_max_sources: int = 6
+    deepseek_source_char_limit: int = 4000
+    deepseek_source_timeout_seconds: float = 15.0
+    deepseek_source_max_bytes: int = 1_000_000
+    deepseek_image_max_bytes: int = 3_000_000
+    image_search_api_url: str = "https://commons.wikimedia.org/w/api.php"
+    ai_image_min_year: int = 2018
+    deepseek_pricing_mode: str = "peak"
+    deepseek_cache_hit_price_per_million: float = 0.014
+    deepseek_cache_miss_price_per_million: float = 0.44
+    deepseek_output_price_per_million: float = 1.32
+    deepseek_offpeak_cache_hit_price_per_million: float = 0.007
+    deepseek_offpeak_cache_miss_price_per_million: float = 0.22
+    deepseek_offpeak_output_price_per_million: float = 0.66
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

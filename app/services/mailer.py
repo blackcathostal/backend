@@ -217,12 +217,15 @@ def _build_message(
     to_email: str,
     subject: str,
     html_body: str,
+    reply_to: str = "",
     attachments: list[dict[str, Any]] | None = None,
 ) -> MIMEMultipart:
     message = MIMEMultipart("mixed")
     message["Subject"] = subject or "(sin asunto)"
     message["From"] = formataddr((account.name or "", account.email))
     message["To"] = to_email
+    if reply_to:
+        message["Reply-To"] = reply_to
 
     final_html = _append_signature(html_body, getattr(account, "signature", None))
     html_with_cids, inline_parts = _embed_inline_images(final_html)
@@ -285,6 +288,7 @@ def send_html_email(
     to_email: str,
     subject: str,
     html_body: str,
+    reply_to: str = "",
     attachments: list[dict[str, Any]] | None = None,
     smtp: smtplib.SMTP | smtplib.SMTP_SSL | None = None,
 ) -> None:
@@ -297,6 +301,7 @@ def send_html_email(
         to_email=to_email,
         subject=subject,
         html_body=html_body,
+        reply_to=reply_to,
         attachments=attachments,
     )
 

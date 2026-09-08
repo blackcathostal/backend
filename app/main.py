@@ -1,14 +1,19 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from app.api import api_router
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.models import (  # noqa: F401
+    AiGenerationRuns,
+    AiSources,
+    AiUsage,
     Campaigns,
     ContactGroups,
     Contacts,
@@ -22,7 +27,10 @@ from app.models import (  # noqa: F401
     Users,
 )
 from app.models.hostel_info import CommonAnswers, HostelInfo  # noqa: F401
+from app.services.mcp_sources import protected_mcp_app
 from app.services.seed import seed_database
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_schema_patches() -> None:
@@ -73,17 +81,61 @@ def _ensure_schema_patches() -> None:
                     """
                 )
             )
+        if not column_exists("posts", "keywords"):
+            conn.execute(
+                text("ALTER TABLE posts ADD COLUMN keywords VARCHAR(500) NOT NULL DEFAULT ''")
+            )
+        if not column_exists("posts", "image_source_url"):
+            conn.execute(
+                text(
+                    "ALTER TABLE posts ADD COLUMN image_source_url VARCHAR(500) "
+                    "NOT NULL DEFAULT ''"
+                )
+            )
+        if not column_exists("ai_usage", "api_requests"):
+            conn.execute(
+                text(
+                    "ALTER TABLE ai_usage ADD COLUMN api_requests INT NOT NULL DEFAULT 1"
+                )
+            )
+        if not column_exists("ai_usage", "platform_cost_usd"):
+            conn.execute(
+                text("ALTER TABLE ai_usage ADD COLUMN platform_cost_usd FLOAT NULL")
+            )
+        if not column_exists("ai_usage", "platform_balance_usd"):
+            conn.execute(
+                text("ALTER TABLE ai_usage ADD COLUMN platform_balance_usd FLOAT NULL")
+            )
+        if not column_exists("ai_generation_runs", "generated_title"):
+            conn.execute(
+                text("ALTER TABLE ai_generation_runs ADD COLUMN generated_title VARCHAR(220) NULL")
+            )
+        if not column_exists("ai_generation_runs", "generated_excerpt"):
+            conn.execute(
+                text("ALTER TABLE ai_generation_runs ADD COLUMN generated_excerpt TEXT NULL")
+            )
+        if not column_exists("ai_generation_runs", "generated_keywords"):
+            conn.execute(
+                text("ALTER TABLE ai_generation_runs ADD COLUMN generated_keywords VARCHAR(500) NULL")
+            )
+        if not column_exists("ai_generation_runs", "generated_body"):
+            conn.execute(
+                text("ALTER TABLE ai_generation_runs ADD COLUMN generated_body TEXT NULL")
+            )
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    _ensure_schema_patches()
-    db = SessionLocal()
     try:
-        seed_database(db)
-    finally:
-        db.close()
+        Base.metadata.create_all(bind=engine)
+        _ensure_schema_patches()
+        db = SessionLocal()
+        try:
+            seed_database(db)
+        finally:
+            db.close()
+    except OperationalError:
+        logger.warning("Database unavailable at startup; API will run without MySQL.")
     yield
 
 
@@ -99,6 +151,7 @@ app.add_middleware(
 
 app.include_router(api_router, prefix=settings.api_prefix)
 app.mount("/uploads", StaticFiles(directory=str(settings.uploads_dir)), name="uploads")
+app.mount("/mcp", protected_mcp_app())
 
 
 @app.get("/")

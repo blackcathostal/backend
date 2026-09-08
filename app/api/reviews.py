@@ -23,8 +23,11 @@ class GooglePhotoImportBody(BaseModel):
 
 
 @router.get("/google")
-async def google_reviews(force: bool = Query(False, description="Bypass cache and refresh from Google")):
-    return await get_google_reviews(force=force)
+async def google_reviews(
+    force: bool = Query(False, description="Bypass cache and refresh from Google"),
+    locale: str = Query("es", description="Review language: es, en or pt"),
+):
+    return await get_google_reviews(force=force, locale=locale)
 
 
 @router.get("/google/photos")
