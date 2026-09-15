@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.services.review_recency import filter_recent_reviews, parse_review_timestamp
 
 CACHE_FILE = settings.uploads_dir / "cache" / "google_reviews.json"
 CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -81,23 +82,11 @@ FALLBACK_REVIEWS = [
         "profile_photo_url": "",
         "author_url": "",
     },
-    {
-        "author_name": "Valentina Núñez",
-        "rating": 5,
-        "text": (
-            "Experiencia muy linda, lugar bonito y con muy buena ubicación. Habitación cómoda y "
-            "bien equipada, atención excelente y desayuno rico y variado."
-        ),
-        "time": int(time.time()) - 86400 * 40,
-        "relative_time_description": "hace 1 mes",
-        "profile_photo_url": "",
-        "author_url": "",
-    },
 ]
 
 
 def _fallback_payload(source: str = "fallback") -> dict[str, Any]:
-    reviews = sorted(FALLBACK_REVIEWS, key=lambda item: item["time"], reverse=True)
+    reviews = filter_recent_reviews(FALLBACK_REVIEWS)
     return {
         "name": "Black Cat Hostal",
         "rating": 4.9,
@@ -141,7 +130,7 @@ def _normalize_reviews(raw_reviews: list[dict[str, Any]]) -> list[dict[str, Any]
                 "author_name": item.get("author_name") or author_attribution.get("displayName") or "Huésped",
                 "rating": int(item.get("rating") or 5),
                 "text": text_value,
-                "time": int(item.get("time") or 0),
+                "time": parse_review_timestamp(item),
                 "relative_time_description": item.get("relative_time_description")
                 or item.get("relativePublishTimeDescription")
                 or "",
@@ -153,8 +142,7 @@ def _normalize_reviews(raw_reviews: list[dict[str, Any]]) -> list[dict[str, Any]
                 or "",
             }
         )
-    reviews.sort(key=lambda review: review.get("time") or 0, reverse=True)
-    return [review for review in reviews if review.get("text")]
+    return filter_recent_reviews([review for review in reviews if review.get("text")])
 
 
 async def _fetch_from_google(locale: str) -> dict[str, Any] | None:
@@ -191,15 +179,29 @@ async def _fetch_from_google(locale: str) -> dict[str, Any] | None:
         }
 
 
+def _with_recent_reviews(payload: dict[str, Any]) -> dict[str, Any]:
+    data = dict(payload)
+    recent = filter_recent_reviews(list(data.get("reviews") or []))
+    if not recent:
+        # Google often returns older samples with missing unix timestamps.
+        # Keep rating/totals from Google, but show curated reviews from the last month.
+        recent = filter_recent_reviews(FALLBACK_REVIEWS)
+        data["source"] = f"{data.get('source') or 'google'}+fallback_recent"
+        data["live"] = False
+    data["reviews"] = recent
+    return data
+
+
 async def get_google_reviews(force: bool = False, locale: str = "es") -> dict[str, Any]:
     if not force:
         cached = _read_cache(locale)
         if cached:
-            return cached
+            return _with_recent_reviews(cached)
 
     try:
         live = await _fetch_from_google(locale)
         if live and live.get("reviews"):
+            live = _with_recent_reviews(live)
             _write_cache(live, locale)
             return live
     except Exception:
@@ -214,7 +216,7 @@ async def get_google_reviews(force: bool = False, locale: str = "es") -> dict[st
         if stale:
             stale["live"] = False
             stale["source"] = "cache"
-            return stale
+            return _with_recent_reviews(stale)
 
     payload = _fallback_payload()
     _write_cache(payload, locale)

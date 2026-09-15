@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from app.core.config import settings
+from app.services.review_recency import filter_recent_reviews
 
 CACHE_FILE = settings.uploads_dir / "cache" / "tripadvisor_reviews.json"
 CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -54,37 +55,11 @@ FALLBACK_REVIEWS = [
         "profile_photo_url": "",
         "author_url": "",
     },
-    {
-        "author_name": "Javier C.",
-        "rating": 4,
-        "title": "Buena ubicación y diseño",
-        "text": (
-            "Nos gustó mucho el patio y el diseño del lugar. Buena relación calidad-precio "
-            "y cerca de cafés, museos y transporte."
-        ),
-        "time": int(time.time()) - 86400 * 33,
-        "relative_time_description": "hace 1 mes",
-        "profile_photo_url": "",
-        "author_url": "",
-    },
-    {
-        "author_name": "Ana Beatriz",
-        "rating": 5,
-        "title": "Volveremos",
-        "text": (
-            "Todo impecable: limpieza, atención y comodidad. El hostal tiene un estilo único "
-            "y te hace sentir como en casa."
-        ),
-        "time": int(time.time()) - 86400 * 47,
-        "relative_time_description": "hace 2 meses",
-        "profile_photo_url": "",
-        "author_url": "",
-    },
 ]
 
 
 def _fallback_payload(source: str = "fallback") -> dict[str, Any]:
-    reviews = sorted(FALLBACK_REVIEWS, key=lambda item: item["time"], reverse=True)
+    reviews = filter_recent_reviews(FALLBACK_REVIEWS)
     listing_url = settings.tripadvisor_location_url or DEFAULT_URL
     return {
         "name": "Hostal Boutique Black Cat",
@@ -117,15 +92,27 @@ def _write_cache(payload: dict[str, Any]) -> None:
     CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _with_recent_reviews(payload: dict[str, Any]) -> dict[str, Any]:
+    data = dict(payload)
+    recent = filter_recent_reviews(list(data.get("reviews") or []))
+    if not recent:
+        recent = filter_recent_reviews(FALLBACK_REVIEWS)
+        data["source"] = f"{data.get('source') or 'tripadvisor'}+fallback_recent"
+        data["live"] = False
+    data["reviews"] = recent
+    return data
+
+
 async def get_tripadvisor_reviews(force: bool = False) -> dict[str, Any]:
     """
     TripAdvisor Content API requires partner credentials.
     Until configured, serve curated fallback reviews with TripAdvisor branding/links.
+    Only reviews from the last month are returned.
     """
     if not force:
         cached = _read_cache()
         if cached:
-            return cached
+            return _with_recent_reviews(cached)
 
     # Optional: if a partner API key is ever added, fetch live data here.
     # For now always use branded fallback (newest first).

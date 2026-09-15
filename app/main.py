@@ -92,6 +92,18 @@ def _ensure_schema_patches() -> None:
                     "NOT NULL DEFAULT ''"
                 )
             )
+        if not column_exists("posts", "reddit_url"):
+            conn.execute(
+                text("ALTER TABLE posts ADD COLUMN reddit_url VARCHAR(500) NOT NULL DEFAULT ''")
+            )
+        if not column_exists("posts", "reddit_subreddit"):
+            conn.execute(
+                text(
+                    "ALTER TABLE posts ADD COLUMN reddit_subreddit VARCHAR(80) NOT NULL DEFAULT ''"
+                )
+            )
+        if not column_exists("posts", "reddit_published_at"):
+            conn.execute(text("ALTER TABLE posts ADD COLUMN reddit_published_at DATETIME NULL"))
         if not column_exists("ai_usage", "api_requests"):
             conn.execute(
                 text(

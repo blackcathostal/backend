@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     meta_app_id: str = ""
     meta_app_secret: str = ""
     meta_redirect_uri: str = "http://127.0.0.1:9456/api/instagram/callback"
-    instagram_admin_redirect: str = "http://localhost:5174/communications/instagram"
+    instagram_admin_redirect: str = "http://localhost:5174/settings/instagram-knowledge"
     meta_webhook_verify_token: str = "blackcat-ig-verify"
     graph_api_version: str = "v21.0"
     instagram_auto_reply_enabled: bool = True

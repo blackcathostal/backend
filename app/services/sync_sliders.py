@@ -42,24 +42,31 @@ FRONTEND_SLIDERS = [
 ]
 
 
-def _copy_slider_image(source: Path, sort_order: int) -> str | None:
+def _public_slider_url(source: Path, sort_order: int) -> str | None:
+    """Prefer stable public frontend assets; optionally mirror into uploads for local admin."""
     if not source.exists():
         return None
 
-    destination_dir = settings.uploads_dir / "sliders"
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"frontend-santiago-{sort_order}{source.suffix.lower()}"
-    destination = destination_dir / filename
-    copy2(source, destination)
-    return f"/uploads/sliders/{filename}"
+    # Public site serves these from Firebase; production API may not have /uploads/sliders.
+    public_url = f"/cappa/img/slider/santiago/{sort_order}{source.suffix.lower()}"
+
+    try:
+        destination_dir = settings.uploads_dir / "sliders"
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"frontend-santiago-{sort_order}{source.suffix.lower()}"
+        copy2(source, destination_dir / filename)
+    except OSError:
+        pass
+
+    return public_url
 
 
 def sync_frontend_sliders(db: Session) -> list[Sliders]:
-    """Copy existing frontend slider photos into uploads and upsert texts in DB."""
+    """Point sliders at public /cappa assets and upsert texts in DB."""
     synced: list[Sliders] = []
 
     for item in FRONTEND_SLIDERS:
-        image_url = _copy_slider_image(item["source"], item["sort_order"])
+        image_url = _public_slider_url(item["source"], item["sort_order"])
         if not image_url:
             continue
 

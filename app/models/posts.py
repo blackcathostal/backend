@@ -21,6 +21,9 @@ class Posts(Base):
     author: Mapped[str] = mapped_column(String(120), nullable=False, default="Black Cat Hostal")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reddit_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    reddit_subreddit: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    reddit_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

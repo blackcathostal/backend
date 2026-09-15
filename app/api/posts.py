@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -123,6 +124,9 @@ def update_post(
         # keep existing slug unless explicitly changed
         pass
 
+    if data.get("reddit_url") and not data.get("reddit_published_at"):
+        data["reddit_published_at"] = datetime.now(timezone.utc)
+
     for key, value in data.items():
         setattr(post, key, value)
 
@@ -208,10 +212,19 @@ async def publish_post_to_reddit(
     except RedditPublishError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    post.reddit_url = (result.get("url") or "").strip()
+    post.reddit_subreddit = result.get("subreddit") or subreddit
+    post.reddit_published_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(post)
+
     return {
         **result,
         "post_id": post.id,
         "article_url": article_url,
         "preview_title": title,
         "preview_text": text if kind == "self" else None,
+        "reddit_url": post.reddit_url,
+        "reddit_subreddit": post.reddit_subreddit,
+        "reddit_published_at": post.reddit_published_at.isoformat() if post.reddit_published_at else None,
     }

@@ -55,7 +55,7 @@ async def instagram_callback(
 ) -> RedirectResponse:
     admin = (
         (settings.instagram_admin_redirect or "").rstrip("/")
-        or "http://localhost:5174/communications/instagram"
+        or "http://localhost:5174/settings/instagram-knowledge"
     )
     if error:
         qs = urlencode({"connected": "0", "error": error_description or error})

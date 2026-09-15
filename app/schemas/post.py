@@ -35,11 +35,17 @@ class PostsUpdate(BaseModel):
     sort_order: int | None = None
     is_active: bool | None = None
     published_at: datetime | None = None
+    reddit_url: str | None = None
+    reddit_subreddit: str | None = None
+    reddit_published_at: datetime | None = None
 
 
 class PostsOut(PostsBase):
     id: int
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    reddit_url: str = ""
+    reddit_subreddit: str = ""
+    reddit_published_at: datetime | None = None
 
     model_config = {"from_attributes": True}

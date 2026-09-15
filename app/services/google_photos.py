@@ -79,7 +79,7 @@ def _local_photos() -> list[dict[str, Any]]:
             listed = json.loads(index.read_text(encoding="utf-8"))
         except Exception:
             listed = None
-        if isinstance(listed, list):
+        if isinstance(listed, list) and listed:
             for raw in listed:
                 name = Path(str(raw)).name
                 if not name.endswith(".webp") or name in seen:
@@ -109,7 +109,8 @@ def _local_photos() -> list[dict[str, Any]]:
                         "kind": "customer",
                     }
                 )
-            return photos
+            if photos:
+                return photos
 
     def add_from(folder: Path, url_prefix: str, local_prefix: str) -> None:
         if not folder.exists():
