@@ -25,9 +25,7 @@ INBOX_FILE = settings.uploads_dir / "cache" / "instagram_inbox.json"
 
 SCOPES = [
     "pages_show_list",
-    "pages_manage_metadata",
     "pages_read_engagement",
-    "pages_messaging",
     "instagram_basic",
     "instagram_manage_comments",
     "instagram_manage_messages",
