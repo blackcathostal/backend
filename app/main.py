@@ -143,6 +143,8 @@ def _ensure_schema_patches() -> None:
                     "ALTER TABLE visitor_events ADD COLUMN duration_seconds INT NOT NULL DEFAULT 0"
                 )
             )
+        if not column_exists("visitor_sessions", "ended_at"):
+            conn.execute(text("ALTER TABLE visitor_sessions ADD COLUMN ended_at DATETIME NULL"))
 
 
 @asynccontextmanager

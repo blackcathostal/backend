@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 SKIP_PREFIXES = ("/denuncias",)
 ALLOWED_TYPES = {"pageview", "click", "heartbeat", "pageleave"}
-LIVE_WINDOW = timedelta(minutes=2)
+LIVE_WINDOW = timedelta(seconds=45)
 _schema_ready = False
 
 
@@ -51,29 +51,35 @@ def ensure_analytics_schema() -> None:
         VisitorSessions.__table__.create(bind=engine, checkfirst=True)
         VisitorEvents.__table__.create(bind=engine, checkfirst=True)
         with engine.begin() as conn:
-            exists = conn.execute(
-                text(
-                    """
-                    SELECT COUNT(*)
-                    FROM information_schema.COLUMNS
-                    WHERE TABLE_SCHEMA = DATABASE()
-                      AND TABLE_NAME = 'visitor_events'
-                      AND COLUMN_NAME = 'duration_seconds'
-                    """
+
+            def column_exists(table_name: str, column_name: str) -> bool:
+                return bool(
+                    conn.execute(
+                        text(
+                            """
+                            SELECT COUNT(*)
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = :table_name
+                              AND COLUMN_NAME = :column_name
+                            """
+                        ),
+                        {"table_name": table_name, "column_name": column_name},
+                    ).scalar()
                 )
-            ).scalar()
-            if not exists:
+
+            if not column_exists("visitor_events", "duration_seconds"):
                 conn.execute(
                     text(
                         "ALTER TABLE visitor_events "
                         "ADD COLUMN duration_seconds INT NOT NULL DEFAULT 0"
                     )
                 )
+            if not column_exists("visitor_sessions", "ended_at"):
+                conn.execute(text("ALTER TABLE visitor_sessions ADD COLUMN ended_at DATETIME NULL"))
         _schema_ready = True
     except Exception:
         logger.exception("Could not ensure analytics schema")
-        # Still mark ready to avoid hammering a broken DB on every request;
-        # queries will surface the real error once.
         _schema_ready = True
 
 
@@ -151,18 +157,27 @@ def ingest_events(
     clicks = 0
     last_path = session.current_path
     rows: list[VisitorEvents] = []
+    marked_exit = False
+    still_active = False
 
     for item in usable[:80]:
         event_type = item.get("type") or ""
         path = _clip(item.get("path") or last_path or "/", 400) or "/"
         duration = max(0, min(int(item.get("duration_seconds") or 0), 86_400))
+        label = _clip(item.get("label") or "", 160)
         if event_type == "pageview":
             pageviews += 1
             last_path = path
+            still_active = True
         elif event_type == "click":
             clicks += 1
+            still_active = True
+        elif event_type == "heartbeat":
+            still_active = True
         elif event_type == "pageleave":
             last_path = path
+            if label == "exit":
+                marked_exit = True
         if event_type == "heartbeat":
             continue
         rows.append(
@@ -172,7 +187,7 @@ def ingest_events(
                 event_type=event_type,
                 path=path,
                 title=_clip(item.get("title") or "", 200),
-                label=_clip(item.get("label") or "", 160),
+                label=label,
                 href=_clip(item.get("href") or "", 500),
                 element=_clip(item.get("element") or "", 200),
                 x_pct=max(0.0, min(float(item.get("x_pct") or 0), 100.0)),
@@ -186,6 +201,10 @@ def ingest_events(
         db.add_all(rows)
 
     session.last_seen_at = now
+    if still_active:
+        session.ended_at = None
+    elif marked_exit:
+        session.ended_at = now
     started = _as_utc(session.started_at) or now
     wall_clock = max(0, int((now - started).total_seconds()))
     try:
@@ -237,7 +256,10 @@ def summary(db: Session, days: int = 7) -> dict:
         )
         live_now = (
             db.query(func.count(VisitorSessions.id))
-            .filter(VisitorSessions.last_seen_at >= live_cutoff)
+            .filter(
+                VisitorSessions.last_seen_at >= live_cutoff,
+                VisitorSessions.ended_at.is_(None),
+            )
             .scalar()
             or 0
         )
@@ -410,6 +432,7 @@ def list_sessions(
 def serialize_session(row: VisitorSessions) -> dict:
     live_cutoff = _now() - LIVE_WINDOW
     last_seen = _as_utc(row.last_seen_at)
+    ended = _as_utc(getattr(row, "ended_at", None))
     return {
         "id": row.id,
         "session_id": row.session_id,
@@ -427,7 +450,7 @@ def serialize_session(row: VisitorSessions) -> dict:
         "duration_seconds": row.duration_seconds,
         "started_at": row.started_at,
         "last_seen_at": row.last_seen_at,
-        "live": bool(last_seen and last_seen >= live_cutoff),
+        "live": bool(last_seen and last_seen >= live_cutoff and ended is None),
     }
 
 
