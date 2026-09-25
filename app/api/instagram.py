@@ -255,6 +255,39 @@ def remove_common_answer(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+class DeepSeekPromptBody(BaseModel):
+    prompt: str = Field(min_length=20, max_length=12000)
+
+
+@router.get("/deepseek-prompt")
+def get_deepseek_prompt(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    from app.services.deepseek_instagram import prompt_payload
+
+    return prompt_payload()
+
+
+@router.put("/deepseek-prompt")
+def put_deepseek_prompt(
+    body: DeepSeekPromptBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    from app.services.deepseek_instagram import prompt_payload, save_system_prompt
+
+    try:
+        save_system_prompt(body.prompt)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return prompt_payload()
+
+
+@router.delete("/deepseek-prompt")
+def restore_deepseek_prompt(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    from app.services.deepseek_instagram import prompt_payload, reset_system_prompt
+
+    reset_system_prompt()
+    return prompt_payload()
+
+
 @router.get("/webhook")
 def verify_webhook(request: Request) -> Any:
     params = request.query_params

@@ -27,14 +27,14 @@ def deepseek_configured() -> bool:
     return bool((settings.deepseek_api_key or "").strip())
 
 
-SYSTEM_PROMPT = """Eres un especialista en atención hotelera de Black Cat Hostal Boutique
-(Barrio Brasil, Santiago de Chile). Respondes comentarios y mensajes directos de Instagram.
+DEFAULT_SYSTEM_PROMPT = """Eres un especialista en atención hotelera de Black Cat Hostal Boutique
+(Barrio Brasil, Santiago de Chile). Respondes comentarios y mensajes de Instagram y Facebook.
 
 Estilo:
 - Redacta como un humano del sector hotelero: cercano, claro, profesional y natural.
 - Sin tono robótico. Frases cortas. Máximo 1 emoji si encaja.
 - Contesta SIEMPRE en el mismo idioma de la pregunta del huésped (español, inglés u otro).
-- Respuestas concisas para Instagram (máx. ~450 caracteres).
+- Respuestas concisas para redes sociales (máx. ~450 caracteres).
 
 Datos (OBLIGATORIO):
 - Precios, tipos o características de habitación → llama search_rooms.
@@ -50,6 +50,50 @@ Cuando ya tengas la información, responde ÚNICAMENTE con JSON válido (sin mar
 {"action":"reply"|"escalate","message":"...","reason":"..."}
 - El campo message debe estar en el idioma de la pregunta del huésped.
 """
+
+SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
+PROMPT_FILE = settings.uploads_dir / "cache" / "deepseek_system_prompt.txt"
+
+
+def get_system_prompt() -> str:
+    try:
+        if PROMPT_FILE.exists():
+            text = PROMPT_FILE.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+    except OSError:
+        pass
+    return DEFAULT_SYSTEM_PROMPT
+
+
+def prompt_is_custom() -> bool:
+    try:
+        return PROMPT_FILE.exists() and bool(PROMPT_FILE.read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
+
+
+def save_system_prompt(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise ValueError("El prompt no puede estar vacío")
+    PROMPT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PROMPT_FILE.write_text(cleaned + "\n", encoding="utf-8")
+    return cleaned
+
+
+def reset_system_prompt() -> str:
+    if PROMPT_FILE.exists():
+        PROMPT_FILE.unlink()
+    return DEFAULT_SYSTEM_PROMPT
+
+
+def prompt_payload() -> dict[str, Any]:
+    return {
+        "prompt": get_system_prompt(),
+        "default_prompt": DEFAULT_SYSTEM_PROMPT,
+        "is_custom": prompt_is_custom(),
+    }
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -106,7 +150,7 @@ async def generate_instagram_reply(
     )
 
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": get_system_prompt()},
         {"role": "user", "content": user_content},
     ]
 

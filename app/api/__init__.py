@@ -9,6 +9,7 @@ from app.api import (
     contacts,
     health,
     inquiries,
+    facebook,
     instagram,
     items,
     mail_accounts,
@@ -40,3 +41,4 @@ api_router.include_router(reviews.router)
 api_router.include_router(places.router)
 api_router.include_router(inquiries.router)
 api_router.include_router(instagram.router)
+api_router.include_router(facebook.router)
