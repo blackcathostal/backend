@@ -17,6 +17,7 @@ from app.models import (  # noqa: F401
     Campaigns,
     Complaints,
     ContactGroups,
+    ContactInquiries,
     Contacts,
     MailAccounts,
     Medias,
@@ -145,7 +146,17 @@ def _ensure_schema_patches() -> None:
             )
         if not column_exists("visitor_sessions", "ended_at"):
             conn.execute(text("ALTER TABLE visitor_sessions ADD COLUMN ended_at DATETIME NULL"))
-
+        if not column_exists("complaints", "data_consent"):
+            conn.execute(
+                text(
+                    "ALTER TABLE complaints ADD COLUMN data_consent TINYINT(1) "
+                    "NOT NULL DEFAULT 0"
+                )
+            )
+        if not column_exists("complaints", "data_consent_accepted_at"):
+            conn.execute(
+                text("ALTER TABLE complaints ADD COLUMN data_consent_accepted_at DATETIME NULL")
+            )
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

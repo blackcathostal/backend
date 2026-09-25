@@ -113,6 +113,8 @@ def serialize(row: Complaints, *, include_whatsapp: bool = False) -> dict[str, A
         "phone": row.phone or "",
         "document_type": "" if row.is_anonymous else (row.document_type or ""),
         "document_number": "" if row.is_anonymous else (row.document_number or ""),
+        "data_consent": bool(row.data_consent),
+        "data_consent_accepted_at": row.data_consent_accepted_at,
         "status": row.status,
         "status_label": status_label(row.status),
         "investigator_name": row.investigator_name or "",
@@ -185,7 +187,13 @@ def officer_email_html(row: Complaints) -> str:
     <strong>Denunciante:</strong> {who}<br />
     <strong>Persona denunciada:</strong> {accused}<br />
     <strong>Dónde:</strong> {escape(row.location or "—")}<br />
-    <strong>Cuándo:</strong> {escape(row.happened_at or "—")}</p>
+    <strong>Cuándo:</strong> {escape(row.happened_at or "—")}<br />
+    <strong>Autorización de datos:</strong> {"Sí" if row.data_consent else "No"}<br />
+    <strong>Aceptado el:</strong> {escape(
+        row.data_consent_accepted_at.astimezone().strftime("%d/%m/%Y %H:%M:%S")
+        if row.data_consent_accepted_at
+        else "—"
+    )}</p>
     <p><strong>Hechos:</strong><br />{desc}</p>
     """
 

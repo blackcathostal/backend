@@ -7,6 +7,7 @@ class ContactInquiryCreate(BaseModel):
     phone: str = Field(default="", max_length=40, pattern=r"^[0-9]*$")
     subject: str = Field(min_length=2, max_length=180)
     message: str = Field(min_length=5, max_length=5000)
+    data_consent: bool = False
     recaptcha_token: str = Field(default="", max_length=4000)
 
 

@@ -4,6 +4,7 @@ from app.models.ai_usage import AiUsage
 from app.models.campaigns import Campaigns
 from app.models.complaints import Complaints
 from app.models.contact_groups import ContactGroups
+from app.models.contact_inquiries import ContactInquiries
 from app.models.contacts import Contacts
 from app.models.hostel_info import CommonAnswers, HostelInfo
 from app.models.mail_accounts import MailAccounts
@@ -30,6 +31,7 @@ __all__ = [
     "MailAccounts",
     "Campaigns",
     "Complaints",
+    "ContactInquiries",
     "Services",
     "Rooms",
     "HostelInfo",

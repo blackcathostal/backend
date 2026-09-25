@@ -49,6 +49,8 @@ class ComplaintOut(BaseModel):
     phone: str = ""
     document_type: str = ""
     document_number: str = ""
+    data_consent: bool = False
+    data_consent_accepted_at: datetime | None = None
     status: str
     status_label: str = ""
     investigator_name: str = ""

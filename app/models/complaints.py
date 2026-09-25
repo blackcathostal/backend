@@ -26,6 +26,11 @@ class Complaints(Base):
     phone: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     document_type: Mapped[str] = mapped_column(String(20), nullable=False, default="")
     document_number: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    data_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    data_consent_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="received")
     investigator_name: Mapped[str] = mapped_column(String(160), nullable=False, default="")
     measures: Mapped[str] = mapped_column(Text, nullable=False, default="")

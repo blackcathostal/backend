@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
@@ -29,6 +31,12 @@ def _get_or_404(db: Session, complaint_id: int) -> Complaints:
     return row
 
 
+def _truthy(value: str | bool | None) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "si", "sí", "yes", "on"}
+
+
 @router.post("/", response_model=ComplaintSubmitOut, status_code=status.HTTP_201_CREATED)
 async def submit_complaint(
     request: Request,
@@ -46,12 +54,18 @@ async def submit_complaint(
     phone: str = Form(""),
     document_type: str = Form(""),
     document_number: str = Form(""),
+    data_consent: str = Form("false"),
     recaptcha_token: str = Form(""),
     files: list[UploadFile] | None = File(None),
     db: Session = Depends(get_db),
 ) -> ComplaintSubmitOut:
     verify_recaptcha(recaptcha_token, "complaint", client_ip(request))
-    anonymous = str(is_anonymous).strip().lower() in {"1", "true", "si", "sí", "yes"}
+    anonymous = _truthy(is_anonymous)
+    if not _truthy(data_consent):
+        raise HTTPException(
+            status_code=400,
+            detail="Debes autorizar el uso de tus datos personales.",
+        )
     if complaint_type not in COMPLAINT_TYPES:
         raise HTTPException(status_code=400, detail="Tipo de denuncia no válido")
     if relation not in RELATIONS:
@@ -71,6 +85,7 @@ async def submit_complaint(
     while db.query(Complaints).filter(Complaints.tracking_code == code).first():
         code = svc.new_tracking_code()
 
+    consent_at = datetime.now(timezone.utc)
     attachments = await svc.save_uploads(code, files)
     row = Complaints(
         tracking_code=code,
@@ -88,6 +103,8 @@ async def submit_complaint(
         phone=svc.normalize_phone(phone),
         document_type="" if anonymous else document_type.strip(),
         document_number="" if anonymous else document_number.strip(),
+        data_consent=True,
+        data_consent_accepted_at=consent_at,
         status="received",
         attachments=attachments,
         events=[],

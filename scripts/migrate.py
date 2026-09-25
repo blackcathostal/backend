@@ -16,7 +16,9 @@ from app.models import (  # noqa: F401
     AiSources,
     AiUsage,
     Campaigns,
+    Complaints,
     ContactGroups,
+    ContactInquiries,
     Contacts,
     CommonAnswers,
     HostelInfo,
@@ -90,6 +92,10 @@ def main() -> None:
             ("ai_generation_runs", "generated_excerpt"),
             ("ai_generation_runs", "generated_keywords"),
             ("ai_generation_runs", "generated_body"),
+            ("complaints", "data_consent"),
+            ("complaints", "data_consent_accepted_at"),
+            ("contact_inquiries", "data_consent"),
+            ("contact_inquiries", "data_consent_accepted_at"),
         ]
         for table, column in checks:
             exists = conn.execute(
