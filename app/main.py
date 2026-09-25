@@ -15,6 +15,7 @@ from app.models import (  # noqa: F401
     AiSources,
     AiUsage,
     Campaigns,
+    Complaints,
     ContactGroups,
     Contacts,
     MailAccounts,

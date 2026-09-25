@@ -4,6 +4,7 @@ from app.api import (
     ai,
     auth,
     campaigns,
+    complaints,
     contact_groups,
     contacts,
     health,
@@ -31,6 +32,7 @@ api_router.include_router(contact_groups.router)
 api_router.include_router(contacts.router)
 api_router.include_router(mail_accounts.router)
 api_router.include_router(campaigns.router)
+api_router.include_router(complaints.router)
 api_router.include_router(services.router)
 api_router.include_router(rooms.router)
 api_router.include_router(items.router)

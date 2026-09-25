@@ -29,11 +29,20 @@ class Settings(BaseSettings):
     secret_key: str = "blackcat-dev-secret-change-me"
     access_token_expire_minutes: int = 60 * 12
     contact_inbox_email: str = "reservas@blackcathostal.com"
+    complaint_inbox_email: str = "admin@blackcathostal.com"
     admin_email: str = "admin@blackcathostal.com"
     admin_password: str = "admin123"
     admin_full_name: str = "Administrator"
     admin_role_name: str = "admin"
     uploads_dir: Path = BASE_DIR / "uploads"
+    recaptcha_secret_key: str = ""
+    recaptcha_min_score: float = 0.5
+    recaptcha_allowed_hosts: list[str] = [
+        "localhost",
+        "127.0.0.1",
+        "blackcathostal.com",
+        "www.blackcathostal.com",
+    ]
     google_places_api_key: str = ""
     google_place_id: str = ""
     google_place_query: str = "Black Cat Hostal Boutique Compañía de Jesús 1921 Santiago Chile"
@@ -135,3 +144,4 @@ settings.uploads_dir.mkdir(parents=True, exist_ok=True)
 (settings.uploads_dir / "posts").mkdir(parents=True, exist_ok=True)
 (settings.uploads_dir / "campaigns").mkdir(parents=True, exist_ok=True)
 (settings.uploads_dir / "signatures").mkdir(parents=True, exist_ok=True)
+(settings.uploads_dir / "complaints").mkdir(parents=True, exist_ok=True)

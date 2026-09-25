@@ -2,6 +2,7 @@ from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_sources import AiSources
 from app.models.ai_usage import AiUsage
 from app.models.campaigns import Campaigns
+from app.models.complaints import Complaints
 from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
 from app.models.hostel_info import CommonAnswers, HostelInfo
@@ -27,6 +28,7 @@ __all__ = [
     "Contacts",
     "MailAccounts",
     "Campaigns",
+    "Complaints",
     "Services",
     "Rooms",
     "HostelInfo",

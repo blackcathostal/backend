@@ -1,6 +1,6 @@
 from html import escape
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.models.mail_accounts import MailAccounts
 from app.schemas.inquiries import ContactInquiryCreate, ContactInquiryOut
 from app.services.mailer import MailSendError, send_html_email
+from app.services.recaptcha import client_ip, verify_recaptcha
 
 router = APIRouter(prefix="/inquiries", tags=["inquiries"])
 
@@ -30,8 +31,11 @@ def _pick_mail_account(db: Session) -> MailAccounts | None:
 
 @router.post("/contact", response_model=ContactInquiryOut, status_code=status.HTTP_201_CREATED)
 def submit_contact_inquiry(
-    payload: ContactInquiryCreate, db: Session = Depends(get_db)
+    payload: ContactInquiryCreate,
+    request: Request,
+    db: Session = Depends(get_db),
 ) -> ContactInquiryOut:
+    verify_recaptcha(payload.recaptcha_token, "contact", client_ip(request))
     account = _pick_mail_account(db)
     if not account:
         raise HTTPException(
