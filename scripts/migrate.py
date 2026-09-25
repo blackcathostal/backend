@@ -28,6 +28,8 @@ from app.models import (  # noqa: F401
     Services,
     Sliders,
     Users,
+    VisitorEvents,
+    VisitorSessions,
 )
 from app.core.config import settings
 from app.services.seed import seed_database

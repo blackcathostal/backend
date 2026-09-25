@@ -26,6 +26,8 @@ from app.models import (  # noqa: F401
     Services,
     Sliders,
     Users,
+    VisitorEvents,
+    VisitorSessions,
 )
 from app.models.hostel_info import CommonAnswers, HostelInfo  # noqa: F401
 from app.services.mcp_sources import protected_mcp_app
@@ -134,6 +136,12 @@ def _ensure_schema_patches() -> None:
         if not column_exists("ai_generation_runs", "generated_body"):
             conn.execute(
                 text("ALTER TABLE ai_generation_runs ADD COLUMN generated_body TEXT NULL")
+            )
+        if not column_exists("visitor_events", "duration_seconds"):
+            conn.execute(
+                text(
+                    "ALTER TABLE visitor_events ADD COLUMN duration_seconds INT NOT NULL DEFAULT 0"
+                )
             )
 
 

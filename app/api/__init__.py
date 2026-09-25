@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api import (
     ai,
+    analytics,
     auth,
     campaigns,
     complaints,
@@ -42,3 +43,4 @@ api_router.include_router(places.router)
 api_router.include_router(inquiries.router)
 api_router.include_router(instagram.router)
 api_router.include_router(facebook.router)
+api_router.include_router(analytics.router)
