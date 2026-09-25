@@ -29,6 +29,7 @@ from app.models import (  # noqa: F401
     Rooms,
     Services,
     Sliders,
+    TermsAndConditions,
     Users,
     VisitorEvents,
     VisitorSessions,
@@ -96,6 +97,8 @@ def main() -> None:
             ("complaints", "data_consent_accepted_at"),
             ("contact_inquiries", "data_consent"),
             ("contact_inquiries", "data_consent_accepted_at"),
+            ("terms_and_conditions", "body_html"),
+            ("terms_and_conditions", "locale"),
         ]
         for table, column in checks:
             exists = conn.execute(

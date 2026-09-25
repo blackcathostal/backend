@@ -14,6 +14,7 @@ from app.models.roles import Roles
 from app.models.rooms import Rooms
 from app.models.services import Services
 from app.models.sliders import Sliders
+from app.models.terms import TermsAndConditions
 from app.models.users import Users
 from app.models.visitor_analytics import VisitorEvents, VisitorSessions
 
@@ -36,6 +37,7 @@ __all__ = [
     "Rooms",
     "HostelInfo",
     "CommonAnswers",
+    "TermsAndConditions",
     "VisitorSessions",
     "VisitorEvents",
 ]

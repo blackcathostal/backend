@@ -13,6 +13,7 @@ from app.models.sliders import Sliders
 from app.models.users import Users
 from app.services.instagram_knowledge import get_or_create_hostel_info
 from app.services.sync_sliders import sync_frontend_sliders
+from app.services.terms import ensure_default_terms
 
 DEFAULT_SLIDERS = [
     {
@@ -276,3 +277,4 @@ def seed_database(db: Session) -> None:
             db.add(CommonAnswers(**item, is_active=True))
 
     db.commit()
+    ensure_default_terms(db)

@@ -21,6 +21,7 @@ from app.api import (
     rooms,
     services,
     sliders,
+    terms,
 )
 
 api_router = APIRouter()
@@ -44,3 +45,4 @@ api_router.include_router(inquiries.router)
 api_router.include_router(instagram.router)
 api_router.include_router(facebook.router)
 api_router.include_router(analytics.router)
+api_router.include_router(terms.router)
