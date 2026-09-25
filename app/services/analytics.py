@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
+from sqlalchemy import func, text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
+from app.core.database import engine
 from app.models.visitor_analytics import VisitorEvents, VisitorSessions
 from app.services.geoip import (
     browser_from_ua,
@@ -15,17 +18,63 @@ from app.services.geoip import (
     lookup_geo,
 )
 
+logger = logging.getLogger(__name__)
+
 SKIP_PREFIXES = ("/denuncias",)
 ALLOWED_TYPES = {"pageview", "click", "heartbeat", "pageleave"}
 LIVE_WINDOW = timedelta(minutes=2)
+_schema_ready = False
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _clip(value: str, size: int) -> str:
     return (value or "").strip()[:size]
+
+
+def ensure_analytics_schema() -> None:
+    """Create analytics tables/columns if missing (safe to call often)."""
+    global _schema_ready
+    if _schema_ready:
+        return
+    try:
+        VisitorSessions.__table__.create(bind=engine, checkfirst=True)
+        VisitorEvents.__table__.create(bind=engine, checkfirst=True)
+        with engine.begin() as conn:
+            exists = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'visitor_events'
+                      AND COLUMN_NAME = 'duration_seconds'
+                    """
+                )
+            ).scalar()
+            if not exists:
+                conn.execute(
+                    text(
+                        "ALTER TABLE visitor_events "
+                        "ADD COLUMN duration_seconds INT NOT NULL DEFAULT 0"
+                    )
+                )
+        _schema_ready = True
+    except Exception:
+        logger.exception("Could not ensure analytics schema")
+        # Still mark ready to avoid hammering a broken DB on every request;
+        # queries will surface the real error once.
+        _schema_ready = True
 
 
 def should_skip_path(path: str) -> bool:
@@ -137,16 +186,21 @@ def ingest_events(
         db.add_all(rows)
 
     session.last_seen_at = now
-    wall_clock = max(0, int((now - (session.started_at or now)).total_seconds()))
-    page_time = (
-        db.query(func.coalesce(func.sum(VisitorEvents.duration_seconds), 0))
-        .filter(
-            VisitorEvents.session_id == session_id,
-            VisitorEvents.event_type == "pageleave",
+    started = _as_utc(session.started_at) or now
+    wall_clock = max(0, int((now - started).total_seconds()))
+    try:
+        page_time = (
+            db.query(func.coalesce(func.sum(VisitorEvents.duration_seconds), 0))
+            .filter(
+                VisitorEvents.session_id == session_id,
+                VisitorEvents.event_type == "pageleave",
+            )
+            .scalar()
+            or 0
         )
-        .scalar()
-        or 0
-    )
+    except (OperationalError, ProgrammingError):
+        db.rollback()
+        page_time = 0
     session.duration_seconds = max(wall_clock, int(page_time), int(session.duration_seconds or 0))
     session.page_count = int(session.page_count or 0) + pageviews
     session.click_count = int(session.click_count or 0) + clicks
@@ -170,22 +224,58 @@ def _avg_duration(rows: list[VisitorSessions]) -> int:
 
 
 def summary(db: Session, days: int = 7) -> dict:
+    ensure_analytics_schema()
     since = _since(days)
     start_today = _now().replace(hour=0, minute=0, second=0, microsecond=0)
     live_cutoff = _now() - LIVE_WINDOW
 
-    period = (
-        db.query(VisitorSessions)
-        .filter(VisitorSessions.started_at >= since)
-        .all()
-    )
-    today = [row for row in period if (row.started_at or since) >= start_today]
-    live_now = (
-        db.query(func.count(VisitorSessions.id))
-        .filter(VisitorSessions.last_seen_at >= live_cutoff)
-        .scalar()
-        or 0
-    )
+    try:
+        period = (
+            db.query(VisitorSessions)
+            .filter(VisitorSessions.started_at >= since)
+            .all()
+        )
+        live_now = (
+            db.query(func.count(VisitorSessions.id))
+            .filter(VisitorSessions.last_seen_at >= live_cutoff)
+            .scalar()
+            or 0
+        )
+        page_rows = (
+            db.query(
+                VisitorEvents.path,
+                VisitorEvents.event_type,
+                VisitorEvents.visitor_id,
+                VisitorEvents.duration_seconds,
+            )
+            .filter(
+                VisitorEvents.created_at >= since,
+                VisitorEvents.event_type.in_(("pageview", "click", "pageleave")),
+            )
+            .all()
+        )
+    except (OperationalError, ProgrammingError):
+        logger.exception("Analytics summary query failed")
+        db.rollback()
+        return {
+            "live_now": 0,
+            "visits_today": 0,
+            "unique_today": 0,
+            "visits_period": 0,
+            "unique_period": 0,
+            "avg_duration": 0,
+            "clicks_period": 0,
+            "countries": [],
+            "pages": [],
+            "devices": [],
+            "referrers": [],
+        }
+
+    today = [
+        row
+        for row in period
+        if (_as_utc(row.started_at) or since) >= start_today
+    ]
 
     countries_map: dict[str, dict] = {}
     pages_map: dict[str, dict] = defaultdict(
@@ -219,19 +309,6 @@ def summary(db: Session, days: int = 7) -> dict:
         else:
             referrers_map["Directo"] += 1
 
-    page_rows = (
-        db.query(
-            VisitorEvents.path,
-            VisitorEvents.event_type,
-            VisitorEvents.visitor_id,
-            VisitorEvents.duration_seconds,
-        )
-        .filter(
-            VisitorEvents.created_at >= since,
-            VisitorEvents.event_type.in_(("pageview", "click", "pageleave")),
-        )
-        .all()
-    )
     for path, event_type, visitor_id, duration_seconds in page_rows:
         key = path or "/"
         item = pages_map[key]
@@ -310,25 +387,29 @@ def list_sessions(
     limit: int = 80,
     offset: int = 0,
 ) -> tuple[list[VisitorSessions], int]:
+    ensure_analytics_schema()
     since = _since(days)
-    query = db.query(VisitorSessions).filter(VisitorSessions.started_at >= since)
-    if country:
-        query = query.filter(VisitorSessions.country_code == country.upper())
-    total = query.count()
-    rows = (
-        query.order_by(VisitorSessions.last_seen_at.desc())
-        .offset(max(0, offset))
-        .limit(max(1, min(limit, 200)))
-        .all()
-    )
-    return rows, total
+    try:
+        query = db.query(VisitorSessions).filter(VisitorSessions.started_at >= since)
+        if country:
+            query = query.filter(VisitorSessions.country_code == country.upper())
+        total = query.count()
+        rows = (
+            query.order_by(VisitorSessions.last_seen_at.desc())
+            .offset(max(0, offset))
+            .limit(max(1, min(limit, 200)))
+            .all()
+        )
+        return rows, total
+    except (OperationalError, ProgrammingError):
+        logger.exception("Analytics sessions query failed")
+        db.rollback()
+        return [], 0
 
 
 def serialize_session(row: VisitorSessions) -> dict:
     live_cutoff = _now() - LIVE_WINDOW
-    last_seen = row.last_seen_at
-    if last_seen and last_seen.tzinfo is None:
-        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    last_seen = _as_utc(row.last_seen_at)
     return {
         "id": row.id,
         "session_id": row.session_id,
@@ -372,11 +453,11 @@ def _build_page_stays(events: list[VisitorEvents]) -> list[dict]:
                     "title": event.title or "",
                     "entered_at": None,
                     "left_at": event.created_at,
-                    "duration_seconds": int(event.duration_seconds or 0),
+                    "duration_seconds": int(getattr(event, "duration_seconds", 0) or 0),
                 }
             else:
                 current["left_at"] = event.created_at
-                current["duration_seconds"] = int(event.duration_seconds or 0)
+                current["duration_seconds"] = int(getattr(event, "duration_seconds", 0) or 0)
                 if event.title:
                     current["title"] = event.title
             stays.append(current)
@@ -389,19 +470,25 @@ def _build_page_stays(events: list[VisitorEvents]) -> list[dict]:
 
 
 def session_detail(db: Session, session_id: str) -> dict | None:
-    row = (
-        db.query(VisitorSessions)
-        .filter(VisitorSessions.session_id == session_id)
-        .first()
-    )
-    if not row:
+    ensure_analytics_schema()
+    try:
+        row = (
+            db.query(VisitorSessions)
+            .filter(VisitorSessions.session_id == session_id)
+            .first()
+        )
+        if not row:
+            return None
+        events = (
+            db.query(VisitorEvents)
+            .filter(VisitorEvents.session_id == session_id)
+            .order_by(VisitorEvents.created_at.asc(), VisitorEvents.id.asc())
+            .all()
+        )
+    except (OperationalError, ProgrammingError):
+        logger.exception("Analytics session detail failed")
+        db.rollback()
         return None
-    events = (
-        db.query(VisitorEvents)
-        .filter(VisitorEvents.session_id == session_id)
-        .order_by(VisitorEvents.created_at.asc(), VisitorEvents.id.asc())
-        .all()
-    )
     return {
         "session": serialize_session(row),
         "events": events,
@@ -410,24 +497,30 @@ def session_detail(db: Session, session_id: str) -> dict | None:
 
 
 def clicks_for_path(db: Session, path: str, days: int = 7, limit: int = 400) -> dict:
+    ensure_analytics_schema()
     since = _since(days)
     wanted = (path or "").strip() or "/"
-    query = db.query(VisitorEvents).filter(
-        VisitorEvents.created_at >= since,
-        VisitorEvents.event_type == "click",
-    )
-    if wanted != "*":
-        query = query.filter(VisitorEvents.path == wanted)
-    rows = query.order_by(VisitorEvents.created_at.desc()).limit(max(1, min(limit, 800))).all()
-    session_ids = {row.session_id for row in rows}
-    countries = {}
-    if session_ids:
-        sessions = (
-            db.query(VisitorSessions.session_id, VisitorSessions.country_name)
-            .filter(VisitorSessions.session_id.in_(session_ids))
-            .all()
+    try:
+        query = db.query(VisitorEvents).filter(
+            VisitorEvents.created_at >= since,
+            VisitorEvents.event_type == "click",
         )
-        countries = {item.session_id: item.country_name for item in sessions}
+        if wanted != "*":
+            query = query.filter(VisitorEvents.path == wanted)
+        rows = query.order_by(VisitorEvents.created_at.desc()).limit(max(1, min(limit, 800))).all()
+        session_ids = {row.session_id for row in rows}
+        countries = {}
+        if session_ids:
+            sessions = (
+                db.query(VisitorSessions.session_id, VisitorSessions.country_name)
+                .filter(VisitorSessions.session_id.in_(session_ids))
+                .all()
+            )
+            countries = {item.session_id: item.country_name for item in sessions}
+    except (OperationalError, ProgrammingError):
+        logger.exception("Analytics clicks query failed")
+        db.rollback()
+        return {"path": wanted, "total": 0, "points": [], "top_targets": []}
 
     targets: dict[str, int] = defaultdict(int)
     points = []
