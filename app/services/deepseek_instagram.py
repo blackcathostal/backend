@@ -126,38 +126,38 @@ def _parse_tool_args(raw: Any) -> dict[str, Any]:
     return {}
 
 
-async def generate_instagram_reply(
-    *,
-    db: Session,
-    inbound_text: str,
-    item_type: str,
-    author_username: str | None = None,
-) -> dict[str, Any]:
-    """Return {action, message, reason, model} using DeepSeek + knowledge tools."""
+def _require_deepseek() -> tuple[str, str, dict[str, str]]:
     if not deepseek_configured():
         raise DeepSeekConfigError(
             "DeepSeek no está configurado. Agrega DEEPSEEK_API_KEY en backend/.env"
         )
-
     base = (settings.deepseek_base_url or "https://api.deepseek.com").rstrip("/")
     model = (settings.deepseek_model or "deepseek-chat").strip() or "deepseek-chat"
-    user_content = (
-        f"Tipo: {item_type}\n"
-        f"Usuario Instagram: @{author_username or 'desconocido'}\n"
-        f"Mensaje del huésped:\n{(inbound_text or '').strip() or '(vacío)'}\n\n"
-        "Detecta el idioma del mensaje y responde en ese mismo idioma. "
-        "Usa las tools si necesitas datos del hostal/habitaciones y luego entrega el JSON final."
-    )
-
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": get_system_prompt()},
-        {"role": "user", "content": user_content},
-    ]
-
     headers = {
         "Authorization": f"Bearer {settings.deepseek_api_key.strip()}",
         "Content-Type": "application/json",
     }
+    return base, model, headers
+
+
+def _guest_turn(item_type: str, text: str, *, author_username: str | None = None) -> str:
+    return (
+        f"Tipo: {item_type}\n"
+        f"Usuario: @{author_username or 'huesped_prueba'}\n"
+        f"Mensaje del huésped:\n{(text or '').strip() or '(vacío)'}\n\n"
+        "Detecta el idioma del mensaje y responde en ese mismo idioma. "
+        "Usa las tools si necesitas datos del hostal/habitaciones y luego entrega el JSON final."
+    )
+
+
+async def _run_reply_loop(
+    *,
+    db: Session,
+    messages: list[dict[str, Any]],
+    base: str,
+    model: str,
+    headers: dict[str, str],
+) -> dict[str, Any]:
 
     async with httpx.AsyncClient(timeout=90.0) as client:
         for _ in range(4):
@@ -225,3 +225,66 @@ async def generate_instagram_reply(
             }
 
     raise DeepSeekError("DeepSeek agotó el límite de tool calls sin respuesta final")
+
+
+async def generate_instagram_reply(
+    *,
+    db: Session,
+    inbound_text: str,
+    item_type: str,
+    author_username: str | None = None,
+) -> dict[str, Any]:
+    """Return {action, message, reason, model} using DeepSeek + knowledge tools."""
+    base, model, headers = _require_deepseek()
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": get_system_prompt()},
+        {
+            "role": "user",
+            "content": _guest_turn(item_type, inbound_text, author_username=author_username),
+        },
+    ]
+    return await _run_reply_loop(db=db, messages=messages, base=base, model=model, headers=headers)
+
+
+async def generate_test_chat(
+    *,
+    db: Session,
+    channel: str,
+    history: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Same reply pipeline as Instagram/Facebook, with prior turns for testing."""
+    base, model, headers = _require_deepseek()
+    item_type = "dm" if channel == "instagram" else "comment"
+    channel_label = "Instagram" if channel == "instagram" else "Facebook"
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": (
+                get_system_prompt()
+                + f"\n\nCanal de esta conversación de prueba: {channel_label}."
+            ),
+        }
+    ]
+    turns = [turn for turn in history if (turn.get("content") or "").strip()]
+    if not turns or turns[-1].get("role") != "user":
+        raise DeepSeekError("El último mensaje debe ser del huésped")
+
+    for turn in turns[:-1]:
+        role = turn.get("role")
+        text = (turn.get("content") or "").strip()
+        if role == "user":
+            messages.append({"role": "user", "content": _guest_turn(item_type, text)})
+        elif role == "assistant":
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": json.dumps(
+                        {"action": "reply", "message": text, "reason": "turno_previo"},
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+    messages.append({"role": "user", "content": _guest_turn(item_type, turns[-1]["content"])})
+    result = await _run_reply_loop(db=db, messages=messages, base=base, model=model, headers=headers)
+    result["channel"] = channel
+    return result

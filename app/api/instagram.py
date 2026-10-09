@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -17,13 +17,27 @@ from app.models.users import Users
 from app.services import instagram as ig
 from app.services import instagram_knowledge as knowledge
 from app.services import room_rates as rates
-from app.services.deepseek_instagram import DeepSeekConfigError, DeepSeekError
+from app.services.deepseek_instagram import (
+    DeepSeekConfigError,
+    DeepSeekError,
+    generate_test_chat,
+)
 
 router = APIRouter(prefix="/instagram", tags=["instagram"])
 
 
 class ReplyBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+
+
+class TestChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class TestChatBody(BaseModel):
+    channel: Literal["instagram", "facebook"] = "instagram"
+    messages: list[TestChatTurn] = Field(min_length=1, max_length=20)
 
 
 class RoomRatesBody(BaseModel):
@@ -37,6 +51,24 @@ class RoomRatesBody(BaseModel):
 @router.get("/status")
 def instagram_status(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     return ig.connection_status()
+
+
+@router.post("/test-chat")
+async def instagram_test_chat(
+    body: TestChatBody,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await generate_test_chat(
+            db=db,
+            channel=body.channel,
+            history=[turn.model_dump() for turn in body.messages],
+        )
+    except DeepSeekConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/auth-url")
