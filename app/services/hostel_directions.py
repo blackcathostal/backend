@@ -239,17 +239,17 @@ def _guest_replies(
         "es": (
             f"¡Hola! {place} queda a unos {spoken['es']} a pie, cerca de {distance}. "
             f"{es_path}. Ahí lo encuentras, en pleno centro.\n\n"
-            f"{maps_url}"
+            f"Ver en Google Maps\n{maps_url}"
         ),
         "en": (
             f"Hi! {destination} is about a {spoken['en']} walk from the hostel, around {distance}. "
             f"{en_path}. You will find it right there, in the center.\n\n"
-            f"{maps_url}"
+            f"See on Google Maps\n{maps_url}"
         ),
         "pt": (
             f"Olá! {destination} fica a uns {spoken['pt']} a pé, cerca de {distance}. "
             f"{pt_path}. Você encontra logo ali, no centro.\n\n"
-            f"{maps_url}"
+            f"Ver no Google Maps\n{maps_url}"
         ),
     }
 
