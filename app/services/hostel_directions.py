@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 HOSTEL_ADDRESS = "Compañía de Jesús 1921, Barrio Brasil, Santiago, Chile"
-HOSTEL_LAT = -33.43997
-HOSTEL_LNG = -70.66885
+HOSTEL_LAT = -33.4396639
+HOSTEL_LNG = -70.6638072
 USER_AGENT = "BlackCatHostal/1.0 (reservas@blackcathostal.com)"
 
 
@@ -36,8 +37,8 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
 
     maps_url = (
         "https://www.google.com/maps/dir/?api=1"
-        f"&origin={HOSTEL_LAT:.5f},{HOSTEL_LNG:.5f}"
-        f"&destination={dest['lat']:.5f},{dest['lng']:.5f}"
+        f"&origin={quote(HOSTEL_ADDRESS)}"
+        f"&destination={quote(dest['name'] + ', Santiago, Chile')}"
         "&travelmode=walking"
     )
     replies = _guest_replies(
