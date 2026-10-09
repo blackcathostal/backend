@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
@@ -37,9 +36,16 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
 
     maps_url = (
         "https://www.google.com/maps/dir/?api=1"
-        f"&origin={quote(HOSTEL_ADDRESS)}"
-        f"&destination={quote(dest['name'])}"
+        f"&origin={HOSTEL_LAT:.5f},{HOSTEL_LNG:.5f}"
+        f"&destination={dest['lat']:.5f},{dest['lng']:.5f}"
         "&travelmode=walking"
+    )
+    replies = _guest_replies(
+        destination=dest["name"],
+        distance=route["distance"],
+        duration=route["duration"],
+        moves=route["moves"],
+        maps_url=maps_url,
     )
     return {
         "ok": True,
@@ -49,11 +55,12 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
         "mode": "walking",
         "distance": route["distance"],
         "duration": route["duration"],
-        "steps": route["steps"],
+        "summary": replies["es"].split("\n\n", 1)[0],
         "maps_url": maps_url,
+        "replies": replies,
         "instruction": (
-            "Responde tú con esta ruta a pie. No derives la pregunta a WhatsApp. "
-            "Menciona duración, distancia y los pasos. Puedes agregar el enlace de Maps."
+            "Usa replies según el idioma del huésped, casi textual. "
+            "No reescribas las calles ni armes otra URL. No mandes a WhatsApp."
         ),
     }
 
@@ -97,66 +104,173 @@ def _walking_route(dest_lat: float, dest_lng: float) -> dict[str, Any] | None:
         return None
     route = routes[0]
     legs = route.get("legs") or [{}]
-    steps = _summarize_steps((legs[0].get("steps") or []))
+    moves = _walking_moves(legs[0].get("steps") or [])
     meters = int(route.get("distance") or 0)
     # The public OSRM foot profile reports car-like times. Use a normal walking pace.
     seconds = int(round(meters / 1.33))
     return {
         "distance": _format_distance(meters),
         "duration": _format_duration(seconds),
-        "steps": steps,
+        "moves": moves,
     }
 
 
-def _summarize_steps(steps: list[dict[str, Any]]) -> list[str]:
-    lines: list[str] = []
+def _walking_moves(steps: list[dict[str, Any]]) -> list[dict[str, str]]:
+    moves: list[dict[str, str]] = []
     for step in steps:
         maneuver = step.get("maneuver") or {}
         kind = str(maneuver.get("type") or "")
         modifier = str(maneuver.get("modifier") or "")
-        name = str(step.get("name") or "").strip()
-        if kind in {"depart", "arrive"} and not name:
-            continue
+        name = _street_name(str(step.get("name") or ""))
         meters = int(step.get("distance") or 0)
-        if meters < 40 and kind not in {"arrive"}:
+        if kind == "arrive" or not name:
             continue
-        turn = _turn_label(kind, modifier)
-        if name and turn:
-            text = f"{turn} por {name} ({_format_distance(meters)})"
-        elif name:
-            text = f"Sigue por {name} ({_format_distance(meters)})"
-        elif turn:
-            text = f"{turn} ({_format_distance(meters)})"
-        else:
+        if meters < 40 and kind != "depart":
             continue
-        if lines and lines[-1].split(" (")[0] == text.split(" (")[0]:
+        action = _move_action(kind, modifier)
+        if not action:
             continue
-        lines.append(text)
-        if len(lines) >= 6:
+        if moves and moves[-1]["street"] == name and moves[-1]["action"] == action:
+            continue
+        moves.append({"action": action, "street": name})
+        if len(moves) >= 4:
             break
-    if not lines:
-        return ["Camina desde el hostal hasta el destino siguiendo el mapa."]
-    return lines
+    return moves
 
 
-def _turn_label(kind: str, modifier: str) -> str:
-    labels = {
-        "left": "Gira a la izquierda",
-        "right": "Gira a la derecha",
-        "slight left": "Sigue ligeramente a la izquierda",
-        "slight right": "Sigue ligeramente a la derecha",
-        "straight": "Sigue derecho",
-        "uturn": "Da la vuelta",
-    }
-    if kind == "arrive":
-        return "Llegas"
-    if kind in {"turn", "end of road", "fork", "roundabout", "rotary"}:
-        return labels.get(modifier, "Sigue")
-    if kind == "new name":
-        return "Continúa"
+def _street_name(name: str) -> str:
+    cleaned = " ".join(name.replace("Avenida", "avenida").split())
+    for prefix in ("Calle ", "Av. ", "Avda. "):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):]
+            break
+    return cleaned.strip()
+
+
+def _move_action(kind: str, modifier: str) -> str:
     if kind == "depart":
-        return "Sal"
+        return "start"
+    if modifier in {"left", "slight left", "sharp left"}:
+        return "left"
+    if modifier in {"right", "slight right", "sharp right"}:
+        return "right"
+    if modifier == "uturn":
+        return "back"
+    if kind in {"turn", "new name", "continue", "fork", "end of road", "depart"} or modifier == "straight":
+        return "straight"
     return ""
+
+
+def _join_clauses(clauses: list[str], conjunction: str = "y") -> str:
+    cleaned = [item.strip() for item in clauses if item.strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    return f"{', '.join(cleaned[:-1])} {conjunction} {cleaned[-1]}"
+
+
+def _route_clauses(moves: list[dict[str, str]], language: str) -> str:
+    clauses: list[str] = []
+    for move in moves:
+        street = move["street"]
+        action = move["action"]
+        if language == "en":
+            if action == "start":
+                clauses.append(f"leave the hostel along {street}")
+            elif action == "left":
+                clauses.append(f"turn left onto {street}")
+            elif action == "right":
+                clauses.append(f"turn right onto {street}")
+            elif action == "back":
+                clauses.append(f"turn around onto {street}")
+            else:
+                clauses.append(f"continue along {street}")
+        elif language == "pt":
+            if action == "start":
+                clauses.append(f"saia do hostel pela {street}")
+            elif action == "left":
+                clauses.append(f"vire à esquerda na {street}")
+            elif action == "right":
+                clauses.append(f"vire à direita na {street}")
+            elif action == "back":
+                clauses.append(f"dê a volta para a {street}")
+            else:
+                clauses.append(f"siga pela {street}")
+        else:
+            if action == "start":
+                clauses.append(f"sales del hostal por {street}")
+            elif action == "left":
+                clauses.append(f"tomas a la izquierda por {street}")
+            elif action == "right":
+                clauses.append(f"doblas a la derecha en {street}")
+            elif action == "back":
+                clauses.append(f"das la vuelta hacia {street}")
+            else:
+                clauses.append(f"sigues por {street}")
+    text = _join_clauses(clauses, "and" if language == "en" else "e" if language == "pt" else "y")
+    if text:
+        return text[0].upper() + text[1:]
+    if language == "en":
+        return "It is a short walk from the hostel"
+    if language == "pt":
+        return "É uma caminhada curta a partir do hostel"
+    return "Es una caminata corta desde el hostal"
+
+
+def _guest_replies(
+    *,
+    destination: str,
+    distance: str,
+    duration: str,
+    moves: list[dict[str, str]],
+    maps_url: str,
+) -> dict[str, str]:
+    spoken = {
+        "es": _spoken_duration(duration, "es"),
+        "en": _spoken_duration(duration, "en"),
+        "pt": _spoken_duration(duration, "pt"),
+    }
+    place = _with_article(destination)
+    es_path = _route_clauses(moves, "es")
+    en_path = _route_clauses(moves, "en")
+    pt_path = _route_clauses(moves, "pt")
+    return {
+        "es": (
+            f"¡Hola! {place} queda a unos {spoken['es']} a pie, cerca de {distance}. "
+            f"{es_path}. Ahí lo encuentras, en pleno centro.\n\n"
+            f"{maps_url}"
+        ),
+        "en": (
+            f"Hi! {destination} is about a {spoken['en']} walk from the hostel, around {distance}. "
+            f"{en_path}. You will find it right there, in the center.\n\n"
+            f"{maps_url}"
+        ),
+        "pt": (
+            f"Olá! {destination} fica a uns {spoken['pt']} a pé, cerca de {distance}. "
+            f"{pt_path}. Você encontra logo ali, no centro.\n\n"
+            f"{maps_url}"
+        ),
+    }
+
+
+def _with_article(name: str) -> str:
+    lower = name.lower()
+    if lower.startswith(("el ", "la ", "los ", "las ")):
+        return name[0].upper() + name[1:]
+    feminine = ("plaza", "estacion", "estación", "iglesia", "catedral", "vega", "torre")
+    if any(lower.startswith(word) for word in feminine):
+        return f"La {name}"
+    return f"El {name}"
+
+
+def _spoken_duration(duration: str, language: str) -> str:
+    if not duration.endswith(" min"):
+        return duration
+    minutes = duration[: -len(" min")]
+    if language == "en":
+        return f"{minutes}-minute" if minutes != "1" else "1-minute"
+    return f"{minutes} minutos"
 
 
 def _format_distance(meters: int) -> str:

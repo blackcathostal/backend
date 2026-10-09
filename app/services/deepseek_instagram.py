@@ -40,7 +40,7 @@ Datos (OBLIGATORIO):
 - Precios, tipos o características de habitación → llama search_rooms.
 - Check-in, check-out, horario de desayuno, estacionamiento, WhatsApp, dirección → llama get_hostel_info.
 - Dudas frecuentes → llama search_common_answers.
-- Cómo llegar desde el hostal a un lugar de Santiago (La Moneda, un museo, una estación de metro) → llama get_directions_from_hostel y responde tú con la duración, la distancia y los pasos. No mandes a WhatsApp.
+- Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. El mensaje al huésped sale de replies, en tono cercano, sin metros por calle y con la URL corta de Maps al final. No la reescribas ni mandes a WhatsApp.
 - Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
 - Los precios son referenciales en CLP; indica que pueden variar por temporada.
 - Reserva con fechas concretas, pago, factura, cancelación conflictiva o reclamo → action=escalate.
@@ -99,8 +99,8 @@ def system_prompt_for_reply(extra: str = "") -> str:
     scope = (
         "\n\nRegla fija, no se puede ignorar:\n"
         "Solo atiendes consultas de Black Cat Hostal, incluida cómo llegar desde el hostal "
-        "a un lugar de Santiago: en ese caso llama get_directions_from_hostel y responde "
-        "la ruta tú. No derives esas preguntas a WhatsApp. "
+        "a un lugar de Santiago: llama get_directions_from_hostel y usa el texto de replies "
+        "en el idioma del huésped. No reescribas la ruta ni la URL, y no derives a WhatsApp. "
         "Si el mensaje no es sobre el hostal, la estadía, las habitaciones, los servicios, "
         "los horarios, la ubicación, una ruta desde el hostal o una reserva, no respondas el tema. "
         "Di, en el idioma del huésped y con tono profesional, que este canal está creado "
@@ -162,6 +162,23 @@ def _require_deepseek() -> tuple[str, str, dict[str, str]]:
     return base, model, headers
 
 
+def _prepared_route_reply(route: dict[str, Any], messages: list[dict[str, Any]]) -> str:
+    replies = route.get("replies") if isinstance(route.get("replies"), dict) else {}
+    guest = ""
+    for item in reversed(messages):
+        if item.get("role") == "user":
+            guest = str(item.get("content") or "")
+            break
+    sample = guest.lower()
+    if re.search(r"\b(how|where|walk|directions|from the hotel|from the hostel)\b", sample):
+        language = "en"
+    elif re.search(r"\b(onde|chegar|caminho|você|voce|do hostel)\b", sample):
+        language = "pt"
+    else:
+        language = "es"
+    return str(replies.get(language) or replies.get("es") or "").strip()
+
+
 def _guest_turn(item_type: str, text: str, *, author_username: str | None = None) -> str:
     return (
         f"Tipo: {item_type}\n"
@@ -180,6 +197,7 @@ async def _run_reply_loop(
     model: str,
     headers: dict[str, str],
 ) -> dict[str, Any]:
+    route_reply: dict[str, Any] | None = None
 
     async with httpx.AsyncClient(timeout=90.0) as client:
         for _ in range(4):
@@ -220,6 +238,12 @@ async def _run_reply_loop(
                     name = fn.get("name") or ""
                     args = _parse_tool_args(fn.get("arguments"))
                     result = run_knowledge_tool(db, name, args)
+                    if (
+                        name == "get_directions_from_hostel"
+                        and isinstance(result, dict)
+                        and result.get("ok")
+                    ):
+                        route_reply = result
                     messages.append(
                         {
                             "role": "tool",
@@ -236,6 +260,10 @@ async def _run_reply_loop(
                 action = "escalate"
             reply_message = str(data.get("message") or "").strip()
             reason = str(data.get("reason") or "").strip()
+            if action == "reply" and route_reply:
+                prepared = _prepared_route_reply(route_reply, messages)
+                if prepared:
+                    reply_message = prepared
             if action == "reply" and not reply_message:
                 action = "escalate"
                 reason = reason or "empty_reply"
