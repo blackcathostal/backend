@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.hostel_info import CommonAnswers, HostelInfo
+from app.services.hostel_directions import directions_from_hostel
 from app.models.rooms import Rooms
 
 
@@ -232,6 +233,28 @@ DEEPSEEK_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_directions_from_hostel",
+            "description": (
+                "Walking route from Black Cat Hostal (Compañía de Jesús 1921, Barrio Brasil) "
+                "to a place in Santiago, such as Palacio de La Moneda, a museum or a metro station. "
+                "Use this when a guest asks how to get somewhere from the hostel. "
+                "Answer with the returned duration, distance and steps. Do not send them to WhatsApp."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "destination": {
+                        "type": "string",
+                        "description": "Place name, e.g. Palacio de La Moneda",
+                    }
+                },
+                "required": ["destination"],
+            },
+        },
+    },
 ]
 
 
@@ -243,4 +266,8 @@ def run_knowledge_tool(db: Session, name: str, arguments: dict[str, Any] | None 
         return hostel_info_dict(db)
     if name == "search_common_answers":
         return search_common_answers(db, args.get("query") or args.get("consulta"))
+    if name == "get_directions_from_hostel":
+        return directions_from_hostel(
+            str(args.get("destination") or args.get("lugar") or args.get("query") or "")
+        )
     return {"error": f"Unknown tool: {name}"}

@@ -15,6 +15,7 @@ from app.models.ai_sources import AiSources
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.users import Users
 from app.services.ai_api_sources import collect_external_api_materials
+from app.services.hostel_directions import directions_from_hostel
 from app.services.ai_source_fetcher import fetch_source_content
 
 mcp = FastMCP(
@@ -132,6 +133,18 @@ async def search_google_places(query: str, max_results: int = 5) -> dict[str, An
             }
         )
     return {"ok": True, "query": text_query, "places": places}
+
+
+@mcp.tool(
+    name="directions_from_hostel",
+    description=(
+        "Ruta a pie desde Black Cat Hostal, Compañía de Jesús 1921, hasta un lugar de Santiago. "
+        "Úsala cuando pregunten cómo llegar a La Moneda, un museo o una estación."
+    ),
+    structured_output=True,
+)
+def directions_from_hostel_tool(destination: str) -> dict[str, Any]:
+    return directions_from_hostel(destination)
 
 
 async def collect_google_places(queries: list[str]) -> list[dict[str, Any]]:
