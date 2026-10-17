@@ -176,13 +176,27 @@ async def auto_reply_inbox_item(
 
 @router.post("/sync-comments")
 async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    warning = None
     try:
-        synced = await ig.sync_recent_comments()
-        return {"synced": len(synced), "items": synced}
+        comments = await ig.sync_recent_comments()
     except ig.InstagramConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ig.InstagramError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    subscription = await ig.subscribe_instagram_webhooks()
+    if not subscription.get("ok"):
+        warning = subscription.get("error")
+    try:
+        messages = await ig.sync_recent_messages()
+    except ig.InstagramError as exc:
+        messages = []
+        warning = str(exc)
+    return {
+        "synced": len(comments) + len(messages),
+        "comments": len(comments),
+        "messages": len(messages),
+        "warning": warning,
+    }
 
 
 @router.get("/room-rates")

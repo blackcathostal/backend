@@ -32,8 +32,18 @@ SCOPES = [
     "instagram_basic",
     "instagram_manage_comments",
     "instagram_manage_messages",
+    "pages_manage_metadata",
     "business_management",
 ]
+
+MESSAGE_WEBHOOK_FIELDS = (
+    "messages",
+    "messaging_postbacks",
+    "messaging_seen",
+    "messaging_referral",
+    "message_reactions",
+    "comments",
+)
 
 
 class InstagramConfigError(Exception):
@@ -298,7 +308,26 @@ async def exchange_code_and_connect(code: str) -> dict[str, Any]:
         "token_expires_at": None,
     }
     save_connection(conn)
+    await subscribe_instagram_webhooks(conn)
     return conn
+
+
+async def subscribe_instagram_webhooks(conn: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Ask Meta to deliver Instagram DMs for this Page, not only comments."""
+    conn = conn or _require_connection()
+    page_id = conn.get("page_id")
+    token = conn.get("page_access_token")
+    if not page_id or not token:
+        return {"ok": False, "error": "Falta la página de Facebook conectada."}
+    try:
+        result = await _graph_post(
+            f"/{page_id}/subscribed_apps",
+            token,
+            {"subscribed_fields": ",".join(MESSAGE_WEBHOOK_FIELDS)},
+        )
+        return {"ok": True, "result": result}
+    except InstagramError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def _require_connection() -> dict[str, Any]:
@@ -386,6 +415,67 @@ async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
                     "replies": [],
                     "escalation_reason": None,
                     "permalink": m.get("permalink"),
+                }
+            )
+            synced.append(item)
+    return synced
+
+
+async def sync_recent_messages(limit_conversations: int = 20) -> list[dict[str, Any]]:
+    """Pull recent Instagram DM threads. Does not auto-reply to old messages."""
+    conn = _require_connection()
+    token = conn["page_access_token"]
+    ig_user_id = str(conn.get("ig_user_id") or "")
+    page_id = str(conn.get("page_id") or "")
+    ig_username = str(conn.get("ig_username") or "").lower()
+    params = {
+        "platform": "instagram",
+        "fields": "id,updated_time,messages.limit(15){id,message,from,created_time}",
+        "limit": limit_conversations,
+    }
+    data: dict[str, Any] | None = None
+    last_error = "No se pudieron leer los mensajes privados"
+    for path in (f"/{ig_user_id}/conversations", f"/{page_id}/conversations"):
+        if path == "/conversations":
+            continue
+        try:
+            data = await _graph_get(path, token, params)
+            break
+        except InstagramError as exc:
+            last_error = str(exc)
+    if data is None:
+        raise InstagramError(last_error)
+
+    own_ids = {item for item in (ig_user_id, page_id) if item}
+    synced: list[dict[str, Any]] = []
+    for conv in data.get("data") or []:
+        thread_id = conv.get("id")
+        messages = ((conv.get("messages") or {}).get("data")) or []
+        for msg in messages:
+            sender = msg.get("from") or {}
+            sender_id = str(sender.get("id") or "")
+            username = str(sender.get("username") or "")
+            if not sender_id or sender_id in own_ids or username.lower() == ig_username:
+                continue
+            external_id = f"message:{msg.get('id') or uuid.uuid4()}"
+            if find_by_external_id(external_id):
+                continue
+            text = str(msg.get("message") or "").strip() or "[archivo]"
+            item = upsert_inbox_item(
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "message",
+                    "thread_id": thread_id or sender_id,
+                    "external_id": external_id,
+                    "meta_comment_id": None,
+                    "media_id": None,
+                    "author_username": username or None,
+                    "author_id": sender_id,
+                    "text": text,
+                    "created_at": msg.get("created_time") or _now_iso(),
+                    "status": "pending",
+                    "replies": [],
+                    "escalation_reason": None,
                 }
             )
             synced.append(item)
@@ -526,53 +616,86 @@ def ingest_inbound(
     )
 
 
+def _own_instagram_ids() -> set[str]:
+    conn = load_connection() or {}
+    return {str(item) for item in (conn.get("ig_user_id"), conn.get("page_id")) if item}
+
+
+def _dm_event_text(event: dict[str, Any]) -> tuple[str, str, str]:
+    """Return (sender_id, mid, text) for an Instagram DM webhook event."""
+    sender = str((event.get("sender") or {}).get("id") or "")
+    message = event.get("message")
+    if isinstance(message, dict):
+        if message.get("is_echo") or message.get("is_deleted") or sender in _own_instagram_ids():
+            return "", "", ""
+        mid = str(message.get("mid") or "")
+        text = str(message.get("text") or "").strip()
+        if not text and message.get("attachments"):
+            text = "[archivo]"
+        return sender, mid, text
+    postback = event.get("postback") or {}
+    if isinstance(postback, dict) and sender and sender not in _own_instagram_ids():
+        text = str(postback.get("title") or postback.get("payload") or "").strip()
+        return sender, str(postback.get("mid") or ""), text
+    return "", "", ""
+
+
+async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    sender, mid, text = _dm_event_text(event)
+    if not sender or not text:
+        return None
+    item = ingest_inbound(
+        item_type="message",
+        external_id=f"message:{mid or f'{sender}-{int(time.time())}'}",
+        text=text,
+        author_id=sender,
+        thread_id=sender,
+    )
+    if settings.instagram_auto_reply_enabled and item.get("status") == "pending":
+        try:
+            item = await run_auto_reply(item["id"])
+        except Exception as exc:  # noqa: BLE001 — keep webhook 200
+            item["status"] = "failed"
+            item["escalation_reason"] = str(exc)
+            upsert_inbox_item(item)
+    return item
+
+
 async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse Meta webhook and auto-reply when enabled."""
     results: list[dict[str, Any]] = []
+    dm_fields = {"messages", "message_echoes", "messaging_postbacks"}
     for entry in payload.get("entry") or []:
-        # Instagram messaging
-        for messaging in entry.get("messaging") or []:
-            sender = (messaging.get("sender") or {}).get("id")
-            message = messaging.get("message") or {}
-            if message.get("is_echo"):
-                continue
-            text = message.get("text") or ""
-            mid = message.get("mid") or f"msg-{sender}-{int(time.time())}"
-            item = ingest_inbound(
-                item_type="message",
-                external_id=f"message:{mid}",
-                text=text,
-                author_id=sender,
-                thread_id=sender,
-            )
-            if settings.instagram_auto_reply_enabled and item.get("status") == "pending":
-                try:
-                    item = await run_auto_reply(item["id"])
-                except Exception as exc:  # noqa: BLE001 — keep webhook 200
-                    item["status"] = "failed"
-                    item["escalation_reason"] = str(exc)
-                    upsert_inbox_item(item)
-            results.append(item)
+        for messaging in (entry.get("messaging") or []) + (entry.get("standby") or []):
+            item = await _store_dm_event(messaging)
+            if item:
+                results.append(item)
 
-        # Instagram comments changes
         for change in entry.get("changes") or []:
             value = change.get("value") or {}
-            field = change.get("field")
-            if field not in {"comments", "mentions"} and "text" not in value:
-                # still try if looks like comment
-                if not value.get("text") and not value.get("message"):
-                    continue
+            field = str(change.get("field") or "")
+            if field in dm_fields or (
+                isinstance(value.get("message"), dict) and value.get("sender")
+            ):
+                item = await _store_dm_event(value)
+                if item:
+                    results.append(item)
+                continue
+            if field not in {"comments", "mentions", "live_comments"} and "text" not in value:
+                continue
             comment_id = value.get("id") or value.get("comment_id")
-            text = value.get("text") or value.get("message") or ""
+            text = value.get("text") or ""
+            if isinstance(text, dict):
+                continue
             from_user = value.get("from") or {}
             media = value.get("media") or {}
-            if not comment_id and not text:
+            if not comment_id and not str(text).strip():
                 continue
             external = f"comment:{comment_id or uuid.uuid4()}"
             item = ingest_inbound(
                 item_type="comment",
                 external_id=external,
-                text=text,
+                text=str(text),
                 author_id=from_user.get("id"),
                 author_username=from_user.get("username"),
                 thread_id=media.get("id") or value.get("media_id"),
