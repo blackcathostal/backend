@@ -22,6 +22,7 @@ from app.services.deepseek_instagram import (
 
 CONNECTION_FILE = settings.uploads_dir / "cache" / "instagram_connection.json"
 INBOX_FILE = settings.uploads_dir / "cache" / "instagram_inbox.json"
+AUTO_REPLY_FILE = settings.uploads_dir / "cache" / "deepseek_auto_reply.json"
 
 SCOPES = [
     "pages_show_list",
@@ -174,12 +175,86 @@ def find_by_external_id(external_id: str) -> dict[str, Any] | None:
     return None
 
 
+def auto_reply_enabled() -> bool:
+    try:
+        if AUTO_REPLY_FILE.exists():
+            data = json.loads(AUTO_REPLY_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "enabled" in data:
+                return bool(data["enabled"])
+    except (OSError, json.JSONDecodeError):
+        pass
+    return bool(settings.instagram_auto_reply_enabled)
+
+
+def set_auto_reply_enabled(enabled: bool) -> bool:
+    _ensure_dirs()
+    value = bool(enabled)
+    AUTO_REPLY_FILE.write_text(
+        json.dumps({"enabled": value}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return value
+
+
+def update_inbox_message(item_id: str, text: str) -> dict[str, Any]:
+    item = get_inbox_item(item_id)
+    if not item:
+        raise InstagramError("Item de inbox no encontrado")
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise InstagramError("El mensaje no puede quedar vacío")
+    item["text"] = cleaned
+    item["updated_at"] = _now_iso()
+    return upsert_inbox_item(item)
+
+
+def delete_inbox_item(item_id: str) -> None:
+    data = _load_inbox_raw()
+    items = list(data.get("items") or [])
+    kept = [item for item in items if item.get("id") != item_id]
+    if len(kept) == len(items):
+        raise InstagramError("Item de inbox no encontrado")
+    data["items"] = kept
+    _save_inbox_raw(data)
+
+
+def update_inbox_reply(item_id: str, reply_index: int, text: str) -> dict[str, Any]:
+    item = get_inbox_item(item_id)
+    if not item:
+        raise InstagramError("Item de inbox no encontrado")
+    replies = list(item.get("replies") or [])
+    if reply_index < 0 or reply_index >= len(replies):
+        raise InstagramError("Respuesta no encontrada")
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise InstagramError("La respuesta no puede quedar vacía")
+    replies[reply_index] = {**replies[reply_index], "text": cleaned, "updated_at": _now_iso()}
+    item["replies"] = replies
+    item["updated_at"] = _now_iso()
+    return upsert_inbox_item(item)
+
+
+def delete_inbox_reply(item_id: str, reply_index: int) -> dict[str, Any]:
+    item = get_inbox_item(item_id)
+    if not item:
+        raise InstagramError("Item de inbox no encontrado")
+    replies = list(item.get("replies") or [])
+    if reply_index < 0 or reply_index >= len(replies):
+        raise InstagramError("Respuesta no encontrada")
+    replies.pop(reply_index)
+    item["replies"] = replies
+    item["updated_at"] = _now_iso()
+    if not replies and item.get("status") in {"replied_human", "replied_deepseek"}:
+        item["status"] = "pending"
+    return upsert_inbox_item(item)
+
+
 def connection_status() -> dict[str, Any]:
     conn = load_connection()
     return {
         "meta_configured": meta_configured(),
         "deepseek_configured": deepseek_configured(),
-        "auto_reply_enabled": bool(settings.instagram_auto_reply_enabled),
+        "auto_reply_enabled": auto_reply_enabled(),
         "connected": bool(conn),
         "page_id": (conn or {}).get("page_id"),
         "page_name": (conn or {}).get("page_name"),
@@ -650,7 +725,7 @@ async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
         author_id=sender,
         thread_id=sender,
     )
-    if settings.instagram_auto_reply_enabled and item.get("status") == "pending":
+    if auto_reply_enabled() and item.get("status") == "pending":
         try:
             item = await run_auto_reply(item["id"])
         except Exception as exc:  # noqa: BLE001 — keep webhook 200
@@ -701,7 +776,7 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
                 meta_comment_id=comment_id,
                 media_id=media.get("id") or value.get("media_id"),
             )
-            if settings.instagram_auto_reply_enabled and item.get("status") == "pending":
+            if auto_reply_enabled() and item.get("status") == "pending":
                 try:
                     item = await run_auto_reply(item["id"])
                 except Exception as exc:  # noqa: BLE001

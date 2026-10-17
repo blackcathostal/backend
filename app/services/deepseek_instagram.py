@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.services.instagram_knowledge import DEEPSEEK_TOOLS, run_knowledge_tool
+
+SANTIAGO = ZoneInfo("America/Santiago")
 
 
 class DeepSeekConfigError(Exception):
@@ -95,6 +99,68 @@ def reset_system_prompt() -> str:
     return DEFAULT_SYSTEM_PROMPT
 
 
+def _day_part(hour: int) -> str:
+    if 5 <= hour < 12:
+        return "morning"
+    if 12 <= hour < 20:
+        return "afternoon"
+    return "night"
+
+
+def current_greeting(language: str = "es") -> str:
+    part = _day_part(datetime.now(SANTIAGO).hour)
+    greetings = {
+        "es": {"morning": "Buenos días", "afternoon": "Buenas tardes", "night": "Buenas noches"},
+        "en": {"morning": "Good morning", "afternoon": "Good afternoon", "night": "Good evening"},
+        "pt": {"morning": "Bom dia", "afternoon": "Boa tarde", "night": "Boa noite"},
+    }
+    return greetings.get(language, greetings["es"])[part]
+
+
+def apply_time_greeting(message: str) -> str:
+    """Replace a time-of-day greeting with the one that matches Santiago right now."""
+    text = message or ""
+    if not text.strip():
+        return text
+    part = _day_part(datetime.now(SANTIAGO).hour)
+    correct = {
+        "es": {"morning": "buenos días", "afternoon": "buenas tardes", "night": "buenas noches"},
+        "en": {"morning": "good morning", "afternoon": "good afternoon", "night": "good evening"},
+        "pt": {"morning": "bom dia", "afternoon": "boa tarde", "night": "boa noite"},
+    }
+    patterns = {
+        "es": [
+            (re.compile(r"buenos\s+d[ií]as", re.IGNORECASE), "morning"),
+            (re.compile(r"buenas\s+tardes", re.IGNORECASE), "afternoon"),
+            (re.compile(r"buenas\s+noches", re.IGNORECASE), "night"),
+        ],
+        "en": [
+            (re.compile(r"good\s+morning", re.IGNORECASE), "morning"),
+            (re.compile(r"good\s+afternoon", re.IGNORECASE), "afternoon"),
+            (re.compile(r"good\s+(?:evening|night)", re.IGNORECASE), "night"),
+        ],
+        "pt": [
+            (re.compile(r"bom\s+dia", re.IGNORECASE), "morning"),
+            (re.compile(r"boa\s+tarde", re.IGNORECASE), "afternoon"),
+            (re.compile(r"boa\s+noite", re.IGNORECASE), "night"),
+        ],
+    }
+    for language, rules in patterns.items():
+        phrase = correct[language][part]
+        for pattern, slot in rules:
+            if slot == part:
+                continue
+
+            def replace(match: re.Match[str], phrase: str = phrase) -> str:
+                found = match.group(0)
+                if found[:1].isupper():
+                    return phrase[:1].upper() + phrase[1:]
+                return phrase
+
+            text = pattern.sub(replace, text)
+    return text
+
+
 def system_prompt_for_reply(extra: str = "") -> str:
     scope = (
         "\n\nRegla fija, no se puede ignorar:\n"
@@ -107,7 +173,17 @@ def system_prompt_for_reply(extra: str = "") -> str:
         "únicamente para consultas del hostal y que puedes ayudar con la estadía. "
         "Usa action=reply y no llames tools para esos mensajes."
     )
-    return get_system_prompt().rstrip() + scope + (extra or "")
+    now = datetime.now(SANTIAGO)
+    greeting = (
+        "\n\nSaludo según la hora de Santiago de Chile, ahora "
+        f"{now.strftime('%H:%M')}: usa «{current_greeting('es')}». "
+        "De 05:00 a 11:59 es Buenos días, de 12:00 a 19:59 es Buenas tardes "
+        "y de 20:00 a 04:59 es Buenas noches. "
+        "No saludes buenas noches si todavía es de día, aunque la respuesta salga un poco tarde. "
+        "En inglés: Good morning, Good afternoon o Good evening. "
+        "En portugués: Bom dia, Boa tarde o Boa noite."
+    )
+    return get_system_prompt().rstrip() + scope + greeting + (extra or "")
 
 
 def prompt_payload() -> dict[str, Any]:
@@ -264,6 +340,7 @@ async def _run_reply_loop(
                 prepared = _prepared_route_reply(route_reply, messages)
                 if prepared:
                     reply_message = prepared
+            reply_message = apply_time_greeting(reply_message)
             if action == "reply" and not reply_message:
                 action = "escalate"
                 reason = reason or "empty_reply"

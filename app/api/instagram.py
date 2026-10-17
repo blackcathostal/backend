@@ -110,6 +110,23 @@ def instagram_disconnect(_: Users = Depends(get_current_user)) -> dict[str, bool
     return {"ok": True}
 
 
+class AutoReplyBody(BaseModel):
+    enabled: bool
+
+
+class InboxTextBody(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@router.put("/auto-reply")
+def update_auto_reply(
+    body: AutoReplyBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, bool]:
+    enabled = ig.set_auto_reply_enabled(body.enabled)
+    return {"enabled": enabled}
+
+
 @router.get("/inbox")
 def get_inbox(
     type: str | None = Query(default=None, alias="type"),
@@ -126,6 +143,52 @@ def get_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[s
     if not item:
         raise HTTPException(status_code=404, detail="No encontrado")
     return item
+
+
+@router.put("/inbox/{item_id}")
+def edit_inbox_item(
+    item_id: str,
+    body: InboxTextBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return ig.update_inbox_message(item_id, body.text)
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/inbox/{item_id}")
+def remove_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[str, bool]:
+    try:
+        ig.delete_inbox_item(item_id)
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@router.put("/inbox/{item_id}/replies/{reply_index}")
+def edit_inbox_reply(
+    item_id: str,
+    reply_index: int,
+    body: InboxTextBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return ig.update_inbox_reply(item_id, reply_index, body.text)
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/inbox/{item_id}/replies/{reply_index}")
+def remove_inbox_reply(
+    item_id: str,
+    reply_index: int,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return ig.delete_inbox_reply(item_id, reply_index)
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/inbox/{item_id}/reply")
