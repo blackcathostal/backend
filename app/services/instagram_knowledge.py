@@ -88,6 +88,117 @@ def search_rooms(db: Session, query: str | None = None) -> list[dict[str, Any]]:
     return out
 
 
+_INSTRUCTION_MARKERS = (
+    "comparte el whatsapp",
+    "comparte la dirección",
+    "share whatsapp",
+    "share address",
+    "usa el horario",
+    "usa si hay estacionamiento",
+    "use get_hostel_info",
+    "use check_out_time",
+    "use has_parking",
+    "consulta las habitaciones",
+    "call search_rooms",
+    "el horario es el que está guardado",
+    "hours from breakfast",
+    "no confirmes cupos",
+    "do not confirm exact",
+    "depende de las condiciones de la reserva. pide que escriban",
+    "depends on booking",
+    "pide fechas y cantidad de personas por whatsapp para cotizar",
+    "ask for dates and headcount",
+    "invite whatsapp",
+    "offer whatsapp",
+)
+
+
+def _is_instruction(text: str) -> bool:
+    sample = (text or "").strip().lower()
+    return any(marker in sample for marker in _INSTRUCTION_MARKERS)
+
+
+def _live_faq_answer(topic: str, guide: str, info: dict[str, Any], rooms: list[dict[str, Any]]) -> str:
+    """Turn an internal instruction into the real hostel values."""
+    stored = (guide or "").strip()
+    if stored and not _is_instruction(stored):
+        return stored
+    whatsapp = str(info.get("whatsapp_url") or "").strip()
+    email = str(info.get("email") or "").strip()
+    address = str(info.get("address") or "").strip()
+    check_in = str(info.get("check_in_time") or "").strip()
+    check_out = str(info.get("check_out_time") or "").strip()
+    breakfast = str(info.get("breakfast_hours") or "").strip()
+    parking_notes = str(info.get("parking_notes") or "").strip()
+    key = (topic or "").strip().lower()
+    if key == "whatsapp":
+        return f"Puedes escribirnos por WhatsApp {whatsapp} o al correo {email}."
+    if key == "checkin":
+        return (
+            f"El check-in es a las {check_in}. "
+            "Te enviamos las instrucciones de llegada antes de tu entrada."
+        )
+    if key == "checkout":
+        return (
+            f"El check-out es a las {check_out}. "
+            f"Si necesitas salida más tarde, escríbenos por WhatsApp {whatsapp} para ver disponibilidad."
+        )
+    if key == "breakfast":
+        hours = breakfast.replace("-", " a ", 1)
+        return f"Sí, el desayuno continental está incluido. Se sirve de {hours}."
+    if key == "parking":
+        if info.get("has_parking"):
+            return f"Sí, hay estacionamiento. {parking_notes}".strip()
+        return parking_notes or "No hay estacionamiento en el hostal."
+    if key == "location":
+        return (
+            f"Estamos en {address}. "
+            f"Si necesitas ayuda para llegar, escríbenos por WhatsApp {whatsapp}."
+        )
+    if key == "prices":
+        tariffs = [
+            f"{room.get('name') or room.get('type')}: {room.get('price_label')} CLP"
+            for room in rooms
+            if room.get("price_label")
+        ]
+        listed = ". ".join(tariffs)
+        extra = f" {listed}." if listed else ""
+        return (
+            "Las tarifas son referenciales y pueden variar por temporada."
+            f"{extra} Para una fecha exacta escríbenos por WhatsApp {whatsapp}."
+        )
+    if key == "groups":
+        return (
+            "Sí, recibimos grupos y estadías corporativas. "
+            f"Escríbenos por WhatsApp {whatsapp} con las fechas y la cantidad de personas para cotizar."
+        )
+    if key == "cancellation":
+        return (
+            "La cancelación depende de las condiciones de tu reserva. "
+            f"Escríbenos por WhatsApp {whatsapp} o al correo {email} con el código de reserva."
+        )
+    if key == "availability":
+        return (
+            "Para confirmar disponibilidad necesitamos las fechas. "
+            f"Escríbenos por WhatsApp {whatsapp}."
+        )
+    return stored
+
+
+def _faq_payload(row: CommonAnswers, info: dict[str, Any], rooms: list[dict[str, Any]]) -> dict[str, Any]:
+    answer = _live_faq_answer(row.topic, row.answer_guide, info, rooms)
+    return {
+        "id": row.id,
+        "topic": row.topic,
+        "keywords": row.keywords,
+        "question": row.question,
+        "answer": answer,
+        "answer_guide": answer,
+        "sort_order": row.sort_order,
+        "is_active": row.is_active,
+    }
+
+
 def search_common_answers(db: Session, query: str | None = None) -> list[dict[str, Any]]:
     rows = (
         db.query(CommonAnswers)
@@ -95,17 +206,12 @@ def search_common_answers(db: Session, query: str | None = None) -> list[dict[st
         .order_by(CommonAnswers.sort_order.asc(), CommonAnswers.id.asc())
         .all()
     )
+    info = hostel_info_dict(db)
+    rooms = search_rooms(db)
     needle = (query or "").strip().lower()
     out: list[dict[str, Any]] = []
     for row in rows:
-        item = {
-            "id": row.id,
-            "topic": row.topic,
-            "keywords": row.keywords,
-            "question": row.question,
-            "answer": row.answer_guide,
-            "answer_guide": row.answer_guide,
-        }
+        item = _faq_payload(row, info, rooms)
         if needle:
             blob = f"{row.topic} {row.keywords} {row.question} {row.answer_guide}".lower()
             tokens = [t for t in needle.replace("?", " ").split() if t]
@@ -116,34 +222,15 @@ def search_common_answers(db: Session, query: str | None = None) -> list[dict[st
                 continue
         out.append(item)
     if needle and not out:
-        return [
-            {
-                "id": row.id,
-                "topic": row.topic,
-                "keywords": row.keywords,
-                "question": row.question,
-                "answer": row.answer_guide,
-                "answer_guide": row.answer_guide,
-            }
-            for row in rows
-        ]
+        return [_faq_payload(row, info, rooms) for row in rows]
     return out
 
 
 def list_common_answers_admin(db: Session) -> list[dict[str, Any]]:
     rows = db.query(CommonAnswers).order_by(CommonAnswers.sort_order.asc(), CommonAnswers.id.asc()).all()
-    return [
-        {
-            "id": row.id,
-            "topic": row.topic,
-            "keywords": row.keywords,
-            "question": row.question,
-            "answer_guide": row.answer_guide,
-            "sort_order": row.sort_order,
-            "is_active": row.is_active,
-        }
-        for row in rows
-    ]
+    info = hostel_info_dict(db)
+    rooms = search_rooms(db)
+    return [_faq_payload(row, info, rooms) for row in rows]
 
 
 def upsert_common_answer(db: Session, payload: dict[str, Any], answer_id: int | None = None) -> dict[str, Any]:
@@ -219,10 +306,10 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "search_common_answers",
             "description": (
-                "Lee las preguntas frecuentes guardadas en español, cada una con su respuesta. "
-                "Úsala cuando el huésped pregunte por la estadía. "
-                "Responde con esa respuesta, en el idioma en que escribió el huésped. "
-                "No inventes datos que no estén en la respuesta."
+                "Lee las preguntas frecuentes. El campo answer ya trae los datos reales "
+                "(WhatsApp, correo, horarios, dirección o precios). "
+                "Escribe esos valores en la respuesta, en el idioma del huésped. "
+                "No contestes con instrucciones como 'comparte el WhatsApp'."
             ),
             "parameters": {
                 "type": "object",
