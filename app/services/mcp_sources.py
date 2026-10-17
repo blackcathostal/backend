@@ -16,6 +16,7 @@ from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.users import Users
 from app.services.ai_api_sources import collect_external_api_materials
 from app.services.hostel_directions import directions_from_hostel
+from app.services.instagram_knowledge import search_common_answers
 from app.services.ai_source_fetcher import fetch_source_content
 
 mcp = FastMCP(
@@ -145,6 +146,27 @@ async def search_google_places(query: str, max_results: int = 5) -> dict[str, An
 )
 def directions_from_hostel_tool(destination: str) -> dict[str, Any]:
     return directions_from_hostel(destination)
+
+
+@mcp.tool(
+    name="search_frequent_questions",
+    description=(
+        "Lee las preguntas frecuentes de Black Cat Hostal guardadas en configuraciones, "
+        "cada una con su respuesta. Úsala antes de contestar una duda del huésped."
+    ),
+    structured_output=True,
+)
+def search_frequent_questions(query: str = "") -> dict[str, Any]:
+    with SessionLocal() as db:
+        items = search_common_answers(db, query)
+    return {
+        "ok": True,
+        "query": str(query or "").strip(),
+        "questions": [
+            {"question": item.get("question") or "", "answer": item.get("answer") or ""}
+            for item in items
+        ],
+    }
 
 
 async def collect_google_places(queries: list[str]) -> list[dict[str, Any]]:

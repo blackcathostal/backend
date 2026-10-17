@@ -103,6 +103,7 @@ def search_common_answers(db: Session, query: str | None = None) -> list[dict[st
             "topic": row.topic,
             "keywords": row.keywords,
             "question": row.question,
+            "answer": row.answer_guide,
             "answer_guide": row.answer_guide,
         }
         if needle:
@@ -121,6 +122,7 @@ def search_common_answers(db: Session, query: str | None = None) -> list[dict[st
                 "topic": row.topic,
                 "keywords": row.keywords,
                 "question": row.question,
+                "answer": row.answer_guide,
                 "answer_guide": row.answer_guide,
             }
             for row in rows
@@ -217,8 +219,9 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "search_common_answers",
             "description": (
-                "Search common Instagram FAQ guides: breakfast, check-in, parking, location, "
-                "contact, cancellations, groups, etc."
+                "Read the frequent questions saved by the hostel admin, each with its official answer. "
+                "Use this for guest questions about the stay, and reply with the returned answer. "
+                "Do not invent facts that are not in that answer."
             ),
             "parameters": {
                 "type": "object",

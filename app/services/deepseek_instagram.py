@@ -43,7 +43,7 @@ Estilo:
 Datos (OBLIGATORIO):
 - Precios, tipos o características de habitación → llama search_rooms.
 - Check-in, check-out, horario de desayuno, estacionamiento, WhatsApp, dirección → llama get_hostel_info.
-- Dudas frecuentes → llama search_common_answers.
+- Preguntas frecuentes → llama search_common_answers y responde con el campo answer, en el idioma del huésped.
 - Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. El mensaje al huésped sale de replies, en tono cercano, sin metros por calle y con la URL corta de Maps al final. No la reescribas ni mandes a WhatsApp.
 - Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
 - Los precios son referenciales en CLP; indica que pueden variar por temporada.
@@ -177,7 +177,9 @@ def system_prompt_for_reply(extra: str = "") -> str:
         "Un comentario se publica bajo la foto: responde breve. "
         "Un mensaje privado puede ser un poco más completo. "
         "Si escribió por los dos, usa lo que ya dijo en el otro canal y no repitas la misma respuesta. "
-        "No inventes que escribió por un canal si el turno dice que no."
+        "No inventes que escribió por un canal si el turno dice que no.\n"
+        "Si la consulta puede estar en las preguntas frecuentes, llama search_common_answers. "
+        "Si hay una respuesta guardada, úsala como base del mensaje y no inventes datos que no estén ahí."
     )
     now = datetime.now(SANTIAGO)
     greeting = (
