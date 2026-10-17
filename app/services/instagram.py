@@ -297,6 +297,24 @@ async def _graph_get(path: str, token: str, params: dict[str, Any] | None = None
     return data
 
 
+async def _graph_delete(path: str, token: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        response = await client.delete(
+            f"{_graph_base()}{path}",
+            params={"access_token": token},
+        )
+    data = response.json() if response.content else {}
+    if not isinstance(data, dict):
+        data = {}
+    if response.status_code >= 400 or data.get("error"):
+        err = data.get("error") or {}
+        raise InstagramError(
+            err.get("message") or f"Graph DELETE {path} falló ({response.status_code})",
+            details=data,
+        )
+    return data
+
+
 async def _graph_post(path: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
     body = {**payload, "access_token": token}
     async with httpx.AsyncClient(timeout=45.0) as client:

@@ -7,6 +7,7 @@ from typing import Any
 from app.services.instagram import (
     InstagramConfigError,
     InstagramError,
+    _graph_delete,
     _graph_get,
     _graph_post,
     _require_connection,
@@ -50,15 +51,26 @@ def _serialize_post(post: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _serialize_comment(comment: dict[str, Any]) -> dict[str, Any]:
+def _serialize_comment(
+    comment: dict[str, Any],
+    *,
+    page_id: str = "",
+    page_name: str = "",
+) -> dict[str, Any]:
     author = comment.get("from") or {}
     parent = comment.get("parent") or {}
+    author_id = str(author.get("id") or "")
+    author_name = author.get("name") or "Usuario"
+    own = bool(page_id) and author_id == str(page_id)
+    if not own and page_name and author_name.strip().lower() == page_name.strip().lower():
+        own = True
     return {
         "id": comment.get("id") or "",
         "message": comment.get("message") or "",
         "created_time": comment.get("created_time") or "",
-        "author_id": author.get("id") or "",
-        "author_name": author.get("name") or "Usuario",
+        "author_id": author_id,
+        "author_name": author_name,
+        "own": own,
         "comment_count": int(comment.get("comment_count") or 0),
         "parent_id": parent.get("id") or "",
         "permalink_url": comment.get("permalink_url") or "",
@@ -103,7 +115,13 @@ async def list_comments(post_id: str, limit: int = 100) -> dict[str, Any]:
             "limit": max(1, min(limit, 100)),
         },
     )
-    comments = [_serialize_comment(item) for item in data.get("data") or [] if item.get("id")]
+    page_id = str(conn.get("page_id") or "")
+    page_name = str(conn.get("page_name") or "")
+    comments = [
+        _serialize_comment(item, page_id=page_id, page_name=page_name)
+        for item in data.get("data") or []
+        if item.get("id")
+    ]
     return {"post": post, "comments": comments, "count": len(comments)}
 
 
@@ -147,6 +165,33 @@ async def comment_on_post(post_id: str, message: str) -> dict[str, Any]:
         {"message": text},
     )
     return {"id": result.get("id") or "", "message": text}
+
+
+async def update_comment(comment_id: str, message: str) -> dict[str, Any]:
+    conn = _require_connection()
+    text = (message or "").strip()
+    if not text:
+        raise InstagramError("El comentario no puede quedar vacío")
+    token = conn["page_access_token"]
+    page_id = str(conn.get("page_id") or "")
+    current = await _graph_get(f"/{comment_id}", token, {"fields": "id,from{id,name},message"})
+    author = current.get("from") or {}
+    author_id = str(author.get("id") or "")
+    author_name = str(author.get("name") or "")
+    page_name = str(conn.get("page_name") or "")
+    own = bool(page_id) and author_id == page_id
+    if not own and page_name and author_name.strip().lower() == page_name.strip().lower():
+        own = True
+    if not own:
+        raise InstagramError("Solo puedes editar los comentarios de la página")
+    await _graph_post(f"/{comment_id}", token, {"message": text})
+    return {"id": comment_id, "message": text, "own": True}
+
+
+async def delete_comment(comment_id: str) -> dict[str, bool]:
+    conn = _require_connection()
+    await _graph_delete(f"/{comment_id}", conn["page_access_token"])
+    return {"ok": True}
 
 
 async def reply_to_comment(comment_id: str, message: str) -> dict[str, Any]:

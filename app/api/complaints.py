@@ -223,11 +223,11 @@ def update_complaint(
     return ComplaintOut(**data)
 
 
-@router.delete("/{complaint_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{complaint_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_complaint(
     complaint_id: int,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
-) -> None:
+):
     row = _get_or_404(db, complaint_id)
     svc.delete_complaint(db, row)

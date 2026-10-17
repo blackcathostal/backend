@@ -82,6 +82,29 @@ async def facebook_comment_on_post(
         raise _http(exc) from exc
 
 
+@router.put("/comments/{comment_id}")
+async def facebook_update_comment(
+    comment_id: str,
+    body: CommentBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await fb.update_comment(comment_id, body.message)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.delete("/comments/{comment_id}")
+async def facebook_delete_comment(
+    comment_id: str,
+    _: Users = Depends(get_current_user),
+) -> dict[str, bool]:
+    try:
+        return await fb.delete_comment(comment_id)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
 @router.post("/comments/{comment_id}/reply")
 async def facebook_reply_comment(
     comment_id: str,
