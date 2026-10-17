@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 import jwt
@@ -16,14 +18,14 @@ from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.users import Users
 from app.services.ai_api_sources import collect_external_api_materials
 from app.services.hostel_directions import directions_from_hostel
-from app.services.instagram_knowledge import search_common_answers
-from app.services.ai_source_fetcher import fetch_source_content
+from app.services.instagram_knowledge import hostel_info_dict, search_common_answers, search_rooms
+from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content
 
 mcp = FastMCP(
     "Black Cat Tourism Sources",
     instructions=(
-        "Consulta únicamente las fuentes web HTTPS activadas y las APIs REST "
-        "configuradas por el administrador."
+        "Responde con datos del hostal, las habitaciones, las preguntas frecuentes "
+        "y, si falta algo, con búsqueda en la web. No inventes datos."
     ),
     streamable_http_path="/",
 )
@@ -148,15 +150,7 @@ def directions_from_hostel_tool(destination: str) -> dict[str, Any]:
     return directions_from_hostel(destination)
 
 
-@mcp.tool(
-    name="search_frequent_questions",
-    description=(
-        "Lee las preguntas frecuentes de Black Cat Hostal guardadas en configuraciones, "
-        "cada una con su respuesta. Úsala antes de contestar una duda del huésped."
-    ),
-    structured_output=True,
-)
-def search_frequent_questions(query: str = "") -> dict[str, Any]:
+def _faq_payload(query: str = "") -> dict[str, Any]:
     with SessionLocal() as db:
         items = search_common_answers(db, query)
     return {
@@ -167,6 +161,231 @@ def search_frequent_questions(query: str = "") -> dict[str, Any]:
             for item in items
         ],
     }
+
+
+@mcp.tool(
+    name="search_frequent_questions",
+    description=(
+        "Lee las preguntas frecuentes de Black Cat Hostal guardadas en configuraciones, "
+        "cada una con su respuesta. Úsala antes de contestar una duda del huésped."
+    ),
+    structured_output=True,
+)
+def search_frequent_questions(query: str = "") -> dict[str, Any]:
+    return _faq_payload(query)
+
+
+@mcp.tool(
+    name="search_common_answers",
+    description=(
+        "Lee las preguntas frecuentes guardadas en configuraciones. "
+        "Úsala primero. Si la respuesta no está completa, busca también en la web."
+    ),
+    structured_output=True,
+)
+def search_common_answers_tool(query: str = "") -> dict[str, Any]:
+    return _faq_payload(query)
+
+
+@mcp.tool(
+    name="search_rooms",
+    description=(
+        "Lee nombre, tipo, capacidad y precio actual de las habitaciones del panel. "
+        "Úsala siempre que pregunten precios o qué incluye una habitación."
+    ),
+    structured_output=True,
+)
+def search_rooms_tool(query: str = "") -> dict[str, Any]:
+    with SessionLocal() as db:
+        rooms = search_rooms(db, query)
+    return {"ok": True, "query": str(query or "").strip(), "rooms": rooms}
+
+
+@mcp.tool(
+    name="get_hostel_info",
+    description=(
+        "Lee check-in, check-out, desayuno, estacionamiento, WhatsApp, correo y dirección "
+        "guardados en la información del hostal."
+    ),
+    structured_output=True,
+)
+def get_hostel_info_tool() -> dict[str, Any]:
+    with SessionLocal() as db:
+        info = hostel_info_dict(db)
+    return {"ok": True, **info}
+
+
+@mcp.tool(
+    name="get_directions_from_hostel",
+    description=(
+        "Ruta a pie desde Black Cat Hostal, Compañía de Jesús 1921, hasta un lugar de Santiago."
+    ),
+    structured_output=True,
+)
+def get_directions_from_hostel_tool(destination: str) -> dict[str, Any]:
+    return directions_from_hostel(destination)
+
+
+def _web_result_url(raw_href: str) -> str:
+    href = unquote(str(raw_href or "").strip())
+    if href.startswith("//"):
+        href = f"https:{href}"
+    parsed = urlparse(href)
+    if "duckduckgo.com" in (parsed.hostname or "") and parsed.path.startswith("/l/"):
+        target = parse_qs(parsed.query).get("uddg", [""])[0]
+        href = unquote(target)
+    if href.startswith("https://"):
+        return href
+    return ""
+
+
+def _strip_tags(value: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", value or "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _parse_duckduckgo(html: str, limit: int) -> list[dict[str, str]]:
+    blocks = re.findall(
+        r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>(?:.*?)class="result__snippet"[^>]*>(.*?)</(?:a|td|span)>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    results: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for href, title_html, snippet_html in blocks:
+        url = _web_result_url(href)
+        title = _strip_tags(title_html)
+        snippet = _strip_tags(snippet_html)
+        if not url or not title or url in seen:
+            continue
+        seen.add(url)
+        results.append({"title": title[:180], "url": url, "snippet": snippet[:320]})
+        if len(results) >= limit:
+            break
+    return results
+
+
+async def _wikipedia_search(query: str, limit: int) -> list[dict[str, str]]:
+    try:
+        async with httpx.AsyncClient(timeout=settings.deepseek_source_timeout_seconds) as client:
+            response = await client.get(
+                "https://es.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": query,
+                    "srlimit": limit,
+                    "format": "json",
+                    "utf8": 1,
+                },
+                headers={"User-Agent": "BlackCatTourismBot/1.0 (+https://blackcathostal.com)"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+    results: list[dict[str, str]] = []
+    for item in (payload.get("query") or {}).get("search") or []:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        slug = title.replace(" ", "_")
+        results.append(
+            {
+                "title": title,
+                "url": f"https://es.wikipedia.org/wiki/{slug}",
+                "snippet": _strip_tags(str(item.get("snippet") or ""))[:320],
+            }
+        )
+    return results
+
+
+@mcp.tool(
+    name="search_web",
+    description=(
+        "Busca en la web cuando la respuesta no está en las preguntas frecuentes, "
+        "en las habitaciones ni en la información del hostal. "
+        "Sirve para lugares de Santiago, horarios públicos y datos que no están en el panel."
+    ),
+    structured_output=True,
+)
+async def search_web(query: str, max_results: int = 5) -> dict[str, Any]:
+    text = str(query or "").strip()[:180]
+    if not text:
+        return {"ok": False, "query": text, "error": "La búsqueda está vacía."}
+    limit = max(1, min(int(max_results or 5), 5))
+    results: list[dict[str, str]] = []
+    error = ""
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.deepseek_source_timeout_seconds,
+            follow_redirects=True,
+        ) as client:
+            response = await client.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": text},
+                headers={
+                    "User-Agent": "BlackCatTourismBot/1.0 (+https://blackcathostal.com)",
+                    "Accept": "text/html",
+                },
+            )
+            response.raise_for_status()
+            results = _parse_duckduckgo(response.text, limit)
+    except (httpx.HTTPError, ValueError) as exc:
+        error = str(exc)
+    if not results:
+        results = await _wikipedia_search(text, limit)
+    if not results:
+        return {"ok": False, "query": text, "results": [], "error": error or "Sin resultados web."}
+    return {"ok": True, "query": text, "results": results}
+
+
+@mcp.tool(
+    name="read_web_page",
+    description=(
+        "Lee el texto de una página HTTPS devuelta por search_web. "
+        "No uses direcciones que no hayan salido de una tool."
+    ),
+    structured_output=True,
+)
+async def read_web_page(url: str) -> dict[str, Any]:
+    try:
+        material = await fetch_source_content(
+            str(url or "").strip(),
+            timeout_seconds=settings.deepseek_source_timeout_seconds,
+            max_bytes=settings.deepseek_source_max_bytes,
+        )
+    except (SourceFetchError, Exception) as exc:
+        return {"ok": False, "url": url, "error": str(exc)}
+    return {
+        "ok": True,
+        "url": material.get("url") or url,
+        "title": material.get("title") or "",
+        "text": str(material.get("text") or "")[:1800],
+    }
+
+
+def tool_result_payload(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, tuple) and len(result) > 1 and isinstance(result[1], dict):
+        return result[1]
+    structured = getattr(result, "structured_content", None)
+    if isinstance(structured, dict):
+        return structured
+    return {}
+
+
+async def call_reply_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run one MCP tool for a DeepSeek Instagram or Facebook reply."""
+    try:
+        result = await mcp.call_tool(name, arguments or {})
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    payload = tool_result_payload(result)
+    if payload:
+        return payload
+    return {"ok": False, "error": f"La tool {name} no devolvió datos."}
 
 
 async def collect_google_places(queries: list[str]) -> list[dict[str, Any]]:

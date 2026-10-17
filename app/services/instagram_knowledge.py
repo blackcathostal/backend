@@ -118,12 +118,42 @@ def _is_instruction(text: str) -> bool:
     return any(marker in sample for marker in _INSTRUCTION_MARKERS)
 
 
-def _live_faq_answer(topic: str, guide: str, info: dict[str, Any], rooms: list[dict[str, Any]]) -> str:
+def _is_price_faq(topic: str, question: str) -> bool:
+    if (topic or "").strip().lower() == "prices":
+        return True
+    sample = (question or "").strip().lower()
+    return "cuesta una habitación" in sample or "cuesta una habitacion" in sample
+
+
+def _prices_from_rooms(rooms: list[dict[str, Any]], whatsapp: str) -> str:
+    ordered = sorted(rooms, key=lambda room: int(room.get("id") or 0), reverse=True)
+    tariffs = [
+        f"{room.get('name')}: {room.get('price_label')} CLP"
+        for room in ordered
+        if room.get("name") and room.get("price_label")
+    ]
+    listed = ". ".join(tariffs)
+    extra = f" {listed}." if listed else ""
+    return (
+        "Las tarifas son referenciales y pueden variar por temporada."
+        f"{extra} Para una fecha exacta escríbenos por WhatsApp {whatsapp}."
+    )
+
+
+def _live_faq_answer(
+    topic: str,
+    question: str,
+    guide: str,
+    info: dict[str, Any],
+    rooms: list[dict[str, Any]],
+) -> str:
     """Turn an internal instruction into the real hostel values."""
     stored = (guide or "").strip()
+    whatsapp = str(info.get("whatsapp_url") or "").strip()
+    if _is_price_faq(topic, question):
+        return _prices_from_rooms(rooms, whatsapp)
     if stored and not _is_instruction(stored):
         return stored
-    whatsapp = str(info.get("whatsapp_url") or "").strip()
     email = str(info.get("email") or "").strip()
     address = str(info.get("address") or "").strip()
     check_in = str(info.get("check_in_time") or "").strip()
@@ -155,18 +185,6 @@ def _live_faq_answer(topic: str, guide: str, info: dict[str, Any], rooms: list[d
             f"Estamos en {address}. "
             f"Si necesitas ayuda para llegar, escríbenos por WhatsApp {whatsapp}."
         )
-    if key == "prices":
-        tariffs = [
-            f"{room.get('name') or room.get('type')}: {room.get('price_label')} CLP"
-            for room in rooms
-            if room.get("price_label")
-        ]
-        listed = ". ".join(tariffs)
-        extra = f" {listed}." if listed else ""
-        return (
-            "Las tarifas son referenciales y pueden variar por temporada."
-            f"{extra} Para una fecha exacta escríbenos por WhatsApp {whatsapp}."
-        )
     if key == "groups":
         return (
             "Sí, recibimos grupos y estadías corporativas. "
@@ -186,7 +204,7 @@ def _live_faq_answer(topic: str, guide: str, info: dict[str, Any], rooms: list[d
 
 
 def _faq_payload(row: CommonAnswers, info: dict[str, Any], rooms: list[dict[str, Any]]) -> dict[str, Any]:
-    answer = _live_faq_answer(row.topic, row.answer_guide, info, rooms)
+    answer = _live_faq_answer(row.topic, row.question, row.answer_guide, info, rooms)
     return {
         "id": row.id,
         "topic": row.topic,
@@ -319,6 +337,47 @@ DEEPSEEK_TOOLS = [
                         "description": "Topic or keywords from the guest question",
                     }
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web",
+            "description": (
+                "Search the public web when the answer is not in the frequent questions, "
+                "the rooms or the hostel info. Use it for places in Santiago, public hours "
+                "and facts that are not saved in the admin panel."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query in the guest language or in Spanish",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_web_page",
+            "description": (
+                "Read the text of one HTTPS page returned by search_web. "
+                "Do not open URLs that did not come from a tool."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "HTTPS URL from search_web results",
+                    }
+                },
+                "required": ["url"],
             },
         },
     },

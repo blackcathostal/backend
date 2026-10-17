@@ -12,7 +12,8 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.services.instagram_knowledge import DEEPSEEK_TOOLS, run_knowledge_tool
+from app.services.instagram_knowledge import DEEPSEEK_TOOLS
+from app.services.mcp_sources import call_reply_tool
 
 SANTIAGO = ZoneInfo("America/Santiago")
 
@@ -44,6 +45,7 @@ Datos (OBLIGATORIO):
 - Precios, tipos o características de habitación → llama search_rooms.
 - Check-in, check-out, horario de desayuno, estacionamiento, WhatsApp, dirección → llama get_hostel_info.
 - Preguntas frecuentes → llama search_common_answers y responde con el campo answer, en el idioma del huésped.
+- Si la respuesta no está completa en las preguntas frecuentes, en las habitaciones ni en la info del hostal, llama search_web. Si necesitas el detalle de un resultado, llama read_web_page con esa URL.
 - Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. El mensaje al huésped sale de replies, en tono cercano, sin metros por calle y con la URL corta de Maps al final. No la reescribas ni mandes a WhatsApp.
 - Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
 - Los precios son referenciales en CLP; indica que pueden variar por temporada.
@@ -178,9 +180,9 @@ def system_prompt_for_reply(extra: str = "") -> str:
         "Un mensaje privado puede ser un poco más completo. "
         "Si escribió por los dos, usa lo que ya dijo en el otro canal y no repitas la misma respuesta. "
         "No inventes que escribió por un canal si el turno dice que no.\n"
-        "Si la consulta puede estar en las preguntas frecuentes, llama search_common_answers. "
-        "El campo answer ya tiene los valores reales del hostal. "
-        "Escribe esos valores en el mensaje y contesta en el idioma del huésped. "
+        "Busca la respuesta en las preguntas frecuentes, en las habitaciones y en la info del hostal. "
+        "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
+        "Contesta en el idioma del huésped usando solo datos que devuelvan las tools. "
         "No repitas instrucciones internas."
     )
     now = datetime.now(SANTIAGO)
@@ -304,7 +306,8 @@ def _guest_turn(
         f"Mensaje del huésped:\n{(text or '').strip() or '(vacío)'}",
         "",
         "Detecta el idioma del mensaje y responde en ese mismo idioma. "
-        "Usa las tools si necesitas datos del hostal/habitaciones y luego entrega el JSON final.",
+        "Busca en preguntas frecuentes, habitaciones, info del hostal y en la web si falta el dato. "
+        "Luego entrega el JSON final.",
     ]
     return "\n".join(lines)
 
@@ -320,7 +323,7 @@ async def _run_reply_loop(
     route_reply: dict[str, Any] | None = None
 
     async with httpx.AsyncClient(timeout=90.0) as client:
-        for _ in range(4):
+        for _ in range(6):
             response = await client.post(
                 f"{base}/chat/completions",
                 headers=headers,
@@ -357,7 +360,7 @@ async def _run_reply_loop(
                     fn = call.get("function") or {}
                     name = fn.get("name") or ""
                     args = _parse_tool_args(fn.get("arguments"))
-                    result = run_knowledge_tool(db, name, args)
+                    result = await call_reply_tool(name, args)
                     if (
                         name == "get_directions_from_hostel"
                         and isinstance(result, dict)
