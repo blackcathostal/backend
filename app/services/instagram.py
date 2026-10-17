@@ -39,10 +39,9 @@ SCOPES = [
 MESSAGE_WEBHOOK_FIELDS = (
     "messages",
     "messaging_postbacks",
-    "messaging_seen",
-    "messaging_referral",
+    "message_reads",
+    "messaging_referrals",
     "message_reactions",
-    "comments",
 )
 
 
