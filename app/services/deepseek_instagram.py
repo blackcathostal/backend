@@ -179,7 +179,9 @@ def system_prompt_for_reply(extra: str = "") -> str:
         "Si escribió por los dos, usa lo que ya dijo en el otro canal y no repitas la misma respuesta. "
         "No inventes que escribió por un canal si el turno dice que no.\n"
         "Si la consulta puede estar en las preguntas frecuentes, llama search_common_answers. "
-        "Si hay una respuesta guardada, úsala como base del mensaje y no inventes datos que no estén ahí."
+        "Las preguntas y respuestas están en español. "
+        "Usa esa respuesta como base y contéstala en el idioma en que escribió el huésped. "
+        "No inventes datos que no estén ahí."
     )
     now = datetime.now(SANTIAGO)
     greeting = (

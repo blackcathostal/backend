@@ -219,9 +219,10 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "search_common_answers",
             "description": (
-                "Read the frequent questions saved by the hostel admin, each with its official answer. "
-                "Use this for guest questions about the stay, and reply with the returned answer. "
-                "Do not invent facts that are not in that answer."
+                "Lee las preguntas frecuentes guardadas en español, cada una con su respuesta. "
+                "Úsala cuando el huésped pregunte por la estadía. "
+                "Responde con esa respuesta, en el idioma en que escribió el huésped. "
+                "No inventes datos que no estén en la respuesta."
             ),
             "parameters": {
                 "type": "object",
