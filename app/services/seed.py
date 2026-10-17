@@ -60,7 +60,6 @@ DEFAULT_ROOMS = [
         "type": "Individual",
         "capacity": 1,
         "price": 35000,
-        "status": "Disponible",
         "features": "Single bed, private bathroom, Wi-Fi, heating, continental breakfast included.",
     },
     {
@@ -68,7 +67,6 @@ DEFAULT_ROOMS = [
         "type": "Doble",
         "capacity": 2,
         "price": 48000,
-        "status": "Disponible",
         "features": "Queen/double bed, private bathroom, Wi-Fi, heating, continental breakfast included.",
     },
     {
@@ -76,7 +74,6 @@ DEFAULT_ROOMS = [
         "type": "Triple",
         "capacity": 3,
         "price": 62000,
-        "status": "Ocupada",
         "features": "Twin/triple setup, private bathroom, Wi-Fi, heating, continental breakfast included.",
     },
     {
@@ -84,7 +81,6 @@ DEFAULT_ROOMS = [
         "type": "Suite",
         "capacity": 2,
         "price": 79000,
-        "status": "Disponible",
         "features": "Superior king bed, higher comfort, private bathroom, Wi-Fi, heating, continental breakfast included.",
     },
     {
@@ -92,7 +88,6 @@ DEFAULT_ROOMS = [
         "type": "Familiar",
         "capacity": 4,
         "price": 89000,
-        "status": "Mantenimiento",
         "features": "Family/shared layout, multiple beds or bunks, private bathroom, Wi-Fi, heating, breakfast included.",
     },
 ]

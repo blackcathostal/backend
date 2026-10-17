@@ -41,7 +41,6 @@ def create_room(
         type=payload.type.strip(),
         capacity=payload.capacity,
         price=payload.price,
-        status=(payload.status or "Disponible").strip(),
         features=(payload.features or "").strip(),
     )
     db.add(room)
@@ -62,7 +61,7 @@ def update_room(
         raise HTTPException(status_code=404, detail="Room not found")
 
     data = payload.model_dump(exclude_unset=True)
-    for key in ("name", "type", "status", "features"):
+    for key in ("name", "type", "features"):
         if key in data and data[key] is not None:
             data[key] = str(data[key]).strip()
 

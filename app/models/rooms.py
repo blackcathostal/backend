@@ -14,7 +14,6 @@ class Rooms(Base):
     type: Mapped[str] = mapped_column(String(80), nullable=False)
     capacity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     price: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    status: Mapped[str] = mapped_column(String(40), nullable=False, default="Disponible")
     features: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

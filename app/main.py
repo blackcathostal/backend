@@ -74,6 +74,8 @@ def _ensure_schema_patches() -> None:
             )
         if not column_exists("rooms", "features"):
             conn.execute(text("ALTER TABLE rooms ADD COLUMN features TEXT NULL"))
+        if column_exists("rooms", "status"):
+            conn.execute(text("ALTER TABLE rooms DROP COLUMN status"))
         if column_exists("rooms", "caracteristicas") and column_exists("rooms", "features"):
             conn.execute(
                 text(

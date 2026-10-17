@@ -148,7 +148,6 @@ def main() -> None:
                 "type": room["type"],
                 "capacity": int(room["capacity"]),
                 "price": int(room["price"]),
-                "status": room["status"],
             }
             key = room["name"].lower()
             if key in remote_rooms:

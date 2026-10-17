@@ -72,7 +72,6 @@ def search_rooms(db: Session, query: str | None = None) -> list[dict[str, Any]]:
             "capacity": room.capacity,
             "price_clp": int(room.price or 0),
             "price_label": f"${int(room.price or 0):,}".replace(",", "."),
-            "status": room.status,
             "features": getattr(room, "features", None) or "",
         }
         if needle:
@@ -81,7 +80,6 @@ def search_rooms(db: Session, query: str | None = None) -> list[dict[str, Any]]:
                     str(item["name"]),
                     str(item["type"]),
                     str(item["features"]),
-                    str(item["status"]),
                 ]
             ).lower()
             if needle not in blob:
