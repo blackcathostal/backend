@@ -161,7 +161,8 @@ def upsert_inbox_item(item: dict[str, Any]) -> dict[str, Any]:
     if not item.get("id"):
         item["id"] = str(uuid.uuid4())
     items.insert(0, item)
-    data["items"] = items[:500]
+    items.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    data["items"] = items[:5000]
     _save_inbox_raw(data)
     return item
 
@@ -355,6 +356,34 @@ def build_auth_url(state: str | None = None) -> str:
         "state": state or str(uuid.uuid4()),
     }
     return f"https://www.facebook.com/{settings.graph_api_version}/dialog/oauth?{urlencode(params)}"
+
+
+async def _graph_pages(
+    path: str,
+    token: str,
+    params: dict[str, Any] | None = None,
+    *,
+    max_pages: int = 25,
+) -> list[dict[str, Any]]:
+    """Follow Graph paging.next so older records are not dropped."""
+    collected: list[dict[str, Any]] = []
+    next_url: str | None = None
+    for _ in range(max_pages):
+        if next_url:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.get(next_url)
+            data = response.json() if response.content else {}
+            if not isinstance(data, dict):
+                break
+            if response.status_code >= 400 or data.get("error"):
+                break
+        else:
+            data = await _graph_get(path, token, params)
+        collected.extend(data.get("data") or [])
+        next_url = ((data.get("paging") or {}).get("next") or "").strip() or None
+        if not next_url:
+            break
+    return collected
 
 
 async def _graph_get(path: str, token: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -588,8 +617,8 @@ async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
     return synced
 
 
-async def sync_recent_messages(limit_conversations: int = 20) -> list[dict[str, Any]]:
-    """Pull recent Instagram DM threads. Does not auto-reply to old messages."""
+async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, Any]]:
+    """Pull Instagram DM history, including older pages. Does not auto-reply."""
     conn = _require_connection()
     token = conn["page_access_token"]
     ig_user_id = str(conn.get("ig_user_id") or "")
@@ -597,31 +626,46 @@ async def sync_recent_messages(limit_conversations: int = 20) -> list[dict[str, 
     ig_username = str(conn.get("ig_username") or "").lower()
     params = {
         "platform": "instagram",
-        "fields": "id,updated_time,messages.limit(15){id,message,from,created_time}",
-        "limit": limit_conversations,
+        "fields": "id,updated_time,participants",
+        "limit": max(1, min(limit_conversations, 50)),
     }
-    data: dict[str, Any] | None = None
+    conversations: list[dict[str, Any]] | None = None
     last_error = "No se pudieron leer los mensajes privados"
     for path in (f"/{ig_user_id}/conversations", f"/{page_id}/conversations"):
         if path == "/conversations":
             continue
         try:
-            data = await _graph_get(path, token, params)
+            conversations = await _graph_pages(path, token, params, max_pages=40)
             break
         except InstagramError as exc:
             last_error = str(exc)
-    if data is None:
+    if conversations is None:
         raise InstagramError(last_error)
 
     own_ids = {item for item in (ig_user_id, page_id) if item}
     synced: list[dict[str, Any]] = []
-    for conv in data.get("data") or []:
-        thread_id = conv.get("id")
-        messages = ((conv.get("messages") or {}).get("data")) or []
+    for conv in conversations:
+        thread_id = str(conv.get("id") or "")
+        names = {
+            str(person.get("id") or ""): person.get("username") or person.get("name") or ""
+            for person in ((conv.get("participants") or {}).get("data") or [])
+            if person.get("id")
+        }
+        if not thread_id:
+            continue
+        try:
+            messages = await _graph_pages(
+                f"/{thread_id}/messages",
+                token,
+                {"fields": "id,message,from,created_time", "limit": 50},
+                max_pages=20,
+            )
+        except InstagramError:
+            messages = ((conv.get("messages") or {}).get("data")) or []
         for msg in messages:
             sender = msg.get("from") or {}
             sender_id = str(sender.get("id") or "")
-            username = str(sender.get("username") or "")
+            username = str(sender.get("username") or names.get(sender_id) or "")
             if not sender_id or sender_id in own_ids or username.lower() == ig_username:
                 continue
             external_id = f"message:{msg.get('id') or uuid.uuid4()}"
