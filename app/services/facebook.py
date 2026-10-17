@@ -190,7 +190,10 @@ async def update_comment(comment_id: str, message: str) -> dict[str, Any]:
 
 async def delete_comment(comment_id: str) -> dict[str, bool]:
     conn = _require_connection()
-    await _graph_delete(f"/{comment_id}", conn["page_access_token"])
+    result = await _graph_delete(f"/{comment_id}", conn["page_access_token"])
+    if result.get("success") is False:
+        err = result.get("error") or {}
+        raise InstagramError(err.get("message") or "Facebook no borró el comentario")
     return {"ok": True}
 
 

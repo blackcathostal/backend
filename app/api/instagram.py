@@ -158,35 +158,37 @@ def edit_inbox_item(
 
 
 @router.delete("/inbox/{item_id}")
-def remove_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[str, bool]:
+async def remove_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[str, bool]:
     try:
-        ig.delete_inbox_item(item_id)
+        await ig.delete_inbox_item(item_id)
+    except ig.InstagramConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ig.InstagramError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}
 
 
 @router.put("/inbox/{item_id}/replies/{reply_index}")
-def edit_inbox_reply(
+async def edit_inbox_reply(
     item_id: str,
     reply_index: int,
     body: InboxTextBody,
     _: Users = Depends(get_current_user),
 ) -> dict[str, Any]:
     try:
-        return ig.update_inbox_reply(item_id, reply_index, body.text)
+        return await ig.update_inbox_reply(item_id, reply_index, body.text)
     except ig.InstagramError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/inbox/{item_id}/replies/{reply_index}")
-def remove_inbox_reply(
+async def remove_inbox_reply(
     item_id: str,
     reply_index: int,
     _: Users = Depends(get_current_user),
 ) -> dict[str, Any]:
     try:
-        return ig.delete_inbox_reply(item_id, reply_index)
+        return await ig.delete_inbox_reply(item_id, reply_index)
     except ig.InstagramError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

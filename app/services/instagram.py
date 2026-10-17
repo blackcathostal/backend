@@ -197,50 +197,125 @@ def set_auto_reply_enabled(enabled: bool) -> bool:
 
 
 def update_inbox_message(item_id: str, text: str) -> dict[str, Any]:
+    raise InstagramError("Solo se editan las respuestas del hostal, y el cambio se publica en Instagram")
+
+
+def _meta_already_gone(exc: InstagramError) -> bool:
+    message = str(exc).lower()
+    return any(
+        part in message
+        for part in (
+            "does not exist",
+            "nonexisting",
+            "no existe",
+            "unsupported delete request",
+            "has been deleted",
+        )
+    )
+
+
+async def _delete_on_instagram(object_id: str) -> None:
+    target = str(object_id or "").strip()
+    if not target:
+        raise InstagramError("Falta el id para borrar el comentario en Instagram")
+    conn = _require_connection()
+    try:
+        await _graph_delete(f"/{target}", conn["page_access_token"])
+    except InstagramError as exc:
+        if not _meta_already_gone(exc):
+            raise
+
+
+async def _instagram_reply_id(item: dict[str, Any], reply: dict[str, Any]) -> str | None:
+    stored = str(reply.get("meta_message_id") or reply.get("meta_comment_id") or "").strip()
+    if stored:
+        return stored
+    parent = str(item.get("meta_comment_id") or "").strip()
+    if item.get("type") != "comment" or not parent:
+        return None
+    conn = _require_connection()
+    data = await _graph_get(
+        f"/{parent}/replies",
+        conn["page_access_token"],
+        {"fields": "id,text", "limit": 50},
+    )
+    wanted = str(reply.get("text") or "").strip()
+    for row in reversed(data.get("data") or []):
+        if str(row.get("text") or "").strip() == wanted and row.get("id"):
+            return str(row["id"])
+    return None
+
+
+def _require_comment_item(item: dict[str, Any], action: str) -> None:
+    if item.get("type") == "message":
+        raise InstagramError(
+            f"Instagram no permite {action} un mensaje privado. Solo se puede {action} un comentario."
+        )
+    if item.get("type") != "comment":
+        raise InstagramError(f"No se puede {action} este elemento en Instagram")
+
+
+async def delete_inbox_item(item_id: str) -> None:
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
-    cleaned = (text or "").strip()
-    if not cleaned:
-        raise InstagramError("El mensaje no puede quedar vacío")
-    item["text"] = cleaned
-    item["updated_at"] = _now_iso()
-    return upsert_inbox_item(item)
-
-
-def delete_inbox_item(item_id: str) -> None:
+    _require_comment_item(item, "borrar")
+    for reply in list(item.get("replies") or []):
+        reply_id = await _instagram_reply_id(item, reply)
+        if reply_id:
+            await _delete_on_instagram(reply_id)
+    await _delete_on_instagram(str(item.get("meta_comment_id") or ""))
     data = _load_inbox_raw()
     items = list(data.get("items") or [])
-    kept = [item for item in items if item.get("id") != item_id]
+    kept = [row for row in items if row.get("id") != item_id]
     if len(kept) == len(items):
         raise InstagramError("Item de inbox no encontrado")
     data["items"] = kept
     _save_inbox_raw(data)
 
 
-def update_inbox_reply(item_id: str, reply_index: int, text: str) -> dict[str, Any]:
+async def update_inbox_reply(item_id: str, reply_index: int, text: str) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
+    _require_comment_item(item, "editar")
     replies = list(item.get("replies") or [])
     if reply_index < 0 or reply_index >= len(replies):
         raise InstagramError("Respuesta no encontrada")
     cleaned = (text or "").strip()
     if not cleaned:
         raise InstagramError("La respuesta no puede quedar vacía")
-    replies[reply_index] = {**replies[reply_index], "text": cleaned, "updated_at": _now_iso()}
+    parent = str(item.get("meta_comment_id") or "").strip()
+    if not parent:
+        raise InstagramError("Falta el id del comentario para editarlo en Instagram")
+    old_id = await _instagram_reply_id(item, replies[reply_index])
+    posted = await reply_to_comment(parent, cleaned)
+    new_id = str(posted.get("id") or "")
+    if old_id and old_id != new_id:
+        await _delete_on_instagram(old_id)
+    replies[reply_index] = {
+        **replies[reply_index],
+        "text": cleaned,
+        "meta_message_id": new_id,
+        "updated_at": _now_iso(),
+    }
     item["replies"] = replies
     item["updated_at"] = _now_iso()
     return upsert_inbox_item(item)
 
 
-def delete_inbox_reply(item_id: str, reply_index: int) -> dict[str, Any]:
+async def delete_inbox_reply(item_id: str, reply_index: int) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
+    _require_comment_item(item, "borrar")
     replies = list(item.get("replies") or [])
     if reply_index < 0 or reply_index >= len(replies):
         raise InstagramError("Respuesta no encontrada")
+    reply_id = await _instagram_reply_id(item, replies[reply_index])
+    if not reply_id:
+        raise InstagramError("No encuentro esa respuesta en Instagram para borrarla")
+    await _delete_on_instagram(reply_id)
     replies.pop(reply_index)
     item["replies"] = replies
     item["updated_at"] = _now_iso()
