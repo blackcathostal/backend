@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import secrets
+import shutil
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -275,6 +276,16 @@ def notify_update(db: Session, row: Complaints, note: str, *, email: bool, whats
     if whatsapp:
         return whatsapp_url(row.phone, update_whatsapp_text(row, note))
     return whatsapp_url(row.phone, update_whatsapp_text(row, note)) if row.phone else ""
+
+
+def delete_complaint(db: Session, row: Complaints) -> None:
+    code = (row.tracking_code or "").strip()
+    db.delete(row)
+    db.commit()
+    if re.fullmatch(r"BCH-[A-Z0-9]+", code):
+        folder = settings.uploads_dir / "complaints" / code
+        if folder.is_dir():
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 async def save_uploads(code: str, files: list[UploadFile] | None) -> list[dict[str, Any]]:

@@ -221,3 +221,13 @@ def update_complaint(
     data = svc.serialize(row, include_whatsapp=True)
     data["whatsapp_url"] = whatsapp or data.get("whatsapp_url") or ""
     return ComplaintOut(**data)
+
+
+@router.delete("/{complaint_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_complaint(
+    complaint_id: int,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> None:
+    row = _get_or_404(db, complaint_id)
+    svc.delete_complaint(db, row)
