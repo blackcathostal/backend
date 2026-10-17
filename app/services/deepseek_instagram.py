@@ -171,7 +171,13 @@ def system_prompt_for_reply(extra: str = "") -> str:
         "los horarios, la ubicación, una ruta desde el hostal o una reserva, no respondas el tema. "
         "Di, en el idioma del huésped y con tono profesional, que este canal está creado "
         "únicamente para consultas del hostal y que puedes ayudar con la estadía. "
-        "Usa action=reply y no llames tools para esos mensajes."
+        "Usa action=reply y no llames tools para esos mensajes.\n"
+        "Cada turno dice el canal de este texto y si esa misma persona también escribió "
+        "por comentario público o por mensaje privado. "
+        "Un comentario se publica bajo la foto: responde breve. "
+        "Un mensaje privado puede ser un poco más completo. "
+        "Si escribió por los dos, usa lo que ya dijo en el otro canal y no repitas la misma respuesta. "
+        "No inventes que escribió por un canal si el turno dice que no."
     )
     now = datetime.now(SANTIAGO)
     greeting = (
@@ -255,14 +261,48 @@ def _prepared_route_reply(route: dict[str, Any], messages: list[dict[str, Any]])
     return str(replies.get(language) or replies.get("es") or "").strip()
 
 
-def _guest_turn(item_type: str, text: str, *, author_username: str | None = None) -> str:
-    return (
-        f"Tipo: {item_type}\n"
-        f"Usuario: @{author_username or 'huesped_prueba'}\n"
-        f"Mensaje del huésped:\n{(text or '').strip() or '(vacío)'}\n\n"
+def _channel_label(item_type: str) -> str:
+    if item_type == "comment":
+        return "comentario público"
+    if item_type in {"message", "dm"}:
+        return "mensaje privado"
+    return "desconocido"
+
+
+def _history_lines(title: str, rows: list[dict[str, Any]]) -> list[str]:
+    texts = [str(row.get("text") or "").strip() for row in rows if str(row.get("text") or "").strip()]
+    if not texts:
+        return []
+    lines = [title]
+    lines.extend(f"- {text}" for text in texts[:4])
+    return lines
+
+
+def _guest_turn(
+    item_type: str,
+    text: str,
+    *,
+    author_username: str | None = None,
+    person_history: dict[str, Any] | None = None,
+) -> str:
+    history = person_history or {}
+    comments = list(history.get("comments") or [])
+    messages = list(history.get("messages") or [])
+    wrote_comment = "sí" if comments or item_type == "comment" else "no"
+    wrote_message = "sí" if messages or item_type in {"message", "dm"} else "no"
+    lines = [
+        f"Canal de este texto: {_channel_label(item_type)}.",
+        f"Esta persona escribió por comentario: {wrote_comment}.",
+        f"Esta persona escribió por mensaje privado: {wrote_message}.",
+        *_history_lines("Otros comentarios de esta persona:", comments),
+        *_history_lines("Otros mensajes privados de esta persona:", messages),
+        f"Usuario: @{author_username or 'huesped'}",
+        f"Mensaje del huésped:\n{(text or '').strip() or '(vacío)'}",
+        "",
         "Detecta el idioma del mensaje y responde en ese mismo idioma. "
-        "Usa las tools si necesitas datos del hostal/habitaciones y luego entrega el JSON final."
-    )
+        "Usa las tools si necesitas datos del hostal/habitaciones y luego entrega el JSON final.",
+    ]
+    return "\n".join(lines)
 
 
 async def _run_reply_loop(
@@ -360,6 +400,7 @@ async def generate_instagram_reply(
     inbound_text: str,
     item_type: str,
     author_username: str | None = None,
+    person_history: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return {action, message, reason, model} using DeepSeek + knowledge tools."""
     base, model, headers = _require_deepseek()
@@ -367,7 +408,12 @@ async def generate_instagram_reply(
         {"role": "system", "content": system_prompt_for_reply()},
         {
             "role": "user",
-            "content": _guest_turn(item_type, inbound_text, author_username=author_username),
+            "content": _guest_turn(
+                item_type,
+                inbound_text,
+                author_username=author_username,
+                person_history=person_history,
+            ),
         },
     ]
     return await _run_reply_loop(db=db, messages=messages, base=base, model=model, headers=headers)

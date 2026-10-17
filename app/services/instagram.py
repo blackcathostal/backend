@@ -176,6 +176,36 @@ def find_by_external_id(external_id: str) -> dict[str, Any] | None:
     return None
 
 
+def author_channel_history(
+    *,
+    author_username: str | None = None,
+    author_id: str | None = None,
+    exclude_id: str | None = None,
+) -> dict[str, list[dict[str, str]]]:
+    """Other Instagram comments and DMs from the same person."""
+    username = str(author_username or "").strip().lower().lstrip("@")
+    author = str(author_id or "").strip()
+    comments: list[dict[str, str]] = []
+    messages: list[dict[str, str]] = []
+    if not username and not author:
+        return {"comments": comments, "messages": messages}
+    for item in list_inbox():
+        if exclude_id and item.get("id") == exclude_id:
+            continue
+        item_user = str(item.get("author_username") or "").strip().lower().lstrip("@")
+        item_author = str(item.get("author_id") or "").strip()
+        same_user = bool(username and item_user and username == item_user)
+        same_id = bool(author and item_author and author == item_author)
+        if not same_user and not same_id:
+            continue
+        row = {"text": str(item.get("text") or "").strip()[:180]}
+        if item.get("type") == "comment":
+            comments.append(row)
+        elif item.get("type") == "message":
+            messages.append(row)
+    return {"comments": comments[:6], "messages": messages[:6]}
+
+
 def auto_reply_enabled() -> bool:
     try:
         if AUTO_REPLY_FILE.exists():
@@ -750,6 +780,11 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
                 inbound_text=item.get("text") or "",
                 item_type=item.get("type") or "message",
                 author_username=item.get("author_username"),
+                person_history=author_channel_history(
+                    author_username=item.get("author_username"),
+                    author_id=item.get("author_id"),
+                    exclude_id=item.get("id"),
+                ),
             )
         finally:
             db.close()
@@ -783,6 +818,11 @@ async def suggest_reply(item_id: str) -> dict[str, Any]:
             inbound_text=item.get("text") or "",
             item_type=item.get("type") or "message",
             author_username=item.get("author_username"),
+            person_history=author_channel_history(
+                author_username=item.get("author_username"),
+                author_id=item.get("author_id"),
+                exclude_id=item.get("id"),
+            ),
         )
     finally:
         db.close()
@@ -851,17 +891,48 @@ def _dm_event_text(event: dict[str, Any]) -> tuple[str, str, str]:
     return "", "", ""
 
 
+def _known_username(author_id: str) -> str | None:
+    for item in list_inbox():
+        if str(item.get("author_id") or "") == author_id and item.get("author_username"):
+            return str(item["author_username"])
+    return None
+
+
+async def _instagram_username(author_id: str) -> str | None:
+    known = _known_username(author_id)
+    if known:
+        return known
+    conn = load_connection()
+    if not conn:
+        return None
+    try:
+        profile = await _graph_get(
+            f"/{author_id}",
+            conn["page_access_token"],
+            {"fields": "username"},
+        )
+    except InstagramError:
+        return None
+    username = str(profile.get("username") or "").strip()
+    return username or None
+
+
 async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
     sender, mid, text = _dm_event_text(event)
     if not sender or not text:
         return None
+    username = await _instagram_username(sender)
     item = ingest_inbound(
         item_type="message",
         external_id=f"message:{mid or f'{sender}-{int(time.time())}'}",
         text=text,
         author_id=sender,
+        author_username=username,
         thread_id=sender,
     )
+    if username and not item.get("author_username"):
+        item["author_username"] = username
+        item = upsert_inbox_item(item)
     if auto_reply_enabled() and item.get("status") == "pending":
         try:
             item = await run_auto_reply(item["id"])
