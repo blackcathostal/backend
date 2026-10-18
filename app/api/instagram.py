@@ -401,6 +401,22 @@ def restore_deepseek_prompt(_: Users = Depends(get_current_user)) -> dict[str, A
     return prompt_payload()
 
 
+@router.post("/posts/generate")
+async def generate_instagram_post(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    from app.services.instagram_posts import create_instagram_post
+
+    try:
+        return await create_instagram_post()
+    except DeepSeekConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ig.InstagramConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/webhook")
 def verify_webhook(request: Request) -> Any:
     params = request.query_params

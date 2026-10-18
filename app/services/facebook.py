@@ -36,6 +36,8 @@ def status() -> dict[str, Any]:
     data = connection_status()
     return {
         "meta_configured": data.get("meta_configured"),
+        "deepseek_configured": data.get("deepseek_configured"),
+        "auto_reply_enabled": data.get("auto_reply_enabled"),
         "connected": data.get("connected"),
         "page_id": data.get("page_id"),
         "page_name": data.get("page_name"),
@@ -494,3 +496,394 @@ def refuse_messenger_delete() -> None:
         "Messenger no permite borrar un mensaje privado desde la página. "
         "Solo se puede borrar dentro de Facebook o Messenger."
     )
+
+
+INBOX_FILE = settings.uploads_dir / "cache" / "facebook_inbox.json"
+
+
+def _load_inbox() -> dict[str, Any]:
+    INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not INBOX_FILE.exists():
+        return {"items": []}
+    try:
+        data = json.loads(INBOX_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"items": []}
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        return {"items": []}
+    return data
+
+
+def _save_inbox(data: dict[str, Any]) -> None:
+    INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+    INBOX_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+
+def _comment_item(comment: dict[str, Any], post_id: str, replies: list[dict[str, Any]]) -> dict[str, Any]:
+    name = str(comment.get("author_name") or "").strip()
+    return {
+        "id": comment.get("id") or "",
+        "type": "comment",
+        "post_id": post_id,
+        "thread_id": post_id,
+        "author_username": name,
+        "author_id": comment.get("author_id") or "",
+        "peer_id": comment.get("author_id") or "",
+        "peer_username": name,
+        "direction": "in",
+        "text": comment.get("message") or "",
+        "created_at": comment.get("created_time") or "",
+        "status": "replied_human" if replies else "pending",
+        "replies": replies,
+        "escalation_reason": None,
+    }
+
+
+def _merge_comment_items(fresh: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    data = _load_inbox()
+    by_id = {str(item.get("id") or ""): item for item in data.get("items") or [] if item.get("id")}
+    for item in fresh:
+        item_id = str(item.get("id") or "")
+        if not item_id:
+            continue
+        old = by_id.get(item_id) or {}
+        if old.get("status") in {"replied_deepseek", "needs_human", "failed"} and item.get("status") == "replied_human":
+            item["status"] = old["status"]
+        if old.get("status") in {"replied_deepseek", "needs_human", "failed"} and item.get("status") == "pending" and old.get("replies"):
+            item["status"] = old["status"]
+            item["replies"] = old.get("replies") or item.get("replies")
+        if old.get("deepseek_draft"):
+            item["deepseek_draft"] = old.get("deepseek_draft")
+        if old.get("escalation_reason") and not item.get("escalation_reason"):
+            item["escalation_reason"] = old.get("escalation_reason")
+        by_id[item_id] = item
+    items = [item for item in by_id.values() if item.get("type") == "comment"]
+    items.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+    data["items"] = items[:800]
+    _save_inbox(data)
+    return data["items"]
+
+
+async def sync_page_comments(limit_posts: int = 15) -> list[dict[str, Any]]:
+    """Store guest comments from recent Page posts. Page replies stay inside each comment."""
+    posts = await list_posts(limit=limit_posts)
+    fresh: list[dict[str, Any]] = []
+    for post in posts:
+        post_id = str(post.get("id") or "")
+        if not post_id:
+            continue
+        payload = await list_comments(post_id)
+        replies_by_parent: dict[str, list[dict[str, Any]]] = {}
+        guests: list[dict[str, Any]] = []
+        for comment in payload.get("comments") or []:
+            if comment.get("own"):
+                parent = str(comment.get("parent_id") or "")
+                if not parent:
+                    continue
+                replies_by_parent.setdefault(parent, []).append(
+                    {
+                        "text": comment.get("message") or "",
+                        "created_at": comment.get("created_time") or "",
+                        "source": "human",
+                        "meta_comment_id": comment.get("id") or "",
+                    }
+                )
+            else:
+                guests.append(comment)
+        for comment in guests:
+            comment_id = str(comment.get("id") or "")
+            replies = replies_by_parent.get(comment_id, [])
+            fresh.append(_comment_item(comment, post_id, replies))
+    return _merge_comment_items(fresh)
+
+
+def _message_row(thread: dict[str, Any]) -> dict[str, Any]:
+    messages = list(thread.get("messages") or [])
+    last = messages[-1] if messages else {}
+    own = bool(last.get("own"))
+    name = str(thread.get("peer_name") or "").strip()
+    text = str(last.get("text") or thread.get("last_message") or "").strip()
+    return {
+        "id": thread.get("id") or "",
+        "type": "message",
+        "thread_id": thread.get("id") or "",
+        "author_username": name,
+        "author_id": thread.get("peer_id") or "",
+        "peer_id": thread.get("peer_id") or "",
+        "peer_username": name,
+        "direction": "out" if own else "in",
+        "text": text[:180],
+        "created_at": thread.get("updated_time") or last.get("created_time") or "",
+        "status": "replied_human" if own else "pending",
+        "message_count": len(messages) or 1,
+    }
+
+
+def list_inbox_page(*, item_type: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if item_type in {None, "", "comment"}:
+        for item in _load_inbox().get("items") or []:
+            if item.get("type") != "comment":
+                continue
+            text = str(item.get("text") or "").strip()
+            if len(text) > 180:
+                text = text[:177].rstrip() + "..."
+            rows.append(
+                {
+                    "id": item.get("id"),
+                    "type": "comment",
+                    "thread_id": item.get("thread_id"),
+                    "author_username": item.get("author_username"),
+                    "author_id": item.get("author_id"),
+                    "peer_id": item.get("peer_id"),
+                    "peer_username": item.get("peer_username"),
+                    "direction": item.get("direction") or "in",
+                    "text": text,
+                    "created_at": item.get("created_at"),
+                    "status": item.get("status") or "pending",
+                    "message_count": 1,
+                }
+            )
+    if item_type in {None, "", "message"}:
+        for thread in _load_messenger().get("threads") or []:
+            if thread.get("id"):
+                rows.append(_message_row(thread))
+    if status:
+        rows = [row for row in rows if row.get("status") == status]
+    rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+    return rows
+
+
+def _comment_by_id(item_id: str) -> dict[str, Any] | None:
+    for item in _load_inbox().get("items") or []:
+        if str(item.get("id") or "") == str(item_id):
+            return item
+    return None
+
+
+def _save_comment(item: dict[str, Any]) -> dict[str, Any]:
+    data = _load_inbox()
+    items = list(data.get("items") or [])
+    for index, existing in enumerate(items):
+        if str(existing.get("id") or "") == str(item.get("id") or ""):
+            items[index] = item
+            data["items"] = items
+            _save_inbox(data)
+            return item
+    items.insert(0, item)
+    data["items"] = items[:800]
+    _save_inbox(data)
+    return item
+
+
+def _conversation(item: dict[str, Any]) -> list[dict[str, Any]]:
+    if item.get("type") == "message":
+        thread = get_messenger_thread(str(item.get("id") or ""))
+        turns = []
+        for message in thread.get("messages") or []:
+            own = bool(message.get("own"))
+            turns.append(
+                {
+                    "role": "out" if own else "in",
+                    "text": message.get("text") or "",
+                    "created_at": message.get("created_time"),
+                    "author": "Tú" if own else (message.get("author_name") or thread.get("peer_name") or ""),
+                    "source": "human" if own else "",
+                    "item_id": thread.get("id"),
+                    "reply_index": None,
+                }
+            )
+        return turns
+    turns = [
+        {
+            "role": "in",
+            "text": item.get("text") or "",
+            "created_at": item.get("created_at"),
+            "author": item.get("author_username") or "",
+            "item_id": item.get("id"),
+            "reply_index": None,
+        }
+    ]
+    for index, reply in enumerate(item.get("replies") or []):
+        turns.append(
+            {
+                "role": "out",
+                "text": reply.get("text") or "",
+                "created_at": reply.get("created_at"),
+                "source": reply.get("source") or "human",
+                "author": "DeepSeek" if reply.get("source") == "deepseek" else "Tú",
+                "item_id": item.get("id"),
+                "reply_index": index,
+            }
+        )
+    return turns
+
+
+def get_inbox_detail(item_id: str) -> dict[str, Any]:
+    comment = _comment_by_id(item_id)
+    if comment:
+        payload = dict(comment)
+        payload["conversation"] = _conversation(comment)
+        return payload
+    try:
+        thread = get_messenger_thread(item_id)
+    except InstagramError:
+        thread = None
+    if not thread:
+        raise InstagramError("No encontrado")
+    payload = _message_row(thread)
+    payload["text"] = ""
+    payload["deepseek_draft"] = thread.get("deepseek_draft") or ""
+    payload["escalation_reason"] = thread.get("escalation_reason")
+    payload["conversation"] = _conversation({"id": thread.get("id"), "type": "message"})
+    if payload["conversation"]:
+        payload["text"] = payload["conversation"][-1].get("text") or ""
+    return payload
+
+
+async def reply_inbox(item_id: str, message: str, *, source: str = "human") -> dict[str, Any]:
+    text = (message or "").strip()
+    if not text:
+        raise InstagramError("El mensaje no puede estar vacío")
+    comment = _comment_by_id(item_id)
+    if comment:
+        result = await reply_to_comment(str(comment.get("id") or ""), text)
+        replies = list(comment.get("replies") or [])
+        replies.append(
+            {
+                "text": text,
+                "created_at": _now_iso(),
+                "source": source,
+                "meta_comment_id": result.get("id") or "",
+            }
+        )
+        comment["replies"] = replies
+        comment["status"] = "replied_deepseek" if source == "deepseek" else "replied_human"
+        comment["updated_at"] = _now_iso()
+        _save_comment(comment)
+        return get_inbox_detail(item_id)
+    await reply_messenger(item_id, text)
+    return get_inbox_detail(item_id)
+
+
+async def delete_inbox_item(item_id: str) -> None:
+    comment = _comment_by_id(item_id)
+    if not comment:
+        refuse_messenger_delete()
+    for reply in list(comment.get("replies") or []):
+        reply_id = str(reply.get("meta_comment_id") or "").strip()
+        if reply_id:
+            try:
+                await delete_comment(reply_id)
+            except InstagramError:
+                pass
+    await delete_comment(str(comment.get("id") or ""))
+    data = _load_inbox()
+    data["items"] = [item for item in data.get("items") or [] if str(item.get("id") or "") != str(item_id)]
+    _save_inbox(data)
+
+
+async def update_inbox_reply(item_id: str, reply_index: int, message: str) -> dict[str, Any]:
+    comment = _comment_by_id(item_id)
+    if not comment:
+        raise InstagramError("Messenger no permite editar un mensaje privado desde la página.")
+    replies = list(comment.get("replies") or [])
+    if reply_index < 0 or reply_index >= len(replies):
+        raise InstagramError("Respuesta no encontrada")
+    reply_id = str(replies[reply_index].get("meta_comment_id") or "").strip()
+    if not reply_id:
+        raise InstagramError("No encuentro esa respuesta en Facebook para editarla")
+    updated = await update_comment(reply_id, message)
+    replies[reply_index]["text"] = updated.get("message") or message
+    replies[reply_index]["updated_at"] = _now_iso()
+    comment["replies"] = replies
+    _save_comment(comment)
+    return get_inbox_detail(item_id)
+
+
+async def delete_inbox_reply(item_id: str, reply_index: int) -> dict[str, Any]:
+    comment = _comment_by_id(item_id)
+    if not comment:
+        refuse_messenger_delete()
+    replies = list(comment.get("replies") or [])
+    if reply_index < 0 or reply_index >= len(replies):
+        raise InstagramError("Respuesta no encontrada")
+    reply_id = str(replies[reply_index].get("meta_comment_id") or "").strip()
+    if not reply_id:
+        raise InstagramError("No encuentro esa respuesta en Facebook para borrarla")
+    await delete_comment(reply_id)
+    replies.pop(reply_index)
+    comment["replies"] = replies
+    if not replies and comment.get("status") in {"replied_human", "replied_deepseek"}:
+        comment["status"] = "pending"
+    _save_comment(comment)
+    return get_inbox_detail(item_id)
+
+
+def _inbound_text(item_id: str) -> tuple[dict[str, Any], str]:
+    detail = get_inbox_detail(item_id)
+    if detail.get("type") == "message":
+        incoming = [turn for turn in detail.get("conversation") or [] if turn.get("role") == "in"]
+        text = str((incoming[-1] if incoming else {}).get("text") or detail.get("text") or "")
+        return detail, text
+    return detail, str(detail.get("text") or "")
+
+
+async def suggest_inbox_reply(item_id: str) -> dict[str, Any]:
+    from app.core.database import SessionLocal
+    from app.services.deepseek_instagram import generate_instagram_reply
+
+    detail, text = _inbound_text(item_id)
+    db = SessionLocal()
+    try:
+        decision = await generate_instagram_reply(
+            db=db,
+            inbound_text=text,
+            item_type="comment" if detail.get("type") == "comment" else "message",
+            author_username=detail.get("peer_username") or detail.get("author_username"),
+        )
+    finally:
+        db.close()
+    if detail.get("type") == "comment":
+        comment = _comment_by_id(item_id) or {}
+        comment["deepseek_draft"] = decision.get("message") or ""
+        comment["escalation_reason"] = decision.get("reason")
+        if decision.get("action") == "escalate":
+            comment["status"] = "needs_human"
+        _save_comment(comment)
+    else:
+        thread = get_messenger_thread(item_id)
+        thread["deepseek_draft"] = decision.get("message") or ""
+        thread["escalation_reason"] = decision.get("reason")
+        _upsert_thread(thread)
+    return decision
+
+
+async def auto_inbox_reply(item_id: str) -> dict[str, Any]:
+    decision = await suggest_inbox_reply(item_id)
+    if decision.get("action") == "escalate":
+        return get_inbox_detail(item_id)
+    message = str(decision.get("message") or "").strip()
+    if not message:
+        raise InstagramError("DeepSeek no escribió una respuesta")
+    return await reply_inbox(item_id, message, source="deepseek")
+
+
+async def sync_inbox() -> dict[str, Any]:
+    comments = await sync_page_comments()
+    warning = None
+    messages = 0
+    try:
+        result = await sync_messenger()
+        messages = int(result.get("synced") or 0)
+    except InstagramError as exc:
+        warning = str(exc)
+    return {
+        "synced": len(comments) + messages,
+        "comments": len(comments),
+        "messages": messages,
+        "warning": warning,
+    }

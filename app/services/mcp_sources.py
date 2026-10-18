@@ -365,6 +365,84 @@ async def read_web_page(url: str) -> dict[str, Any]:
     }
 
 
+_SKIPPED_MEDIA_HOSTS = (
+    "youtube.com",
+    "youtu.be",
+    "vimeo.com",
+    "tiktok.com",
+    "instagram.com",
+    "facebook.com",
+    "fb.watch",
+    "twitter.com",
+    "x.com",
+)
+
+
+def _direct_file(url: str, extensions: tuple[str, ...]) -> bool:
+    path = urlparse(str(url or "")).path.lower()
+    return path.endswith(extensions)
+
+
+def _publishable_host(url: str) -> bool:
+    host = (urlparse(str(url or "")).hostname or "").lower()
+    return bool(host) and not any(host == name or host.endswith(f".{name}") for name in _SKIPPED_MEDIA_HOSTS)
+
+
+def _usable_image(url: str) -> bool:
+    if not _publishable_host(url):
+        return False
+    path = urlparse(url).path.lower()
+    return not path.endswith((".svg", ".gif", ".webp", ".ico", ".avif", ".bmp"))
+
+
+@mcp.tool(
+    name="find_web_media",
+    description=(
+        "Lee una página HTTPS ya encontrada con search_web y devuelve fotos y videos "
+        "que se pueden publicar, junto con el título y la URL de la fuente. "
+        "Úsala para crear un post. No inventes otras URLs."
+    ),
+    structured_output=True,
+)
+async def find_web_media(url: str) -> dict[str, Any]:
+    try:
+        material = await fetch_source_content(
+            str(url or "").strip(),
+            timeout_seconds=settings.deepseek_source_timeout_seconds,
+            max_bytes=settings.deepseek_source_max_bytes,
+        )
+    except (SourceFetchError, Exception) as exc:
+        return {"ok": False, "url": url, "error": str(exc)}
+    page_url = str(material.get("url") or url)
+    ranked = [
+        item
+        for item in (material.get("image_urls") or [])
+        if _usable_image(item) and _direct_file(item, (".jpg", ".jpeg", ".png"))
+    ]
+    ranked.extend(
+        item
+        for item in (material.get("image_urls") or [])
+        if item not in ranked and _usable_image(item)
+    )
+    images = [{"url": item} for item in ranked[:4]]
+    videos = [
+        {"url": item}
+        for item in (material.get("video_urls") or [])
+        if _publishable_host(item) and _direct_file(item, (".mp4", ".mov"))
+    ][:2]
+    title = str(material.get("title") or "").strip()
+    host = urlparse(page_url).hostname or ""
+    return {
+        "ok": True,
+        "url": page_url,
+        "title": title,
+        "source_name": title or host,
+        "text": str(material.get("text") or "")[:700],
+        "images": images,
+        "videos": videos,
+    }
+
+
 def tool_result_payload(result: Any) -> dict[str, Any]:
     if isinstance(result, dict):
         return result

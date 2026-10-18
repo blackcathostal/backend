@@ -22,6 +22,7 @@ class _ReadableTextParser(HTMLParser):
         self.title_parts: list[str] = []
         self.text_parts: list[str] = []
         self.image_candidates: list[tuple[str, str, bool]] = []
+        self.video_candidates: list[str] = []
         self._ignored_depth = 0
         self._in_title = False
 
@@ -34,6 +35,19 @@ class _ReadableTextParser(HTMLParser):
                 image = attributes.get("content")
                 if image:
                     self.image_candidates.append((image.strip(), "", True))
+            if property_name in {"og:video", "og:video:url", "og:video:secure_url"}:
+                video = attributes.get("content")
+                if video:
+                    self.video_candidates.append(video.strip())
+        elif tag == "video":
+            video = attributes.get("src")
+            if video:
+                self.video_candidates.append(video.strip())
+        elif tag == "source":
+            video = attributes.get("src")
+            kind = (attributes.get("type") or "").lower()
+            if video and ("video" in kind or video.lower().split("?", 1)[0].endswith((".mp4", ".mov"))):
+                self.video_candidates.append(video.strip())
         elif tag == "img":
             for attribute in ("src", "data-src", "data-lazy-src"):
                 image = attributes.get(attribute)
@@ -106,7 +120,7 @@ def _extract_text(
     content: bytes,
     content_type: str,
     base_url: str,
-) -> tuple[str, str, list[str], list[dict[str, str]]]:
+) -> tuple[str, str, list[str], list[dict[str, str]], list[str]]:
     encoding_match = re.search(r"charset=([\w-]+)", content_type, re.IGNORECASE)
     encoding = encoding_match.group(1) if encoding_match else "utf-8"
     text = content.decode(encoding, errors="replace")
@@ -122,6 +136,7 @@ def _extract_text(
         raise SourceFetchError("La fuente no contiene texto legible.")
     image_urls: list[str] = []
     image_candidates: list[dict[str, str]] = []
+    video_urls: list[str] = []
     if "html" in content_type.lower():
         for candidate, alt, is_meta in parser.image_candidates[:16]:
             try:
@@ -133,7 +148,14 @@ def _extract_text(
                     )
             except SourceFetchError:
                 continue
-    return title[:240], text, image_urls, image_candidates
+        for candidate in parser.video_candidates[:12]:
+            try:
+                video_url = validate_source_url(urljoin(base_url, candidate))
+            except SourceFetchError:
+                continue
+            if video_url not in video_urls:
+                video_urls.append(video_url)
+    return title[:240], text, image_urls, image_candidates, video_urls
 
 
 async def fetch_source_content(
@@ -169,7 +191,7 @@ async def fetch_source_content(
                     if total > max_bytes:
                         raise SourceFetchError("La fuente supera el tamaño máximo permitido.")
                     chunks.append(chunk)
-                title, text, image_urls, image_candidates = _extract_text(
+                title, text, image_urls, image_candidates, video_urls = _extract_text(
                     b"".join(chunks), content_type, current_url
                 )
                 return {
@@ -179,6 +201,7 @@ async def fetch_source_content(
                     "image_url": image_urls[0] if image_urls else "",
                     "image_urls": image_urls,
                     "image_candidates": image_candidates,
+                    "video_urls": video_urls,
                 }
 
     raise SourceFetchError("La fuente tuvo demasiadas redirecciones.")
