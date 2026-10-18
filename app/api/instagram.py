@@ -133,7 +133,7 @@ def get_inbox(
     status: str | None = None,
     _: Users = Depends(get_current_user),
 ) -> dict[str, Any]:
-    items = ig.list_inbox(item_type=type, status=status)
+    items = ig.list_inbox_page(item_type=type, status=status)
     return {"items": items, "count": len(items)}
 
 

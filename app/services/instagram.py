@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -23,6 +24,8 @@ from app.services.deepseek_instagram import (
 CONNECTION_FILE = settings.uploads_dir / "cache" / "instagram_connection.json"
 INBOX_FILE = settings.uploads_dir / "cache" / "instagram_inbox.json"
 AUTO_REPLY_FILE = settings.uploads_dir / "cache" / "deepseek_auto_reply.json"
+_inbox_lock = threading.Lock()
+_inbox_cache: dict[str, Any] | None = None
 
 SCOPES = [
     "pages_show_list",
@@ -102,6 +105,10 @@ def clear_connection() -> None:
 
 
 def _load_inbox_raw() -> dict[str, Any]:
+    global _inbox_cache
+    with _inbox_lock:
+        if _inbox_cache is not None:
+            return _inbox_cache
     _ensure_dirs()
     if not INBOX_FILE.exists():
         return {"items": []}
@@ -113,12 +120,20 @@ def _load_inbox_raw() -> dict[str, Any]:
         return {"items": []}
     if not isinstance(data.get("items"), list):
         data["items"] = []
+    with _inbox_lock:
+        _inbox_cache = data
     return data
 
 
 def _save_inbox_raw(data: dict[str, Any]) -> None:
+    global _inbox_cache
     _ensure_dirs()
-    INBOX_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    INBOX_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    with _inbox_lock:
+        _inbox_cache = data
 
 
 def list_inbox(
@@ -133,6 +148,128 @@ def list_inbox(
         items = [i for i in items if i.get("status") == status]
     items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
     return items
+
+
+def _clean_handle(value: Any) -> str:
+    name = str(value or "").strip().lstrip("@")
+    if not name or (name.isdigit() and len(name) >= 6):
+        return ""
+    return name
+
+
+def _is_own_message(item: dict[str, Any], own_ids: set[str], ig_username: str) -> bool:
+    if item.get("direction") == "out":
+        return True
+    if str(item.get("author_id") or "") in own_ids:
+        return True
+    name = _clean_handle(item.get("author_username")).lower()
+    return bool(ig_username and name and name == ig_username)
+
+
+def _guest_id(item: dict[str, Any], own_ids: set[str]) -> str:
+    author = str(item.get("author_id") or "")
+    peer = str(item.get("peer_id") or "")
+    if item.get("direction") == "out" or author in own_ids:
+        return "" if not peer or peer in own_ids else peer
+    if author and author not in own_ids:
+        return author
+    return "" if not peer or peer in own_ids else peer
+
+
+def _group_dm_items(messages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """One bucket per conversation, matching thread id or guest id in a single pass."""
+    own_ids = _own_instagram_ids()
+    parent = list(range(len(messages)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    by_thread: dict[str, int] = {}
+    by_guest: dict[str, int] = {}
+    for index, item in enumerate(messages):
+        thread = str(item.get("thread_id") or "")
+        guest = _guest_id(item, own_ids)
+        if thread:
+            previous = by_thread.get(thread)
+            if previous is not None:
+                union(index, previous)
+            by_thread[thread] = index
+        if guest:
+            previous = by_guest.get(guest)
+            if previous is not None:
+                union(index, previous)
+            by_guest[guest] = index
+    buckets: dict[int, list[dict[str, Any]]] = {}
+    for index, item in enumerate(messages):
+        buckets.setdefault(find(index), []).append(item)
+    return list(buckets.values())
+
+
+def _client_username(group: list[dict[str, Any]], own_ids: set[str], ig_username: str) -> str:
+    for row in group:
+        peer = _clean_handle(row.get("peer_username"))
+        if peer:
+            return peer
+        if not _is_own_message(row, own_ids, ig_username):
+            name = _clean_handle(row.get("author_username"))
+            if name:
+                return name
+    return ""
+
+
+def _page_row(item: dict[str, Any], *, message_count: int = 1, peer_username: str | None = None) -> dict[str, Any]:
+    text = str(item.get("text") or "").strip()
+    if len(text) > 180:
+        text = text[:177].rstrip() + "..."
+    return {
+        "id": item.get("id"),
+        "type": item.get("type"),
+        "thread_id": item.get("thread_id"),
+        "author_username": item.get("author_username"),
+        "author_id": item.get("author_id"),
+        "peer_id": item.get("peer_id"),
+        "peer_username": peer_username if peer_username is not None else item.get("peer_username"),
+        "direction": item.get("direction"),
+        "text": text,
+        "created_at": item.get("created_at"),
+        "status": item.get("status"),
+        "message_count": message_count,
+    }
+
+
+def list_inbox_page(
+    *,
+    item_type: str | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    """Slim rows for the admin table: one row per DM thread, comments unchanged."""
+    items = list_inbox(item_type=item_type, status=status)
+    comments = [item for item in items if item.get("type") != "message"]
+    messages = [item for item in items if item.get("type") == "message"]
+    own_ids = _own_instagram_ids()
+    ig_username = str((load_connection() or {}).get("ig_username") or "").strip().lower()
+    rows: list[dict[str, Any]] = []
+    for group in _group_dm_items(messages):
+        latest = max(group, key=lambda row: str(row.get("created_at") or ""))
+        rows.append(
+            _page_row(
+                latest,
+                message_count=len(group),
+                peer_username=_client_username(group, own_ids, ig_username) or None,
+            )
+        )
+    rows.extend(_page_row(item) for item in comments)
+    rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    return rows
 
 
 def get_inbox_item(item_id: str) -> dict[str, Any] | None:
@@ -926,37 +1063,15 @@ def ingest_inbound(
     )
 
 
-def _dm_peer_key(item: dict[str, Any]) -> str:
-    peer = str(item.get("peer_id") or "").strip()
-    if peer:
-        return peer
-    if item.get("direction") == "out":
-        return str(item.get("thread_id") or item.get("id") or "")
-    return str(item.get("author_id") or item.get("thread_id") or item.get("id") or "")
-
-
 def _related_dm_items(item: dict[str, Any]) -> list[dict[str, Any]]:
     """All stored bubbles of the same Instagram DM, including older messages and our replies."""
     messages = [row for row in list_inbox() if row.get("type") == "message"]
-    keys = {key for key in (_dm_peer_key(item), str(item.get("thread_id") or "")) if key}
-    chosen: dict[str, dict[str, Any]] = {}
-    changed = True
-    while changed:
-        changed = False
-        for row in messages:
-            row_id = str(row.get("id") or "")
-            row_keys = {key for key in (_dm_peer_key(row), str(row.get("thread_id") or "")) if key}
-            if row_id in chosen or row_keys & keys:
-                if row_id not in chosen:
-                    chosen[row_id] = row
-                    changed = True
-                before = len(keys)
-                keys |= row_keys
-                if len(keys) != before:
-                    changed = True
-    rows = list(chosen.values()) or [item]
-    rows.sort(key=lambda row: str(row.get("created_at") or ""))
-    return rows
+    item_id = item.get("id")
+    for group in _group_dm_items(messages):
+        if any(row.get("id") == item_id for row in group):
+            group.sort(key=lambda row: str(row.get("created_at") or ""))
+            return group
+    return [item]
 
 
 def conversation_turns(item: dict[str, Any]) -> list[dict[str, Any]]:
