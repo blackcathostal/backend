@@ -142,7 +142,9 @@ def get_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[s
     item = ig.get_inbox_item(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="No encontrado")
-    return item
+    payload = dict(item)
+    payload["conversation"] = ig.conversation_turns(item)
+    return payload
 
 
 @router.put("/inbox/{item_id}")

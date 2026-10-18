@@ -647,6 +647,29 @@ async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
     return synced
 
 
+async def _hydrate_ig_message(msg: dict[str, Any], token: str) -> dict[str, Any]:
+    """The conversations list often returns only ids. Load text and sender per message."""
+    mid = str(msg.get("id") or "").strip()
+    sender = msg.get("from") if isinstance(msg.get("from"), dict) else {}
+    if not mid or (sender.get("id") and "message" in msg):
+        return msg
+    try:
+        detail = await _graph_get(
+            f"/{mid}",
+            token,
+            {"fields": "id,message,from,created_time"},
+        )
+    except InstagramError:
+        return msg
+    if not isinstance(detail, dict):
+        return msg
+    merged = dict(msg)
+    for key, value in detail.items():
+        if value is not None:
+            merged[key] = value
+    return merged
+
+
 async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, Any]]:
     """Pull Instagram DM history, including older pages. Does not auto-reply."""
     conn = _require_connection()
@@ -683,38 +706,50 @@ async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, 
         }
         if not thread_id:
             continue
-        try:
-            messages = await _graph_pages(
-                f"/{thread_id}/messages",
-                token,
-                {"fields": "id,message,from,created_time", "limit": 50},
-                max_pages=20,
-            )
-        except InstagramError:
+        messages: list[dict[str, Any]] = []
+        for fields in ("id,message,from,created_time", "id,created_time"):
+            try:
+                messages = await _graph_pages(
+                    f"/{thread_id}/messages",
+                    token,
+                    {"fields": fields, "limit": 50},
+                    max_pages=20,
+                )
+                break
+            except InstagramError:
+                messages = []
+        if not messages:
             messages = ((conv.get("messages") or {}).get("data")) or []
+        peer_ids = [pid for pid in names if pid not in own_ids]
+        peer_id = peer_ids[0] if peer_ids else ""
         for msg in messages:
-            sender = msg.get("from") or {}
+            msg = await _hydrate_ig_message(msg, token)
+            sender = msg.get("from") if isinstance(msg.get("from"), dict) else {}
             sender_id = str(sender.get("id") or "")
             username = str(sender.get("username") or names.get(sender_id) or "")
-            if not sender_id or sender_id in own_ids or username.lower() == ig_username:
+            if not sender_id:
                 continue
+            own = sender_id in own_ids or username.lower() == ig_username
             external_id = f"message:{msg.get('id') or uuid.uuid4()}"
             if find_by_external_id(external_id):
                 continue
             text = str(msg.get("message") or "").strip() or "[archivo]"
+            guest_id = peer_id or ("" if own else sender_id)
             item = upsert_inbox_item(
                 {
                     "id": str(uuid.uuid4()),
                     "type": "message",
-                    "thread_id": thread_id or sender_id,
+                    "thread_id": thread_id or guest_id or sender_id,
                     "external_id": external_id,
                     "meta_comment_id": None,
                     "media_id": None,
-                    "author_username": username or None,
+                    "author_username": None if own else (username or None),
                     "author_id": sender_id,
+                    "peer_id": guest_id or sender_id,
+                    "direction": "out" if own else "in",
                     "text": text,
                     "created_at": msg.get("created_time") or _now_iso(),
-                    "status": "pending",
+                    "status": "replied_human" if own else "pending",
                     "replies": [],
                     "escalation_reason": None,
                 }
@@ -844,6 +879,8 @@ def ingest_inbound(
     thread_id: str | None = None,
     meta_comment_id: str | None = None,
     media_id: str | None = None,
+    peer_id: str | None = None,
+    direction: str = "in",
 ) -> dict[str, Any]:
     existing = find_by_external_id(external_id)
     if existing:
@@ -858,13 +895,115 @@ def ingest_inbound(
             "media_id": media_id,
             "author_username": author_username,
             "author_id": author_id,
+            "peer_id": peer_id or author_id,
+            "direction": direction if direction in {"in", "out"} else "in",
             "text": text or "",
             "created_at": _now_iso(),
-            "status": "pending",
+            "status": "replied_human" if direction == "out" else "pending",
             "replies": [],
             "escalation_reason": None,
         }
     )
+
+
+def _dm_peer_key(item: dict[str, Any]) -> str:
+    peer = str(item.get("peer_id") or "").strip()
+    if peer:
+        return peer
+    if item.get("direction") == "out":
+        return str(item.get("thread_id") or item.get("id") or "")
+    return str(item.get("author_id") or item.get("thread_id") or item.get("id") or "")
+
+
+def _related_dm_items(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """All stored bubbles of the same Instagram DM, including older messages and our replies."""
+    messages = [row for row in list_inbox() if row.get("type") == "message"]
+    keys = {key for key in (_dm_peer_key(item), str(item.get("thread_id") or "")) if key}
+    chosen: dict[str, dict[str, Any]] = {}
+    changed = True
+    while changed:
+        changed = False
+        for row in messages:
+            row_id = str(row.get("id") or "")
+            row_keys = {key for key in (_dm_peer_key(row), str(row.get("thread_id") or "")) if key}
+            if row_id in chosen or row_keys & keys:
+                if row_id not in chosen:
+                    chosen[row_id] = row
+                    changed = True
+                before = len(keys)
+                keys |= row_keys
+                if len(keys) != before:
+                    changed = True
+    rows = list(chosen.values()) or [item]
+    rows.sort(key=lambda row: str(row.get("created_at") or ""))
+    return rows
+
+
+def conversation_turns(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Chronological bubbles for the admin chat."""
+    if item.get("type") != "message":
+        turns = [
+            {
+                "role": "in",
+                "text": item.get("text") or "",
+                "created_at": item.get("created_at"),
+                "author": item.get("author_username") or item.get("author_id") or "",
+                "item_id": item.get("id"),
+                "reply_index": None,
+            }
+        ]
+        for index, reply in enumerate(item.get("replies") or []):
+            turns.append(
+                {
+                    "role": "out",
+                    "text": reply.get("text") or "",
+                    "created_at": reply.get("created_at"),
+                    "source": reply.get("source") or "human",
+                    "item_id": item.get("id"),
+                    "reply_index": index,
+                }
+            )
+        return turns
+
+    turns: list[dict[str, Any]] = []
+    seen_out: set[str] = set()
+    for row in _related_dm_items(item):
+        for index, reply in enumerate(row.get("replies") or []):
+            mid = str(reply.get("meta_message_id") or "").strip()
+            if mid:
+                seen_out.add(f"message:{mid}")
+            seen_out.add(f"text:{(reply.get('text') or '').strip()}")
+        direction = "out" if row.get("direction") == "out" else "in"
+        external_id = str(row.get("external_id") or "")
+        text = str(row.get("text") or "").strip()
+        if direction == "out" and (external_id in seen_out or f"text:{text}" in seen_out):
+            continue
+        turns.append(
+            {
+                "role": direction,
+                "text": row.get("text") or "",
+                "created_at": row.get("created_at"),
+                "author": row.get("author_username") or ("Tú" if direction == "out" else row.get("author_id") or ""),
+                "source": "human" if direction == "out" else "",
+                "item_id": row.get("id"),
+                "reply_index": None,
+            }
+        )
+        if direction == "in":
+            for index, reply in enumerate(row.get("replies") or []):
+                turns.append(
+                    {
+                        "role": "out",
+                        "text": reply.get("text") or "",
+                        "created_at": reply.get("created_at"),
+                        "source": reply.get("source") or "human",
+                        "author": "DeepSeek" if reply.get("source") == "deepseek" else "Tú",
+                        "item_id": row.get("id"),
+                        "reply_index": index,
+                    }
+                )
+    turns.sort(key=lambda turn: str(turn.get("created_at") or ""))
+    return turns
 
 
 def _own_instagram_ids() -> set[str]:
@@ -917,7 +1056,32 @@ async def _instagram_username(author_id: str) -> str | None:
     return username or None
 
 
+def _echo_event(event: dict[str, Any]) -> tuple[str, str, str]:
+    """Return (guest_id, mid, text) when the hostel replies from the Instagram app."""
+    message = event.get("message")
+    if not isinstance(message, dict) or not message.get("is_echo") or message.get("is_deleted"):
+        return "", "", ""
+    recipient = str((event.get("recipient") or {}).get("id") or "")
+    if not recipient or recipient in _own_instagram_ids():
+        return "", "", ""
+    text = str(message.get("text") or "").strip()
+    if not text and message.get("attachments"):
+        text = "[archivo]"
+    return recipient, str(message.get("mid") or ""), text
+
+
 async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    guest_id, echo_mid, echo_text = _echo_event(event)
+    if guest_id and echo_text:
+        return ingest_inbound(
+            item_type="message",
+            external_id=f"message:{echo_mid or f'{guest_id}-{int(time.time())}'}",
+            text=echo_text,
+            author_id=next(iter(_own_instagram_ids()), guest_id),
+            thread_id=guest_id,
+            peer_id=guest_id,
+            direction="out",
+        )
     sender, mid, text = _dm_event_text(event)
     if not sender or not text:
         return None
@@ -929,6 +1093,8 @@ async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
         author_id=sender,
         author_username=username,
         thread_id=sender,
+        peer_id=sender,
+        direction="in",
     )
     if username and not item.get("author_username"):
         item["author_username"] = username
