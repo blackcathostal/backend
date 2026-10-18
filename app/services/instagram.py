@@ -522,6 +522,7 @@ def build_auth_url(state: str | None = None) -> str:
         "redirect_uri": settings.meta_redirect_uri.strip(),
         "scope": ",".join(SCOPES),
         "response_type": "code",
+        "auth_type": "rerequest",
         "state": state or str(uuid.uuid4()),
     }
     return f"https://www.facebook.com/{settings.graph_api_version}/dialog/oauth?{urlencode(params)}"

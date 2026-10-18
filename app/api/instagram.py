@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -399,6 +400,16 @@ def restore_deepseek_prompt(_: Users = Depends(get_current_user)) -> dict[str, A
 
     reset_system_prompt()
     return prompt_payload()
+
+
+@router.get("/media/{filename}")
+def instagram_hosted_media(filename: str) -> FileResponse:
+    if not re.fullmatch(r"[a-f0-9]{32}\.jpg", filename):
+        raise HTTPException(status_code=404, detail="No encontrado")
+    path = settings.uploads_dir / "instagram-posts" / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No encontrado")
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.post("/posts/generate")
