@@ -34,6 +34,7 @@ SCOPES = [
     "instagram_manage_comments",
     "instagram_manage_messages",
     "pages_manage_metadata",
+    "pages_messaging",
     "business_management",
 ]
 
@@ -722,19 +723,37 @@ async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, 
             messages = ((conv.get("messages") or {}).get("data")) or []
         peer_ids = [pid for pid in names if pid not in own_ids]
         peer_id = peer_ids[0] if peer_ids else ""
+        peer_username = str(names.get(peer_id) or "").strip().lstrip("@")
         for msg in messages:
             msg = await _hydrate_ig_message(msg, token)
             sender = msg.get("from") if isinstance(msg.get("from"), dict) else {}
             sender_id = str(sender.get("id") or "")
-            username = str(sender.get("username") or names.get(sender_id) or "")
+            username = str(sender.get("username") or names.get(sender_id) or "").strip().lstrip("@")
             if not sender_id:
                 continue
-            own = sender_id in own_ids or username.lower() == ig_username
+            own = sender_id in own_ids or (bool(username) and username.lower() == ig_username)
             external_id = f"message:{msg.get('id') or uuid.uuid4()}"
-            if find_by_external_id(external_id):
+            guest_id = peer_id or ("" if own else sender_id)
+            guest_name = peer_username or ("" if own else username)
+            existing = find_by_external_id(external_id)
+            if existing:
+                changed = False
+                if guest_id and str(existing.get("peer_id") or "") in own_ids.union({""}):
+                    existing["peer_id"] = guest_id
+                    changed = True
+                if guest_name and not existing.get("peer_username"):
+                    existing["peer_username"] = guest_name
+                    changed = True
+                if own and existing.get("direction") != "out":
+                    existing["direction"] = "out"
+                    changed = True
+                if not own and username and not existing.get("author_username"):
+                    existing["author_username"] = username
+                    changed = True
+                if changed:
+                    upsert_inbox_item(existing)
                 continue
             text = str(msg.get("message") or "").strip() or "[archivo]"
-            guest_id = peer_id or ("" if own else sender_id)
             item = upsert_inbox_item(
                 {
                     "id": str(uuid.uuid4()),
@@ -743,9 +762,10 @@ async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, 
                     "external_id": external_id,
                     "meta_comment_id": None,
                     "media_id": None,
-                    "author_username": None if own else (username or None),
+                    "author_username": None if own else (username or guest_name or None),
                     "author_id": sender_id,
-                    "peer_id": guest_id or sender_id,
+                    "peer_id": guest_id,
+                    "peer_username": guest_name or None,
                     "direction": "out" if own else "in",
                     "text": text,
                     "created_at": msg.get("created_time") or _now_iso(),

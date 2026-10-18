@@ -105,6 +105,56 @@ async def facebook_delete_comment(
         raise _http(exc) from exc
 
 
+@router.get("/messenger")
+def facebook_messenger(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    items = fb.list_messenger_threads()
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/messenger/sync")
+async def facebook_sync_messenger(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    try:
+        return await fb.sync_messenger()
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.get("/messenger/{thread_id}")
+def facebook_messenger_thread(
+    thread_id: str,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return fb.get_messenger_thread(thread_id)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.post("/messenger/{thread_id}/reply")
+async def facebook_messenger_reply(
+    thread_id: str,
+    body: CommentBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await fb.reply_messenger(thread_id, body.message)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.delete("/messenger/{thread_id}/messages/{message_id}")
+def facebook_messenger_delete(
+    thread_id: str,
+    message_id: str,
+    _: Users = Depends(get_current_user),
+) -> dict[str, bool]:
+    try:
+        fb.refuse_messenger_delete()
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+    return {"ok": False}
+
+
 @router.post("/comments/{comment_id}/reply")
 async def facebook_reply_comment(
     comment_id: str,

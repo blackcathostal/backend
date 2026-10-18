@@ -417,6 +417,10 @@ def verify_webhook(request: Request) -> Any:
 async def receive_webhook(payload: dict[str, Any]) -> dict[str, bool]:
     try:
         await ig.process_webhook_payload(payload)
+        if payload.get("object") == "page":
+            from app.services import facebook as fb
+
+            fb.ingest_messenger_webhook(payload)
     except Exception:
         pass
     return {"ok": True}
