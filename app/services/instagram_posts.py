@@ -293,9 +293,9 @@ async def _page_with_media() -> dict[str, Any]:
         text = "Invita a un plan concreto en Santiago o en una salida desde la ciudad, con un detalle útil."
         title = "Turismo en Santiago"
     photo = await _photo_for(photo_query)
+    if not photo.get("image_url"):
+        photo = await _photo_for("Santiago Chile")
     images = [photo["image_url"]] if photo.get("image_url") else []
-    if not images:
-        raise InstagramError("No encontré una foto atractiva para el post. Intenta de nuevo.")
     return {
         "theme": theme,
         "url": source_url,
@@ -412,6 +412,35 @@ def _with_headline(image: Image.Image, headline: str) -> Image.Image:
     return framed
 
 
+def _store_jpeg(jpeg: bytes) -> str:
+    folder = settings.uploads_dir / "instagram-posts"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid4().hex}.jpg"
+    (folder / name).write_bytes(jpeg)
+    return f"{_public_origin()}/api/instagram/media/{name}"
+
+
+def _made_scene(headline: str) -> bytes:
+    """A real-looking frame when no usable photo came back. Not a poster."""
+    width, height = 1080, 1350
+    image = Image.new("RGB", (width, height))
+    draw = ImageDraw.Draw(image)
+    for row in range(height):
+        blend = row / height
+        color = (
+            int(168 + 55 * blend),
+            int(188 + 28 * blend),
+            int(196 - 18 * blend),
+        )
+        draw.line([(0, row), (width, row)], fill=color)
+    draw.polygon([(0, 860), (180, 740), (360, 900), (520, 690), (760, 930), (980, 720), (1080, 880), (1080, 1350), (0, 1350)], fill=(78, 96, 86))
+    draw.polygon([(0, 1040), (240, 900), (480, 1080), (720, 860), (1080, 1020), (1080, 1350), (0, 1350)], fill=(58, 72, 64))
+    grain = Image.effect_noise((width, height), 18).convert("L")
+    image = Image.blend(image, Image.merge("RGB", (grain, grain, grain)), 0.07)
+    image = _with_headline(image, headline or "Santiago")
+    return _jpeg_bytes(image)
+
+
 def _jpeg_bytes(image: Image.Image) -> bytes:
     buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=88, optimize=True)
@@ -449,18 +478,14 @@ def _to_instagram_jpeg(content: bytes, headline: str = "") -> bytes:
 
 
 async def _hosted_jpeg(image_urls: list[str], headline: str = "") -> str:
-    folder = settings.uploads_dir / "instagram-posts"
-    folder.mkdir(parents=True, exist_ok=True)
     for url in image_urls:
         try:
             content, _kind = await download_image(url, timeout_seconds=20, max_bytes=8_000_000)
             jpeg = _to_instagram_jpeg(content, headline)
         except (SourceFetchError, InstagramError, OSError, ValueError, httpx.HTTPError):
             continue
-        name = f"{uuid4().hex}.jpg"
-        (folder / name).write_bytes(jpeg)
-        return f"{_public_origin()}/api/instagram/media/{name}"
-    raise InstagramError("La foto de esa página no se pudo preparar para Instagram.")
+        return _store_jpeg(jpeg)
+    return _store_jpeg(_made_scene(headline or "Santiago"))
 
 
 async def _draft_post() -> dict[str, Any]:
@@ -468,15 +493,8 @@ async def _draft_post() -> dict[str, Any]:
     images = [str(url) for url in page.get("chosen_images") or [] if url]
     video = str(page.get("chosen_video") or "")
     caption = await _write_caption(page)
-    hosted = ""
-    if images:
-        try:
-            hosted = await _hosted_jpeg(images, str(page.get("headline") or ""))
-        except InstagramError:
-            if not video:
-                raise
-    if not video and not hosted:
-        raise InstagramError("La foto de esa página no se pudo preparar para Instagram.")
+    headline = str(page.get("headline") or page.get("title") or "Santiago")
+    hosted = await _hosted_jpeg(images, headline)
     return {
         "caption": caption,
         "media_type": "video" if video else "image",
