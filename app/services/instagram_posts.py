@@ -27,24 +27,34 @@ from app.services.instagram import (
 )
 from app.services.mcp_sources import call_reply_tool
 
-_THEMES = ("hotel", "turismo", "chiste", "noticia")
+_THEMES = ("concierto", "turismo", "hotel", "noticia")
+_CONCERT_QUERIES = (
+    "conciertos Santiago esta semana cartelera",
+    "agenda conciertos Santiago puntoticket",
+    "recitales Santiago Teatro Municipal",
+    "conciertos GAM Santiago agenda",
+)
 _TOURISM_QUERIES = (
-    "Cerro Santa Lucía mirador Santiago qué hacer",
-    "barrio Lastarria Santiago paseo",
-    "Mercado Central Santiago visitar",
-    "Plaza de Armas Santiago turismo",
-    "barrio Brasil Santiago cafés",
+    "planes imperdibles Santiago centro este fin de semana",
+    "qué hacer en Barrio Lastarria Santiago",
+    "Cerro Santa Lucía mirador atardecer",
+    "food tour Santiago centro",
 )
 _NEWS_QUERIES = (
-    "noticias turismo Santiago",
-    "noticias cultura Santiago centro",
+    "noticias cultura conciertos Santiago",
+    "agenda cultural Santiago esta semana",
 )
 
-_SYSTEM = """Eres el community manager de Black Cat Hostal Boutique, en Compañía de Jesús 1921, Barrio Brasil, Santiago.
-Escribes un post de Instagram en español, corto, con ganas de salir a caminar la ciudad.
-No suenes a enciclopedia. No copies la página. No inventes precios, horarios ni datos que no estén en el material.
-Si el tema es un chiste, que sea amable, de viaje o de Santiago, en dos frases.
-Al final cita la fuente con su nombre y su URL.
+_SYSTEM = """Eres el community manager de Black Cat Hostal Boutique, Compañía de Jesús 1921, Barrio Brasil, Santiago.
+Escribes posts de Instagram que la gente se queda a leer.
+
+Cómo se hace un post que engancha, según las cuentas que funcionan:
+- La primera línea para el dedo: una pregunta, una fecha o una frase concreta. Nada de "descubre la magia".
+- Después, dos o tres datos que solo están en el material: quién, dónde, cuándo, precio o cómo llegar.
+- Frases cortas, una idea por línea. Se puede usar un emoji, no una fila.
+- Cierra con una invitación clara.
+- No copies ejemplos ajenos. No inventes fechas, artistas ni precios.
+- Al final cita la fuente con su nombre y su URL.
 Responde solo JSON: {"caption":"..."}
 """
 
@@ -101,10 +111,11 @@ async def _interesting_page(queries: tuple[str, ...]) -> dict[str, Any]:
             if not isinstance(media, dict) or not media.get("ok"):
                 continue
             images = [str(item.get("url") or "") for item in media.get("images") or [] if item.get("url")]
+            videos = [str(item.get("url") or "") for item in media.get("videos") or [] if item.get("url")]
             photo = await _photo_for(str(media.get("title") or query))
             if photo.get("image_url"):
                 images = [photo["image_url"], *images]
-            if not images:
+            if not images and not videos:
                 continue
             return {
                 "url": str(media.get("url") or url),
@@ -112,49 +123,65 @@ async def _interesting_page(queries: tuple[str, ...]) -> dict[str, Any]:
                 "title": str(media.get("title") or ""),
                 "text": str(media.get("text") or row.get("snippet") or ""),
                 "chosen_images": images,
+                "chosen_video": videos[0] if videos else "",
                 "photo_credit_name": photo.get("title") or "",
                 "photo_credit_url": photo.get("source_url") or "",
             }
     return {}
 
 
+async def _style_notes() -> str:
+    """How other accounts open a post. Used as rhythm, never copied."""
+    found = await call_reply_tool(
+        "search_web",
+        {"query": "instagram caption hooks travel posts ejemplos gancho primera línea", "max_results": 3},
+    )
+    lines = []
+    for row in (found.get("results") or [])[:3]:
+        snippet = str(row.get("snippet") or "").strip()
+        title = str(row.get("title") or "").strip()
+        if snippet:
+            lines.append(f"- {title}: {snippet[:220]}")
+    if not lines:
+        return "Gancho en la primera línea. Luego un dato concreto. Frases cortas. Una invitación."
+    return "\n".join(lines)
+
+
 async def _page_with_media() -> dict[str, Any]:
-    """One rotating theme: hostel detail, attractive tourism, a joke, or a news item."""
+    """Concert listings, city plans, hostel facts or culture news, with a photo or a video."""
     theme = _next_theme()
-    photo_query = "Barrio Brasil Santiago calle"
+    photo_query = "concierto en vivo Santiago"
     text = ""
     source_url = "https://blackcathostal.com"
     source_name = "Black Cat Hostal"
     title = "Black Cat Hostal"
-    if theme == "hotel":
+    if theme == "concierto":
+        page = await _interesting_page(_CONCERT_QUERIES)
+        if page:
+            page["theme"] = theme
+            return page
+        text = "No salió una cartelera. Cuenta que en Santiago hay música en vivo cerca del centro y invita a revisar la fuente."
+        title = "Conciertos en Santiago"
+    elif theme == "hotel":
         info = await call_reply_tool("get_hostel_info", {})
         rooms = await call_reply_tool("search_rooms", {"query": ""})
         text = json.dumps({"hostal": info, "habitaciones": rooms}, ensure_ascii=False)[:1800]
         title = "Detalles del hostal"
         photo_query = "Santiago centro calle histórica"
-    elif theme == "chiste":
-        info = await call_reply_tool("get_hostel_info", {})
-        text = (
-            "Escribe un chiste corto de turismo, amable, para alguien que se queda en el hostal. "
-            "Puedes usar solo este dato real:\n"
-            + json.dumps(info, ensure_ascii=False)[:800]
-        )
-        title = "Chiste de turismo"
-        photo_query = "Santiago Chile turistas café plaza"
     elif theme == "noticia":
         page = await _interesting_page(_NEWS_QUERIES)
         if page:
             page["theme"] = theme
             return page
-        text = "No salió una noticia reciente. Cuenta un dato actual para quien visita Santiago centro."
-        title = "Santiago"
-        photo_query = "Santiago Chile plaza"
+        text = "No salió una noticia reciente. Cuenta un plan cultural concreto del centro de Santiago."
+        title = "Agenda de Santiago"
+        photo_query = "Santiago Chile concierto plaza"
     else:
         page = await _interesting_page(_TOURISM_QUERIES)
         if page:
             page["theme"] = "turismo"
             return page
-        text = "Invita a conocer un lugar lindo del centro de Santiago, cerca de Barrio Brasil."
+        text = "Invita a un plan concreto del centro de Santiago, cerca de Barrio Brasil, con un detalle útil."
         title = "Turismo en Santiago"
         photo_query = "Cerro Santa Lucía Santiago"
     photo = await _photo_for(photo_query)
@@ -180,13 +207,15 @@ async def _write_caption(page: dict[str, Any]) -> str:
     source_name = str(page.get("source_name") or page.get("title") or "").strip()
     theme = str(page.get("theme") or "turismo")
     focus = {
-        "hotel": "Cuenta un detalle real del hostal: dirección, desayuno, horario o una habitación con su precio.",
-        "turismo": "Recomienda el lugar como un plan concreto para un huésped. Nada de tono de Wikipedia.",
-        "chiste": "Empieza con un chiste corto de turismo y cierra con una invitación al hostal.",
-        "noticia": "Resume la noticia en dos frases y di por qué le importa a quien se queda en Santiago.",
-    }.get(theme, "Recomienda un plan en Santiago.")
+        "hotel": "Un detalle real del hostal que dé ganas de quedarse: dirección, desayuno, horario o una habitación con su precio.",
+        "turismo": "Un plan con lugar, momento y un detalle práctico. Nada de tono de guía turística.",
+        "concierto": "Si el material trae artista, sala o fecha, ponlos. Si no están, no los inventes. Di por qué le sirve a quien se queda en Barrio Brasil.",
+        "noticia": "El dato nuevo en la primera línea y por qué un huésped querría ir.",
+    }.get(theme, "Un plan concreto en Santiago.")
+    notes = await _style_notes()
     user = (
         f"Tema del post: {theme}. {focus}\n"
+        f"Así abren otros posts. No los copies, copia solo el ritmo:\n{notes}\n\n"
         f"Fuente: {source_name}\n"
         f"URL: {source_url}\n"
         f"Título: {page.get('title') or ''}\n"
