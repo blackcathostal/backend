@@ -443,6 +443,83 @@ async def find_web_media(url: str) -> dict[str, Any]:
     }
 
 
+_BORING_PHOTO = (
+    "logo",
+    "mapa",
+    "map",
+    "bandera",
+    "flag",
+    "escudo",
+    "icon",
+    "icono",
+    "diagrama",
+    "diagram",
+    "coat of arms",
+)
+
+
+@mcp.tool(
+    name="search_tourism_photo",
+    description=(
+        "Busca una foto atractiva de turismo en Santiago o de un lugar concreto: "
+        "calles, cerros, plazas, cafés, barrios. No devuelve mapas, logos ni banderas."
+    ),
+    structured_output=True,
+)
+async def search_tourism_photo(query: str) -> dict[str, Any]:
+    text = str(query or "").strip()[:140]
+    if not text:
+        return {"ok": False, "query": text, "photos": [], "error": "La búsqueda está vacía."}
+    params = {
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": f"File:{text} Santiago",
+        "gsrnamespace": "6",
+        "gsrlimit": "12",
+        "prop": "imageinfo",
+        "iiprop": "url|mime",
+        "iiurlwidth": "1400",
+        "format": "json",
+        "formatversion": "2",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=settings.deepseek_source_timeout_seconds) as client:
+            response = await client.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params=params,
+                headers={"User-Agent": "BlackCatTourismBot/1.0 (+https://blackcathostal.com)"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"ok": False, "query": text, "photos": [], "error": str(exc)}
+    photos: list[dict[str, str]] = []
+    for page in (payload.get("query") or {}).get("pages") or []:
+        if not isinstance(page, dict):
+            continue
+        title = str(page.get("title") or "").replace("File:", "").strip()
+        if any(word in title.lower() for word in _BORING_PHOTO):
+            continue
+        info = (page.get("imageinfo") or [{}])[0]
+        mime = str(info.get("mime") or "").lower()
+        image_url = str(info.get("thumburl") or info.get("url") or "")
+        source_url = str(info.get("descriptionurl") or "")
+        if mime not in {"image/jpeg", "image/png", "image/webp"} or not image_url.startswith("https://"):
+            continue
+        photos.append(
+            {
+                "title": title[:180],
+                "image_url": image_url,
+                "source_url": source_url or "https://commons.wikimedia.org",
+            }
+        )
+        if len(photos) >= 4:
+            break
+    if not photos:
+        return {"ok": False, "query": text, "photos": [], "error": "No hay una foto atractiva para ese tema."}
+    return {"ok": True, "query": text, "photos": photos}
+
+
 def tool_result_payload(result: Any) -> dict[str, Any]:
     if isinstance(result, dict):
         return result

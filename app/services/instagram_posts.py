@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from io import BytesIO
 from typing import Any
 from urllib.parse import urlparse
@@ -26,15 +27,23 @@ from app.services.instagram import (
 )
 from app.services.mcp_sources import call_reply_tool
 
-_SEARCHES = (
-    "qué hacer en Santiago centro Barrio Brasil",
-    "turismo Santiago centro",
+_THEMES = ("hotel", "turismo", "chiste", "noticia")
+_TOURISM_QUERIES = (
+    "Cerro Santa Lucía mirador Santiago qué hacer",
+    "barrio Lastarria Santiago paseo",
+    "Mercado Central Santiago visitar",
+    "Plaza de Armas Santiago turismo",
+    "barrio Brasil Santiago cafés",
+)
+_NEWS_QUERIES = (
+    "noticias turismo Santiago",
+    "noticias cultura Santiago centro",
 )
 
 _SYSTEM = """Eres el community manager de Black Cat Hostal Boutique, en Compañía de Jesús 1921, Barrio Brasil, Santiago.
-Escribes el texto de un post de Instagram a partir de una página que ya fue leída.
-El mensaje va en español, claro y corto, para quien visita Santiago.
-No copies la página entera. No inventes precios, horarios ni datos que no estén en el texto.
+Escribes un post de Instagram en español, corto, con ganas de salir a caminar la ciudad.
+No suenes a enciclopedia. No copies la página. No inventes precios, horarios ni datos que no estén en el material.
+Si el tema es un chiste, que sea amable, de viaje o de Santiago, en dos frases.
 Al final cita la fuente con su nombre y su URL.
 Responde solo JSON: {"caption":"..."}
 """
@@ -48,41 +57,140 @@ def _with_source(caption: str, source_name: str, source_url: str) -> str:
     return text[:2200]
 
 
-async def _page_with_media() -> dict[str, Any]:
-    """Search and open pages through MCP until one has a photo or a video."""
+def _next_theme() -> str:
+    path = settings.uploads_dir / "cache" / "instagram_post_theme.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    current = path.read_text(encoding="utf-8").strip() if path.exists() else ""
+    try:
+        index = _THEMES.index(current)
+    except ValueError:
+        index = -1
+    theme = _THEMES[(index + 1) % len(_THEMES)]
+    path.write_text(theme, encoding="utf-8")
+    return theme
+
+
+def _is_wikipedia(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return "wikipedia.org" in host or "wikimedia.org" in host
+
+
+async def _photo_for(query: str) -> dict[str, str]:
+    found = await call_reply_tool("search_tourism_photo", {"query": query})
+    photos = found.get("photos") if isinstance(found, dict) else None
+    if not photos:
+        return {}
+    photo = photos[0]
+    return {
+        "image_url": str(photo.get("image_url") or ""),
+        "source_url": str(photo.get("source_url") or ""),
+        "title": str(photo.get("title") or ""),
+    }
+
+
+async def _interesting_page(queries: tuple[str, ...]) -> dict[str, Any]:
     seen: set[str] = set()
-    for query in _SEARCHES:
-        found = await call_reply_tool("search_web", {"query": query, "max_results": 4})
-        for row in (found.get("results") or [])[:4]:
+    for query in queries:
+        found = await call_reply_tool("search_web", {"query": query, "max_results": 5})
+        for row in (found.get("results") or [])[:5]:
             url = str(row.get("url") or "").strip()
-            if not url or url in seen:
+            if not url or url in seen or _is_wikipedia(url):
                 continue
             seen.add(url)
             media = await call_reply_tool("find_web_media", {"url": url})
             if not isinstance(media, dict) or not media.get("ok"):
                 continue
-            videos = [str(item.get("url") or "") for item in media.get("videos") or [] if item.get("url")]
             images = [str(item.get("url") or "") for item in media.get("images") or [] if item.get("url")]
-            if videos or images:
-                media["chosen_video"] = videos[0] if videos else ""
-                media["chosen_images"] = images
-                return media
-    raise InstagramError(
-        "No encontré en la web una foto o un video que Instagram pueda publicar. Intenta de nuevo."
-    )
+            photo = await _photo_for(str(media.get("title") or query))
+            if photo.get("image_url"):
+                images = [photo["image_url"], *images]
+            if not images:
+                continue
+            return {
+                "url": str(media.get("url") or url),
+                "source_name": str(media.get("source_name") or media.get("title") or ""),
+                "title": str(media.get("title") or ""),
+                "text": str(media.get("text") or row.get("snippet") or ""),
+                "chosen_images": images,
+                "photo_credit_name": photo.get("title") or "",
+                "photo_credit_url": photo.get("source_url") or "",
+            }
+    return {}
+
+
+async def _page_with_media() -> dict[str, Any]:
+    """One rotating theme: hostel detail, attractive tourism, a joke, or a news item."""
+    theme = _next_theme()
+    photo_query = "Barrio Brasil Santiago calle"
+    text = ""
+    source_url = "https://blackcathostal.com"
+    source_name = "Black Cat Hostal"
+    title = "Black Cat Hostal"
+    if theme == "hotel":
+        info = await call_reply_tool("get_hostel_info", {})
+        rooms = await call_reply_tool("search_rooms", {"query": ""})
+        text = json.dumps({"hostal": info, "habitaciones": rooms}, ensure_ascii=False)[:1800]
+        title = "Detalles del hostal"
+        photo_query = "Santiago centro calle histórica"
+    elif theme == "chiste":
+        info = await call_reply_tool("get_hostel_info", {})
+        text = (
+            "Escribe un chiste corto de turismo, amable, para alguien que se queda en el hostal. "
+            "Puedes usar solo este dato real:\n"
+            + json.dumps(info, ensure_ascii=False)[:800]
+        )
+        title = "Chiste de turismo"
+        photo_query = "Santiago Chile turistas café plaza"
+    elif theme == "noticia":
+        page = await _interesting_page(_NEWS_QUERIES)
+        if page:
+            page["theme"] = theme
+            return page
+        text = "No salió una noticia reciente. Cuenta un dato actual para quien visita Santiago centro."
+        title = "Santiago"
+        photo_query = "Santiago Chile plaza"
+    else:
+        page = await _interesting_page(_TOURISM_QUERIES)
+        if page:
+            page["theme"] = "turismo"
+            return page
+        text = "Invita a conocer un lugar lindo del centro de Santiago, cerca de Barrio Brasil."
+        title = "Turismo en Santiago"
+        photo_query = "Cerro Santa Lucía Santiago"
+    photo = await _photo_for(photo_query)
+    images = [photo["image_url"]] if photo.get("image_url") else []
+    if not images:
+        raise InstagramError("No encontré una foto atractiva para el post. Intenta de nuevo.")
+    return {
+        "theme": theme,
+        "url": source_url,
+        "source_name": source_name,
+        "title": title,
+        "text": text,
+        "chosen_images": images,
+        "chosen_video": "",
+        "photo_credit_name": photo.get("title") or "",
+        "photo_credit_url": photo.get("source_url") or "",
+    }
 
 
 async def _write_caption(page: dict[str, Any]) -> str:
     base, model, headers = _require_deepseek()
     source_url = str(page.get("url") or "").strip()
     source_name = str(page.get("source_name") or page.get("title") or "").strip()
-    kind = "video" if page.get("chosen_video") else "foto"
+    theme = str(page.get("theme") or "turismo")
+    focus = {
+        "hotel": "Cuenta un detalle real del hostal: dirección, desayuno, horario o una habitación con su precio.",
+        "turismo": "Recomienda el lugar como un plan concreto para un huésped. Nada de tono de Wikipedia.",
+        "chiste": "Empieza con un chiste corto de turismo y cierra con una invitación al hostal.",
+        "noticia": "Resume la noticia en dos frases y di por qué le importa a quien se queda en Santiago.",
+    }.get(theme, "Recomienda un plan en Santiago.")
     user = (
-        f"Escribe el texto del post. El archivo es una {kind}.\n"
+        f"Tema del post: {theme}. {focus}\n"
         f"Fuente: {source_name}\n"
         f"URL: {source_url}\n"
         f"Título: {page.get('title') or ''}\n"
-        f"Texto de la página:\n{str(page.get('text') or '')[:1200]}"
+        f"Material:\n{str(page.get('text') or '')[:1400]}"
     )
     payload = {
         "model": model,
@@ -114,9 +222,13 @@ async def _write_caption(page: dict[str, Any]) -> str:
                 raise DeepSeekError("DeepSeek devolvió un formato inesperado") from exc
             data = _extract_json(content or "")
             caption = _with_source(str(data.get("caption") or "").strip(), source_name, source_url)
+            credit_url = str(page.get("photo_credit_url") or "").strip()
+            credit_name = str(page.get("photo_credit_name") or "").strip()
+            if credit_url and credit_url not in caption:
+                caption = f"{caption}\n\nFoto: {credit_name or 'Wikimedia Commons'}\n{credit_url}"
             if len(caption) < 20:
                 raise InstagramError("DeepSeek no escribió el mensaje del post")
-            return caption
+            return caption[:2200]
     raise DeepSeekError(last_error)
 
 
