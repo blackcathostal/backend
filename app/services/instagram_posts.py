@@ -425,7 +425,9 @@ def _cycle_key(filename: str, keys: list[str]) -> int:
 async def _google_place(query: str) -> dict[str, Any]:
     key = (settings.google_places_api_key or "").strip()
     text = str(query or "").strip()
-    if not key or len(text) < 2:
+    if not key:
+        return {"error": "En el servidor falta la clave de Google"}
+    if len(text) < 2:
         return {}
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -433,25 +435,44 @@ async def _google_place(query: str) -> dict[str, Any]:
                 "https://places.googleapis.com/v1/places:searchText",
                 headers=places_headers(
                     "places.displayName,places.formattedAddress,places.googleMapsUri,"
-                    "places.regularOpeningHours,places.photos"
+                    "places.regularOpeningHours,places.photos.name,"
+                    "places.photos.widthPx,places.photos.heightPx"
                 ),
                 json={
                     "textQuery": f"{text}, Santiago de Chile",
                     "languageCode": "es",
                     "regionCode": "CL",
-                    "maxResultCount": 1,
+                    "maxResultCount": 5,
+                    "locationBias": {
+                        "circle": {
+                            "center": {"latitude": -33.4489, "longitude": -70.6693},
+                            "radius": 50000.0,
+                        }
+                    },
                 },
             )
-            response.raise_for_status()
+            if response.status_code != 200:
+                return {"error": f"Google respondió HTTP {response.status_code}"}
             places = response.json().get("places") or []
-    except (httpx.HTTPError, ValueError):
-        return {}
+    except httpx.HTTPError:
+        return {"error": "No hubo respuesta de Google"}
+    except ValueError:
+        return {"error": "Google respondió un formato inesperado"}
     if not places:
-        return {}
-    place = places[0]
+        return {"error": f"Google no encontró {text[:60]}"}
+    place = next(
+        (
+            item
+            for item in places
+            if any(isinstance(photo, dict) and photo.get("name") for photo in (item.get("photos") or []))
+        ),
+        places[0],
+    )
     name = str((place.get("displayName") or {}).get("text") or text)
     photo_urls = _travel_photo_urls(list(place.get("photos") or []), key)
     hours = (place.get("regularOpeningHours") or {}).get("weekdayDescriptions") or []
+    if not photo_urls:
+        return {"error": f"Google no devolvió fotos de {name[:60]}", "name": name}
     return {
         "name": name,
         "address": str(place.get("formattedAddress") or ""),
@@ -837,7 +858,7 @@ async def _fetch_photo_bytes(url: str) -> bytes:
     async with httpx.AsyncClient(timeout=40.0, follow_redirects=True) as client:
         if resource and key:
             media = f"https://places.googleapis.com/v1/{resource}/media"
-            headers = {"X-Goog-Api-Key": key}
+            headers = {"X-Goog-Api-Key": key, "Referer": "https://blackcathostal.com"}
             response = await client.get(
                 media,
                 params={"maxWidthPx": 1600, "key": key},
@@ -930,7 +951,7 @@ async def _photo_for_page(
         seen.add(text)
         place = await _google_place(text)
         if not place.get("photo_urls") and failures is not None and len(failures) < 3:
-            failures.append(f"Google no devolvió fotos de {text[:60]}")
+            failures.append(str(place.get("error") or f"Google no devolvió fotos de {text[:60]}"))
         urls = [str(url) for url in place.get("photo_urls") or [] if url]
         if place.get("photo_url"):
             urls.append(str(place["photo_url"]))
