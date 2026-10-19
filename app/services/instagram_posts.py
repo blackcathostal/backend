@@ -291,33 +291,29 @@ def _article_photo(media: dict[str, Any], subject: str) -> str:
     return ""
 
 
-def _travel_photo_url(photos: list[Any], key: str) -> str:
-    """Prefer a tall travel photo. Skip wide banners and the flat cover shot."""
+def _photo_media_url(name: str, key: str) -> str:
+    return (
+        f"https://places.googleapis.com/v1/{name}/media"
+        f"?maxHeightPx=1600&maxWidthPx=1200&key={key}"
+    )
+
+
+def _travel_photo_urls(photos: list[Any], key: str) -> list[str]:
+    """Tall travel frames first. Wide ones stay as backup and get cropped later."""
     ranked: list[tuple[float, str]] = []
     for index, photo in enumerate(photos[:8]):
         if not isinstance(photo, dict):
             continue
         name = str(photo.get("name") or "")
+        if not name:
+            continue
         width = int(photo.get("widthPx") or 0)
         height = int(photo.get("heightPx") or 0)
-        if not name or width < 700 or height < 700:
-            continue
-        ratio = width / height
-        if ratio > 1.6:
-            continue
-        penalty = abs(ratio - 0.8) + (0.2 if index == 0 else 0)
+        ratio = (width / height) if width and height else 1.2
+        penalty = abs(ratio - 0.8) + (0.15 if index == 0 else 0)
         ranked.append((penalty, name))
-    if not ranked and photos:
-        name = str((photos[0] or {}).get("name") or "") if isinstance(photos[0], dict) else ""
-        if name:
-            ranked.append((1.0, name))
-    if not ranked:
-        return ""
     ranked.sort()
-    return (
-        f"https://places.googleapis.com/v1/{ranked[0][1]}/media"
-        f"?maxHeightPx=1600&maxWidthPx=1200&key={key}"
-    )
+    return [_photo_media_url(name, key) for _, name in ranked[:4]]
 
 
 async def _interesting_page(
@@ -428,7 +424,7 @@ def _cycle_key(filename: str, keys: list[str]) -> int:
     return chosen
 
 
-async def _google_place(query: str) -> dict[str, str]:
+async def _google_place(query: str) -> dict[str, Any]:
     key = (settings.google_places_api_key or "").strip()
     text = str(query or "").strip()
     if not key or len(text) < 2:
@@ -456,14 +452,15 @@ async def _google_place(query: str) -> dict[str, str]:
         return {}
     place = places[0]
     name = str((place.get("displayName") or {}).get("text") or text)
-    photo_url = _travel_photo_url(list(place.get("photos") or []), key)
+    photo_urls = _travel_photo_urls(list(place.get("photos") or []), key)
     hours = (place.get("regularOpeningHours") or {}).get("weekdayDescriptions") or []
     return {
         "name": name,
         "address": str(place.get("formattedAddress") or ""),
         "maps_url": shorten_url(str(place.get("googleMapsUri") or "")),
         "hours": " · ".join(str(item) for item in hours[:2]),
-        "photo_url": photo_url,
+        "photo_url": photo_urls[0] if photo_urls else "",
+        "photo_urls": photo_urls,
     }
 
 
@@ -477,9 +474,17 @@ def _place_material(place: dict[str, str]) -> str:
 async def _with_travel_photo(page: dict[str, Any], query: str) -> dict[str, Any]:
     """Use a tall photo of the place, not a catalog image from the website."""
     place = await _google_place(query)
-    if not place.get("photo_url"):
+    photos = [str(url) for url in place.get("photo_urls") or [] if url]
+    if not photos and place.get("photo_url"):
+        photos = [str(place["photo_url"])]
+    if not photos:
         return page
-    page["chosen_images"] = [place["photo_url"]]
+    backups = [
+        str(url)
+        for url in page.get("chosen_images") or []
+        if url and "blackcathostal.com" not in str(url) and "/cappa/" not in str(url)
+    ]
+    page["chosen_images"] = [*photos, *backups]
     page["subject"] = place.get("name") or page.get("subject") or query
     page["title"] = place.get("name") or page.get("title") or query
     extra = _place_material(place)
@@ -791,11 +796,41 @@ def _jpeg_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/apng,image/jpeg,image/png,*/*;q=0.8",
+}
+
+
+def _looks_like_image(content: bytes, content_type: str) -> bool:
+    if content.startswith((b"\xff\xd8\xff", b"\x89PNG")):
+        return True
+    if content[:4] == b"RIFF" and b"WEBP" in content[:16]:
+        return True
+    return content_type.startswith("image/") and "svg" not in content_type
+
+
+async def _fetch_photo_bytes(url: str) -> bytes:
+    if not str(url).startswith("https://"):
+        raise InstagramError("La foto no es una dirección pública")
+    async with httpx.AsyncClient(timeout=25.0, follow_redirects=True, headers=_BROWSER_HEADERS) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        content = response.content
+        kind = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if len(content) < 800 or len(content) > 8_000_000 or not _looks_like_image(content, kind):
+        raise InstagramError("La dirección no devolvió una foto")
+    return content
+
+
 def _to_instagram_jpeg(content: bytes) -> bytes:
     """Vertical 4:5, the frame tourism posts use in the feed."""
     image = Image.open(BytesIO(content)).convert("RGB")
     width, height = image.size
-    if width < 400 or height < 400:
+    if width < 180 or height < 180:
         raise InstagramError("La foto es demasiado pequeña")
     target = 4 / 5
     ratio = width / height
@@ -822,7 +857,7 @@ async def _hosted_jpeg(image_urls: list[str]) -> str:
         ):
             continue
         try:
-            content, _kind = await download_image(url, timeout_seconds=20, max_bytes=8_000_000)
+            content = await _fetch_photo_bytes(url)
             jpeg = _to_instagram_jpeg(content)
         except (SourceFetchError, InstagramError, OSError, ValueError, httpx.HTTPError):
             continue
@@ -830,18 +865,49 @@ async def _hosted_jpeg(image_urls: list[str]) -> str:
     return ""
 
 
+async def _photo_for_page(page: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    images = [str(url) for url in page.get("chosen_images") or [] if url]
+    hosted = await _hosted_jpeg(images)
+    if hosted:
+        return hosted, page
+    queries = [
+        str(page.get("subject") or ""),
+        str(page.get("title") or ""),
+        "Cerro San Cristóbal",
+        "Barrio Lastarria",
+    ]
+    seen: set[str] = set()
+    for query in queries:
+        text = query.strip()
+        if len(text) < 2 or text in seen:
+            continue
+        seen.add(text)
+        place = await _google_place(text)
+        urls = [str(url) for url in place.get("photo_urls") or [] if url]
+        if place.get("photo_url"):
+            urls.append(str(place["photo_url"]))
+        hosted = await _hosted_jpeg(urls)
+        if not hosted:
+            continue
+        if text != str(page.get("subject") or ""):
+            page = {
+                **page,
+                "subject": place.get("name") or text,
+                "title": place.get("name") or text,
+                "text": _place_material(place) or page.get("text") or "",
+                "focus": f"La foto es de {place.get('name') or text}. Describe esa vista en la primera línea.",
+            }
+        return hosted, page
+    return "", page
+
+
 async def _draft_post() -> dict[str, Any]:
     page = await _page_with_media()
-    images = [str(url) for url in page.get("chosen_images") or [] if url]
     video = str(page.get("chosen_video") or "")
-    caption = await _write_caption(page)
-    hosted = await _hosted_jpeg(images)
-    if not hosted:
-        place = await _google_place(str(page.get("subject") or page.get("title") or ""))
-        if place.get("photo_url"):
-            hosted = await _hosted_jpeg([str(place["photo_url"])])
+    hosted, page = await _photo_for_page(page)
     if not hosted and not video:
-        raise InstagramError("No hay una foto de ese lugar para publicar")
+        raise InstagramError("No pude bajar una foto para el post. Intenta de nuevo en un momento.")
+    caption = await _write_caption(page)
     return {
         "caption": caption,
         "media_type": "video" if video else "image",
