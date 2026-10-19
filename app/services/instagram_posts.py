@@ -429,30 +429,40 @@ async def _google_place(query: str) -> dict[str, Any]:
         return {"error": "En el servidor falta la clave de Google"}
     if len(text) < 2:
         return {}
+    body = {
+        "textQuery": f"{text}, Santiago de Chile",
+        "languageCode": "es",
+        "regionCode": "CL",
+        "maxResultCount": 5,
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": -33.4489, "longitude": -70.6693},
+                "radius": 50000.0,
+            }
+        },
+    }
+    mask = (
+        "places.displayName,places.formattedAddress,places.googleMapsUri,"
+        "places.regularOpeningHours,places.photos.name,"
+        "places.photos.widthPx,places.photos.heightPx"
+    )
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(
-                "https://places.googleapis.com/v1/places:searchText",
-                headers=places_headers(
-                    "places.displayName,places.formattedAddress,places.googleMapsUri,"
-                    "places.regularOpeningHours,places.photos.name,"
-                    "places.photos.widthPx,places.photos.heightPx"
-                ),
-                json={
-                    "textQuery": f"{text}, Santiago de Chile",
-                    "languageCode": "es",
-                    "regionCode": "CL",
-                    "maxResultCount": 5,
-                    "locationBias": {
-                        "circle": {
-                            "center": {"latitude": -33.4489, "longitude": -70.6693},
-                            "radius": 50000.0,
-                        }
-                    },
-                },
-            )
-            if response.status_code != 200:
-                return {"error": f"Google respondió HTTP {response.status_code}"}
+            response = None
+            for referer in ("", "https://www.blackcathostal.com/", "https://blackcathostal.com/"):
+                headers = places_headers(mask)
+                if referer:
+                    headers["Referer"] = referer
+                response = await client.post(
+                    "https://places.googleapis.com/v1/places:searchText",
+                    headers=headers,
+                    json=body,
+                )
+                if response.status_code != 403:
+                    break
+            if response is None or response.status_code != 200:
+                code = response.status_code if response is not None else 0
+                return {"error": f"Google respondió HTTP {code}"}
             places = response.json().get("places") or []
     except httpx.HTTPError:
         return {"error": "No hubo respuesta de Google"}
@@ -858,7 +868,7 @@ async def _fetch_photo_bytes(url: str) -> bytes:
     async with httpx.AsyncClient(timeout=40.0, follow_redirects=True) as client:
         if resource and key:
             media = f"https://places.googleapis.com/v1/{resource}/media"
-            headers = {"X-Goog-Api-Key": key, "Referer": "https://blackcathostal.com"}
+            headers = {"X-Goog-Api-Key": key}
             response = await client.get(
                 media,
                 params={"maxWidthPx": 1600, "key": key},
@@ -882,7 +892,13 @@ async def _fetch_photo_bytes(url: str) -> bytes:
                     raise InstagramError(f"La foto de Google respondió HTTP {response.status_code}")
                 response = await client.get(photo_uri)
         else:
-            response = await client.get(url, headers=_BROWSER_HEADERS)
+            headers = dict(_BROWSER_HEADERS)
+            if "flickr.com" in url:
+                headers["Referer"] = "https://www.flickr.com/"
+            response = await client.get(url, headers=headers)
+            if response.status_code == 429:
+                await asyncio.sleep(1.5)
+                response = await client.get(url, headers=headers)
         return _image_bytes(response)
 
 
@@ -929,6 +945,85 @@ async def _hosted_jpeg(image_urls: list[str], failures: list[str] | None = None)
     return ""
 
 
+def _travel_license(name: str) -> bool:
+    license_name = name.lower().strip()
+    if not license_name or "nc" in license_name or "nd" in license_name:
+        return False
+    return True
+
+
+async def _openverse_photo(
+    query: str,
+    page: dict[str, Any],
+    failures: list[str] | None = None,
+) -> tuple[str, dict[str, Any]] | None:
+    """A real travel photo when Google Places rejects the server key."""
+    text = str(query or "").strip()
+    if len(text) < 2:
+        return None
+    try:
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            headers={"User-Agent": "BlackCatHostal/1.0", "Accept": "application/json"},
+        ) as client:
+            response = await client.get(
+                "https://api.openverse.org/v1/images/",
+                params={
+                    "q": f"{text} Santiago Chile",
+                    "license_type": "commercial",
+                    "page_size": 20,
+                },
+            )
+            if response.status_code != 200:
+                return None
+            rows = response.json().get("results") or []
+    except (httpx.HTTPError, ValueError):
+        return None
+    urls: list[str] = []
+    credits: dict[str, dict[str, str]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not _travel_license(str(row.get("license") or "")):
+            continue
+        url = str(row.get("url") or "")
+        host = _host(url)
+        if (
+            not url.startswith("https://")
+            or "wikimedia.org" in host
+            or "wikipedia.org" in host
+            or "blackcathostal.com" in host
+        ):
+            continue
+        width = int(row.get("width") or 0)
+        height = int(row.get("height") or 0)
+        if width and height and min(width, height) < 500:
+            continue
+        urls.append(url)
+        credits[url] = {
+            "creator": str(row.get("creator") or "el autor").strip() or "el autor",
+            "credit_url": str(row.get("foreign_landing_url") or url),
+        }
+        if len(urls) >= 6:
+            break
+    for url in urls:
+        hosted = await _hosted_jpeg([url], failures)
+        if not hosted:
+            continue
+        credit = credits.get(url) or {}
+        creator = credit.get("creator") or "el autor"
+        return hosted, {
+            **page,
+            "subject": text,
+            "title": text,
+            "photo_credit_name": creator,
+            "photo_credit_url": credit.get("credit_url") or "",
+            "focus": (
+                f"La foto es de {text}. Describe esa vista en la primera línea. "
+                f"La foto es de {creator}."
+            ),
+        }
+    return None
+
+
 async def _photo_for_page(
     page: dict[str, Any],
     failures: list[str] | None = None,
@@ -957,6 +1052,9 @@ async def _photo_for_page(
             urls.append(str(place["photo_url"]))
         hosted = await _hosted_jpeg(urls, failures)
         if not hosted:
+            hosted = await _openverse_photo(text, page, failures)
+            if hosted:
+                return hosted
             continue
         if text != str(page.get("subject") or ""):
             page = {

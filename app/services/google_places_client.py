@@ -15,7 +15,6 @@ def places_headers(field_mask: str) -> dict[str, str]:
         "X-Goog-Api-Key": (settings.google_places_api_key or "").strip(),
         "X-Goog-FieldMask": field_mask,
         "Content-Type": "application/json",
-        "Referer": "https://blackcathostal.com",
     }
 
 
