@@ -7,6 +7,8 @@ from urllib.parse import quote
 
 import httpx
 
+from app.services.short_links import shorten_url
+
 HOSTEL_ADDRESS = "Compañía de Jesús 1921, Barrio Brasil, Santiago, Chile"
 HOSTEL_LAT = -33.4396639
 HOSTEL_LNG = -70.6638072
@@ -23,6 +25,7 @@ def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
         f"&destination={quote(HOSTEL_ADDRESS)}"
         f"&travelmode={travel}"
     )
+    maps_url = shorten_url(maps_url)
     result: dict[str, Any] = {
         "ok": True,
         "origin": place,
@@ -48,7 +51,8 @@ def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
         sentences.append(f"Tiempo: {result['duration']}. Distancia: {result['distance']}.")
     if result["lines"]:
         sentences.append("En el camino: " + ", ".join(result["lines"]) + ".")
-    sentences.append(f"Google Maps: {maps_url}")
+    if maps_url:
+        sentences.append(f"Mapa: {maps_url}")
     result["summary"] = " ".join(sentences)
     return result
 

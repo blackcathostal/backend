@@ -7,14 +7,13 @@ import json
 import re
 from datetime import datetime, timezone
 from io import BytesIO
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import httpx
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 from app.core.config import settings
 from app.services.ai_source_fetcher import SourceFetchError, download_image
@@ -32,6 +31,7 @@ from app.services.instagram import (
     _require_connection,
 )
 from app.services.mcp_sources import call_reply_tool
+from app.services.short_links import shorten_url
 
 _THEMES = ("concierto", "turismo", "llegada", "juego", "hotel", "noticia")
 _CONCERT_QUERIES = (
@@ -76,11 +76,6 @@ _ARRIVALS = (
     ("Plaza de Armas Santiago", "walking"),
     ("Costanera Center", "transit"),
     ("Barrio Italia Santiago", "transit"),
-)
-_ARRIVAL_PHOTOS = (
-    "https://blackcathostal.com/cappa/img/about/patio.webp",
-    "https://blackcathostal.com/cappa/img/barrio/bb-plaza-1.webp",
-    "https://blackcathostal.com/cappa/img/about/interior.webp",
 )
 _SNOW_OUTINGS = (
     ("centros de ski Valle Nevado Farellones abiertos", "Valle Nevado nieve"),
@@ -191,16 +186,29 @@ Cómo se hace un post que engancha, según las cuentas que funcionan:
 - El texto tiene que hablar de lo mismo que muestra la foto. Si la foto es un desayuno, no hables de la ciudad. Si la foto es un concierto, no hables de otra cosa.
 - Los conciertos salen de Ticketmaster, Puntoticket, Ticketplus o un medio. El cómo llegar sale de Google Maps. No cites Wikipedia ni un blog.
 - No escribas hashtags.
-- Al final deja la página en una línea natural: "Lo vi en ..." y la URL. Si hay un enlace de Google Maps, déjalo.
+- Al final deja la página en una línea natural: "Lo vi en ..." y la URL. Si el material trae un enlace bit.ly, déjalo entero en su propia línea. No escribas api.blackcathostal.com ni un enlace largo de Google.
 Responde solo JSON: {"caption":"..."}
 """
 
 
+_LONG_MAPS = re.compile(
+    r"https?://(?:www\.)?(?:google\.com/maps|maps\.google\.com)\S*",
+    re.IGNORECASE,
+)
+
+
 def _with_source(caption: str, source_name: str, source_url: str) -> str:
-    text = caption.strip()
-    if source_url and source_url not in text:
+    text = _LONG_MAPS.sub("", caption)
+    text = re.sub(r"https?://api\.blackcathostal\.com\S*", "", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    link = source_url.strip()
+    if link.startswith("https://bit.ly/") or "bitly.com" in link:
+        if link not in text:
+            text = f"{text}\n\nEl mapa:\n{link}" if source_name.strip().lower() == "google maps" else f"{text}\n\n{link}"
+    elif link and "api.blackcathostal.com" not in link and link not in text:
         label = source_name.strip() or "esta página"
-        text = f"{text}\n\nLo vi en {label}\n{source_url}"
+        text = f"{text}\n\nLo vi en {label}\n{link}"
     return text[:2200]
 
 
@@ -486,7 +494,7 @@ async def _google_place(query: str) -> dict[str, str]:
     return {
         "name": name,
         "address": str(place.get("formattedAddress") or ""),
-        "maps_url": str(place.get("googleMapsUri") or ""),
+        "maps_url": shorten_url(str(place.get("googleMapsUri") or "")),
         "hours": " · ".join(str(item) for item in hours[:2]),
         "photo_url": photo_url,
     }
@@ -592,25 +600,25 @@ async def _ticketmaster_concert() -> dict[str, Any]:
     return page
 
 
-def _arrival_page() -> dict[str, Any]:
+async def _arrival_page() -> dict[str, Any]:
     index = _cycle_key("instagram_post_arrival.txt", [item[0] for item in _ARRIVALS])
     origin, mode = _ARRIVALS[index]
     route = directions_to_hostel(origin, mode)
-    photo = _ARRIVAL_PHOTOS[index % len(_ARRIVAL_PHOTOS)]
+    place = await _google_place(origin)
     return _story(
         "llegada",
         title=f"Desde {origin}",
         subject=origin,
-        image=photo,
-        source_url=str(route.get("maps_url") or "https://blackcathostal.com"),
+        image=str(place.get("photo_url") or ""),
+        source_url=str(route.get("maps_url") or ""),
         source_name="Google Maps",
         text=str(route.get("summary") or ""),
         focus=(
-            f"La foto es del hostal o del barrio al que se llega. Explica cómo llegar desde {origin} "
-            "usando solo el tiempo, la distancia y las líneas del material. Deja el enlace de Google Maps. "
+            f"La foto es de {origin}. Explica cómo llegar desde ahí al hostal, solo con el tiempo, "
+            "la distancia y las líneas del material. Si hay un enlace bit.ly, déjalo en su línea. "
             "No inventes un recorrido."
         ),
-    ) | {"cover_detail": str(route.get("summary") or origin)[:180]}
+    )
 
 
 async def _page_with_media() -> dict[str, Any]:
@@ -637,7 +645,7 @@ async def _page_with_media() -> dict[str, Any]:
         )
         return await _with_google_photo(page, "sala de conciertos Santiago")
     if theme == "llegada":
-        return _arrival_page()
+        return await _arrival_page()
     if theme == "juego":
         query, place = _next_outing()
         page = await _interesting_page((query,), place)
@@ -653,7 +661,7 @@ async def _page_with_media() -> dict[str, Any]:
             title=place,
             subject=place,
             text=f"Escribe una adivinanza cuya respuesta sea {place}.",
-            focus=f"La foto o el diseño es {place}. La adivinanza se responde con ese lugar, en la última línea.",
+            focus=f"La foto es de {place}. La adivinanza se responde con ese lugar, en la última línea.",
         )
         return await _with_google_photo(page, place)
     if theme == "hotel":
@@ -776,81 +784,12 @@ def _public_origin() -> str:
     return "https://api.blackcathostal.com"
 
 
-def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
-    pairs = (
-        ("C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/segoeui.ttf"),
-        ("C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/arial.ttf"),
-        (
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ),
-        (
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        ),
-    )
-    for bold_path, regular_path in pairs:
-        path = Path(bold_path if bold else regular_path)
-        if path.is_file():
-            return ImageFont.truetype(str(path), size=size)
-    return ImageFont.load_default()
-
-
-def _wrap(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    font: ImageFont.ImageFont,
-    max_width: int,
-    limit: int = 3,
-) -> list[str]:
-    lines: list[str] = []
-    current = ""
-    for word in text.split():
-        trial = f"{current} {word}".strip()
-        if draw.textlength(trial, font=font) <= max_width:
-            current = trial
-            continue
-        if current:
-            lines.append(current)
-        current = word
-        if len(lines) >= limit:
-            break
-    if current and len(lines) < limit:
-        lines.append(current)
-    return lines[:limit]
-
-
 def _store_jpeg(jpeg: bytes) -> str:
     folder = settings.uploads_dir / "instagram-posts"
     folder.mkdir(parents=True, exist_ok=True)
     name = f"{uuid4().hex}.jpg"
     (folder / name).write_bytes(jpeg)
     return f"{_public_origin()}/api/instagram/media/{name}"
-
-
-def _designed_cover(title: str, detail: str) -> bytes:
-    """A finished card when there is no photograph. Not an empty black square."""
-    width, height = 1080, 1350
-    image = Image.new("RGB", (width, height), (244, 241, 234))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, width, 150), fill=(17, 17, 17))
-    draw.text((72, 58), "BLACK CAT HOSTAL", font=_font(26), fill=(212, 175, 110))
-    title_font = _font(64, bold=True)
-    body_font = _font(30)
-    y = 210
-    for row in _wrap(draw, title or "Santiago", title_font, width - 144, limit=3):
-        draw.text((72, y), row, font=title_font, fill=(22, 22, 22))
-        y += 78
-    y += 12
-    draw.rectangle((72, y, 210, y + 4), fill=(212, 175, 110))
-    y += 36
-    for row in _wrap(draw, detail or "Santiago", body_font, width - 144, limit=5):
-        draw.text((72, y), row, font=body_font, fill=(68, 64, 58))
-        y += 42
-    draw.rectangle((0, height - 140, width, height), fill=(17, 17, 17))
-    draw.text((72, height - 96), "Compañía de Jesús 1921", font=_font(30, bold=True), fill=(255, 255, 255))
-    draw.text((72, height - 52), "Santiago", font=_font(24), fill=(212, 175, 110))
-    return _jpeg_bytes(image)
 
 
 def _jpeg_bytes(image: Image.Image) -> bytes:
@@ -887,9 +826,9 @@ def _to_instagram_jpeg(content: bytes) -> bytes:
     return _jpeg_bytes(image)
 
 
-async def _hosted_jpeg(image_urls: list[str], *, title: str, detail: str) -> str:
+async def _hosted_jpeg(image_urls: list[str]) -> str:
     for url in image_urls:
-        if not url or _is_wikipedia(url):
+        if not url or _is_wikipedia(url) or "api.blackcathostal.com/api/g/" in url:
             continue
         try:
             content, _kind = await download_image(url, timeout_seconds=20, max_bytes=8_000_000)
@@ -897,7 +836,7 @@ async def _hosted_jpeg(image_urls: list[str], *, title: str, detail: str) -> str
         except (SourceFetchError, InstagramError, OSError, ValueError, httpx.HTTPError):
             continue
         return _store_jpeg(jpeg)
-    return _store_jpeg(_designed_cover(title, detail))
+    return ""
 
 
 async def _draft_post() -> dict[str, Any]:
@@ -905,9 +844,13 @@ async def _draft_post() -> dict[str, Any]:
     images = [str(url) for url in page.get("chosen_images") or [] if url]
     video = str(page.get("chosen_video") or "")
     caption = await _write_caption(page)
-    title = str(page.get("title") or "Santiago")
-    detail = str(page.get("cover_detail") or title)
-    hosted = await _hosted_jpeg(images, title=title, detail=detail)
+    hosted = await _hosted_jpeg(images)
+    if not hosted:
+        place = await _google_place(str(page.get("subject") or page.get("title") or ""))
+        if place.get("photo_url"):
+            hosted = await _hosted_jpeg([str(place["photo_url"])])
+    if not hosted and not video:
+        raise InstagramError("No hay una foto de ese lugar para publicar")
     return {
         "caption": caption,
         "media_type": "video" if video else "image",

@@ -44,6 +44,7 @@ class Settings(BaseSettings):
         "www.blackcathostal.com",
     ]
     google_places_api_key: str = ""
+    bitly_access_token: str = ""
     google_place_id: str = ""
     google_place_query: str = "Black Cat Hostal Boutique Compañía de Jesús 1921 Santiago Chile"
     google_reviews_cache_seconds: int = 1800

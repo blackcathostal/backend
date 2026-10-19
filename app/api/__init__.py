@@ -20,6 +20,7 @@ from app.api import (
     reviews,
     rooms,
     services,
+    short_links,
     sliders,
     terms,
 )
@@ -42,6 +43,7 @@ api_router.include_router(items.router)
 api_router.include_router(reviews.router)
 api_router.include_router(places.router)
 api_router.include_router(inquiries.router)
+api_router.include_router(short_links.router)
 api_router.include_router(instagram.router)
 api_router.include_router(facebook.router)
 api_router.include_router(analytics.router)
