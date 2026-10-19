@@ -50,20 +50,20 @@ _CONCERT_HOSTS = (
     "cooperativa.cl",
 )
 _OUTINGS = (
-    ("Museo Nacional de Bellas Artes Santiago horarios", "Museo Nacional de Bellas Artes"),
-    ("Museo Histórico Nacional Santiago", "Museo Histórico Nacional"),
-    ("Zoológico Nacional Santiago horarios", "Zoológico Nacional de Chile"),
-    ("Buin Zoo cómo llegar desde Santiago", "Buin Zoo"),
-    ("Parque Nacional Río Clarillo", "Parque Nacional Río Clarillo"),
-    ("Parque Aguas de Ramón Santiago", "Parque Aguas de Ramón"),
+    ("mirador cerro San Cristóbal Santiago", "Cerro San Cristóbal"),
+    ("Templo Bahá'í Peñalolén", "Templo Bahá'í"),
+    ("cerro Santa Lucía Santiago", "Cerro Santa Lucía"),
+    ("Barrio Lastarria Santiago", "Barrio Lastarria"),
+    ("calle Nueva York Santiago centro", "Calle Nueva York"),
+    ("Parque Bicentenario Vitacura", "Parque Bicentenario"),
+    ("teleférico cerro San Cristóbal", "Teleférico San Cristóbal"),
+    ("Museo Nacional de Bellas Artes Santiago", "Museo Nacional de Bellas Artes"),
+    ("Barrio Italia Santiago", "Barrio Italia"),
+    ("Zoológico Nacional Santiago", "Zoológico Nacional"),
     ("Termas de Colina", "Termas de Colina"),
-    ("Termas de Jahuel", "Termas de Jahuel"),
-    ("Termas de Cauquenes", "Termas de Cauquenes"),
-    ("Baños El Corazón Pirque", "Baños El Corazón"),
-    ("Termas Valle de Colina", "Termas Valle de Colina"),
-    ("Cerro San Cristóbal teleférico Santiago", "Cerro San Cristóbal"),
-    ("barrio Italia Santiago planes", "Barrio Italia"),
+    ("Parque Aguas de Ramón Santiago", "Parque Aguas de Ramón"),
     ("Barrio Bellavista Santiago", "Barrio Bellavista"),
+    ("cerro Santa Lucía castillo", "Castillo Hidalgo"),
 )
 _ARRIVALS = (
     ("Aeropuerto de Santiago", "transit"),
@@ -119,69 +119,24 @@ _HASHTAGS = {
     "noticia": ("#Santiago", "#Chile"),
     "llegada": ("#BlackCatHostal", "#Santiago", "#BarrioBrasil"),
 }
-_HOSTEL_SHOTS = (
-    {
-        "subject": "Desayuno",
-        "image": "https://blackcathostal.com/cappa/img/restaurant/1.webp",
-        "title": "Desayuno en Black Cat",
-        "source_url": "https://blackcathostal.com/restaurant",
-        "focus": (
-            "La foto es el desayuno del hostal. Escribe solo del desayuno incluido y del horario "
-            "que está en el material. No hables de la ciudad, de plazas ni de otra foto."
-        ),
-    },
-    {
-        "subject": "Habitación Queen",
-        "image": "https://blackcathostal.com/cappa/img/rooms/blackcat/queen.webp",
-        "title": "Habitación Queen",
-        "source_url": "https://blackcathostal.com/rooms",
-        "focus": (
-            "La foto es la habitación con cama queen. Escribe solo de esa habitación: cama, baño "
-            "y el precio del material si aparece. No hables del desayuno ni de un paisaje."
-        ),
-    },
-    {
-        "subject": "Habitación Twin",
-        "image": "https://blackcathostal.com/cappa/img/rooms/blackcat/twin.webp",
-        "title": "Habitación Twin",
-        "source_url": "https://blackcathostal.com/rooms",
-        "focus": (
-            "La foto es la habitación con dos camas. Escribe solo de esa habitación y de su precio "
-            "si está en el material."
-        ),
-    },
-    {
-        "subject": "Habitación familiar",
-        "image": "https://blackcathostal.com/cappa/img/rooms/blackcat/family.webp",
-        "title": "Habitación familiar",
-        "source_url": "https://blackcathostal.com/rooms",
-        "focus": (
-            "La foto es la habitación familiar. Escribe solo de esa habitación, de cuántas personas "
-            "caben y del precio si está en el material."
-        ),
-    },
-    {
-        "subject": "Patio",
-        "image": "https://blackcathostal.com/cappa/img/about/patio.webp",
-        "title": "Patio del hostal",
-        "source_url": "https://blackcathostal.com",
-        "focus": (
-            "La foto es el patio del hostal. Escribe solo de ese espacio y de la dirección. "
-            "No hables de museos ni de un plano de la ciudad."
-        ),
-    },
+_WALKS = (
+    ("Plaza Brasil Santiago", "Plaza Brasil"),
+    ("Barrio Yungay Santiago", "Barrio Yungay"),
+    ("Barrio Concha y Toro Santiago", "Barrio Concha y Toro"),
+    ("Parque Forestal Santiago", "Parque Forestal"),
+    ("Paseo Phillips Santiago", "Paseo Phillips"),
 )
 
 _SYSTEM = """Eres el community manager de Black Cat Hostal Boutique, en Santiago.
 Los posts hablan de toda Santiago y de las salidas en cualquier dirección: museos, zoológicos, parques naturales, termas de Colina, Jahuel, Cauquenes, Pirque o la cordillera, cerros, barrios y conciertos. También hay cómo llegar al hostal desde el aeropuerto, un terminal o una estación de metro, y posts de chiste o adivinanza. La nieve y los centros de ski solo si el material es de temporada. No te quedes solo en Barrio Brasil ni solo en el Cajón del Maipo.
 Escribes posts de Instagram que la gente se queda a leer.
 
-Cómo se hace un post que engancha, según las cuentas que funcionan:
-- La primera línea para el dedo: una pregunta, una fecha o una frase concreta. Nada de "descubre la magia".
-- Después, dos o tres datos que solo están en el material: quién, dónde, cuándo, precio o cómo llegar.
-- Frases cortas, una idea por línea. Se puede usar un emoji, no una fila.
-- Cierra con una invitación clara.
-- No copies ejemplos ajenos. No inventes fechas, artistas ni precios.
+Cómo escriben las cuentas de turismo que funcionan, sin copiarlas:
+- La primera línea es la foto: la vista, la hora o la calle. "La cordillera detrás del San Cristóbal, a última hora."
+- La segunda es para ir: una dirección corta, un horario o los minutos a pie desde el hostal, solo si está en el material.
+- La tercera invita en una línea.
+- Frases cortas. Un dato, no un folleto. Nada de "descubre la magia" ni de "abre el enlace y mira".
+- No inventes fechas, artistas ni precios.
 - Escribe como una persona del hostal, en voz baja, sin sonar a anuncio ni a texto generado.
 - El texto tiene que hablar de lo mismo que muestra la foto. Si la foto es un desayuno, no hables de la ciudad. Si la foto es un concierto, no hables de otra cosa.
 - Los conciertos salen de Ticketmaster, Puntoticket, Ticketplus o un medio. El cómo llegar sale de Google Maps. No cites Wikipedia ni un blog.
@@ -336,18 +291,33 @@ def _article_photo(media: dict[str, Any], subject: str) -> str:
     return ""
 
 
-def _next_hostel_shot() -> dict[str, str]:
-    path = settings.uploads_dir / "cache" / "instagram_post_hostel.txt"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    current = path.read_text(encoding="utf-8").strip() if path.exists() else ""
-    subjects = [item["subject"] for item in _HOSTEL_SHOTS]
-    try:
-        index = subjects.index(current)
-    except ValueError:
-        index = -1
-    chosen = _HOSTEL_SHOTS[(index + 1) % len(_HOSTEL_SHOTS)]
-    path.write_text(chosen["subject"], encoding="utf-8")
-    return chosen
+def _travel_photo_url(photos: list[Any], key: str) -> str:
+    """Prefer a tall travel photo. Skip wide banners and the flat cover shot."""
+    ranked: list[tuple[float, str]] = []
+    for index, photo in enumerate(photos[:8]):
+        if not isinstance(photo, dict):
+            continue
+        name = str(photo.get("name") or "")
+        width = int(photo.get("widthPx") or 0)
+        height = int(photo.get("heightPx") or 0)
+        if not name or width < 700 or height < 700:
+            continue
+        ratio = width / height
+        if ratio > 1.6:
+            continue
+        penalty = abs(ratio - 0.8) + (0.2 if index == 0 else 0)
+        ranked.append((penalty, name))
+    if not ranked and photos:
+        name = str((photos[0] or {}).get("name") or "") if isinstance(photos[0], dict) else ""
+        if name:
+            ranked.append((1.0, name))
+    if not ranked:
+        return ""
+    ranked.sort()
+    return (
+        f"https://places.googleapis.com/v1/{ranked[0][1]}/media"
+        f"?maxHeightPx=1600&maxWidthPx=1200&key={key}"
+    )
 
 
 async def _interesting_page(
@@ -486,10 +456,7 @@ async def _google_place(query: str) -> dict[str, str]:
         return {}
     place = places[0]
     name = str((place.get("displayName") or {}).get("text") or text)
-    photo_name = str(((place.get("photos") or [{}])[0] or {}).get("name") or "")
-    photo_url = ""
-    if photo_name:
-        photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxWidthPx=1400&key={key}"
+    photo_url = _travel_photo_url(list(place.get("photos") or []), key)
     hours = (place.get("regularOpeningHours") or {}).get("weekdayDescriptions") or []
     return {
         "name": name,
@@ -505,6 +472,23 @@ def _place_material(place: dict[str, str]) -> str:
     if place.get("maps_url"):
         lines.append(f"Google Maps: {place['maps_url']}")
     return "\n".join(line for line in lines if line)
+
+
+async def _with_travel_photo(page: dict[str, Any], query: str) -> dict[str, Any]:
+    """Use a tall photo of the place, not a catalog image from the website."""
+    place = await _google_place(query)
+    if not place.get("photo_url"):
+        return page
+    page["chosen_images"] = [place["photo_url"]]
+    page["subject"] = place.get("name") or page.get("subject") or query
+    page["title"] = place.get("name") or page.get("title") or query
+    extra = _place_material(place)
+    if extra and extra not in str(page.get("text") or ""):
+        page["text"] = f"{page.get('text') or ''}\n\n{extra}".strip()[:1800]
+    if place.get("maps_url"):
+        page["url"] = place["maps_url"]
+        page["source_name"] = "Google Maps"
+    return page
 
 
 async def _with_google_photo(page: dict[str, Any], query: str) -> dict[str, Any]:
@@ -643,42 +627,51 @@ async def _page_with_media() -> dict[str, Any]:
             text="No salió un show en Ticketmaster, Puntoticket ni en un medio. No inventes artista ni fecha.",
             focus="No hay un concierto confirmado. Invita a mirar Puntoticket o Ticketmaster, sin inventar un show.",
         )
-        return await _with_google_photo(page, "sala de conciertos Santiago")
+        return await _with_travel_photo(page, "Movistar Arena Santiago")
     if theme == "llegada":
         return await _arrival_page()
     if theme == "juego":
         query, place = _next_outing()
         page = await _interesting_page((query,), place)
-        if page:
-            page["theme"] = theme
-            page["focus"] = (
-                f"La foto es de {place}. Escribe una adivinanza corta cuya respuesta sea ese lugar. "
-                "La respuesta va en la última línea. No hables de otro lugar."
+        if not page:
+            page = _story(
+                theme,
+                title=place,
+                subject=place,
+                text=f"Escribe una adivinanza cuya respuesta sea {place}.",
+                focus="",
             )
-            return page
+        page["theme"] = theme
+        page["focus"] = (
+            f"La foto es una postal de {place}. Escribe una adivinanza corta cuya respuesta sea ese lugar. "
+            "La respuesta va en la última línea."
+        )
+        return await _with_travel_photo(page, place)
+    if theme == "hotel":
+        index = _cycle_key("instagram_post_walk.txt", [item[1] for item in _WALKS])
+        query, place = _WALKS[index]
+        info = await call_reply_tool("get_hostel_info", {})
+        if not isinstance(info, dict):
+            info = {}
         page = _story(
             theme,
             title=place,
             subject=place,
-            text=f"Escribe una adivinanza cuya respuesta sea {place}.",
-            focus=f"La foto es de {place}. La adivinanza se responde con ese lugar, en la última línea.",
+            source_url="https://blackcathostal.com",
+            source_name="Black Cat Hostal",
+            text=(
+                f"Paseo: {place}. "
+                f"Hostal en {info.get('address') or 'Compañía de Jesús 1921'}. "
+                f"Desayuno: {info.get('breakfast_hours') or ''}. "
+                f"Check-in: {info.get('check_in_time') or ''}."
+            ),
+            focus=(
+                f"La foto es de {place}: calle, plaza o fachada, como una postal. "
+                "Primera línea describe esa foto. Una sola línea puede decir que el hostal queda cerca, "
+                "con un dato real. No describas una habitación de catálogo."
+            ),
         )
-        return await _with_google_photo(page, place)
-    if theme == "hotel":
-        shot = _next_hostel_shot()
-        info = await call_reply_tool("get_hostel_info", {})
-        rooms = await call_reply_tool("search_rooms", {"query": ""})
-        page = _story(
-            theme,
-            title=shot["title"],
-            subject=shot["subject"],
-            image=shot["image"],
-            source_url=shot["source_url"],
-            text=json.dumps({"hostal": info, "habitaciones": rooms}, ensure_ascii=False)[:1800],
-            focus=shot["focus"],
-        )
-        page["cover_detail"] = shot["subject"]
-        return page
+        return await _with_travel_photo(page, query)
     if theme == "noticia":
         page = await _interesting_page(_NEWS_QUERIES, "")
         if page:
@@ -692,24 +685,24 @@ async def _page_with_media() -> dict[str, Any]:
             text="No salió una nota de un medio. Invita a revisar la agenda cultural de Santiago, sin inventar una función.",
             focus="No inventes un artista ni una fecha.",
         )
-        return await _with_google_photo(page, "centro cultural Santiago")
+        return await _with_travel_photo(page, "centro cultural Santiago")
     query, place = _next_outing()
     page = await _interesting_page((query,), place)
-    if page:
-        page["theme"] = "turismo"
-        page["focus"] = (
-            f"La foto es de {place}. Habla solo de ese lugar, con un dato que esté en el material. "
-            "No cambies el lugar."
+    if not page:
+        page = _story(
+            "turismo",
+            title=place,
+            subject=place,
+            text=f"Datos de {place}. No inventes horarios ni precios que no estén escritos.",
+            focus="",
         )
-        return page
-    page = _story(
-        "turismo",
-        title=place,
-        subject=place,
-        text=f"Datos de {place}. No inventes horarios ni precios que no estén escritos.",
-        focus=f"La foto es de {place}. El texto habla solo de ese lugar.",
+    page["theme"] = "turismo"
+    page["focus"] = (
+        f"La foto es una postal de {place}: vista, calle o fachada. "
+        "La primera línea describe esa foto. Después, un dato práctico que esté en el material. "
+        "No suenes a folleto ni a catálogo."
     )
-    return await _with_google_photo(page, place)
+    return await _with_travel_photo(page, place)
 
 
 async def _write_caption(page: dict[str, Any]) -> str:
@@ -799,36 +792,34 @@ def _jpeg_bytes(image: Image.Image) -> bytes:
 
 
 def _to_instagram_jpeg(content: bytes) -> bytes:
+    """Vertical 4:5, the frame tourism posts use in the feed."""
     image = Image.open(BytesIO(content)).convert("RGB")
     width, height = image.size
-    if width < 2 or height < 2:
+    if width < 400 or height < 400:
         raise InstagramError("La foto es demasiado pequeña")
+    target = 4 / 5
     ratio = width / height
-    if ratio < 0.8:
-        new_height = int(width / 0.8)
-        top = max(0, (height - new_height) // 2)
-        image = image.crop((0, top, width, top + new_height))
-    elif ratio > 1.91:
-        new_width = int(height * 1.91)
+    if ratio > target:
+        new_width = max(1, int(height * target))
         left = max(0, (width - new_width) // 2)
-        image = image.crop((left, 0, left + new_width, height))
-    width, height = image.size
-    short_side = min(width, height)
-    if short_side < 320:
-        scale = 320 / short_side
-        image = image.resize((int(width * scale), int(height * scale)), Image.Resampling.LANCZOS)
-    if max(image.size) > 1440:
-        scale = 1440 / max(image.size)
-        image = image.resize(
-            (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
-            Image.Resampling.LANCZOS,
-        )
+        image = image.crop((left, 0, min(width, left + new_width), height))
+    elif ratio < target:
+        new_height = max(1, int(width / target))
+        top = max(0, int((height - new_height) * 0.28))
+        image = image.crop((0, top, width, min(height, top + new_height)))
+    image = image.resize((1080, 1350), Image.Resampling.LANCZOS)
     return _jpeg_bytes(image)
 
 
 async def _hosted_jpeg(image_urls: list[str]) -> str:
     for url in image_urls:
-        if not url or _is_wikipedia(url) or "api.blackcathostal.com/api/g/" in url:
+        if (
+            not url
+            or _is_wikipedia(url)
+            or "api.blackcathostal.com/api/g/" in url
+            or "/cappa/" in url
+            or "blackcathostal.com" in url
+        ):
             continue
         try:
             content, _kind = await download_image(url, timeout_seconds=20, max_bytes=8_000_000)
