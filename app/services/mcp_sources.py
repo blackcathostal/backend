@@ -392,7 +392,38 @@ def _usable_image(url: str) -> bool:
     if not _publishable_host(url):
         return False
     path = urlparse(url).path.lower()
-    return not path.endswith((".svg", ".gif", ".webp", ".ico", ".avif", ".bmp"))
+    return not path.endswith((".svg", ".gif", ".ico", ".avif", ".bmp"))
+
+
+def _rejected_photo(url: str, alt: str = "") -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    if "wikipedia.org" in host or "wikimedia.org" in host:
+        return True
+    blob = f"{url} {alt}".lower()
+    return any(
+        word in blob
+        for word in (
+            "logo",
+            "icon",
+            "icono",
+            "avatar",
+            "sprite",
+            "placeholder",
+            "gravatar",
+            "1x1",
+            "pixel",
+            "escudo",
+            "bandera",
+            "flag",
+            "mapa",
+            "/map.",
+            "grabado",
+            "engraving",
+            "lithograph",
+            "author",
+            "autor",
+        )
+    )
 
 
 @mcp.tool(
@@ -414,17 +445,29 @@ async def find_web_media(url: str) -> dict[str, Any]:
     except (SourceFetchError, Exception) as exc:
         return {"ok": False, "url": url, "error": str(exc)}
     page_url = str(material.get("url") or url)
-    ranked = [
+    candidates = [
         item
-        for item in (material.get("image_urls") or [])
-        if _usable_image(item) and _direct_file(item, (".jpg", ".jpeg", ".png"))
+        for item in (material.get("image_candidates") or [])
+        if isinstance(item, dict)
+        and _usable_image(str(item.get("url") or ""))
+        and not _rejected_photo(str(item.get("url") or ""), str(item.get("alt") or ""))
     ]
-    ranked.extend(
-        item
-        for item in (material.get("image_urls") or [])
-        if item not in ranked and _usable_image(item)
-    )
-    images = [{"url": item} for item in ranked[:4]]
+    candidates.sort(key=lambda item: 0 if str(item.get("is_meta")) == "True" else 1)
+    if not candidates:
+        candidates = [
+            {"url": item, "alt": "", "is_meta": "False"}
+            for item in (material.get("image_urls") or [])
+            if _usable_image(item) and not _rejected_photo(item)
+        ]
+    images = [
+        {
+            "url": str(item.get("url") or ""),
+            "alt": str(item.get("alt") or ""),
+            "is_meta": str(item.get("is_meta") or ""),
+        }
+        for item in candidates[:6]
+        if item.get("url")
+    ]
     videos = [
         {"url": item}
         for item in (material.get("video_urls") or [])
