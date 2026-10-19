@@ -430,15 +430,15 @@ async def generate_instagram_post(_: Users = Depends(get_current_user)) -> dict[
 
 @router.post("/posts/from-photo")
 async def generate_instagram_post_from_photo(
-    photo: UploadFile = File(...),
+    photos: list[UploadFile] = File(...),
     note: str = Form(""),
     _: Users = Depends(get_current_user),
 ) -> dict[str, Any]:
-    from app.services.instagram_posts import create_instagram_post_from_photo
+    from app.services.instagram_posts import create_instagram_post_from_photos
 
-    content = await photo.read()
+    contents = [await item.read() for item in photos]
     try:
-        return await create_instagram_post_from_photo(content, note)
+        return await create_instagram_post_from_photos(contents, note)
     except DeepSeekConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DeepSeekError as exc:

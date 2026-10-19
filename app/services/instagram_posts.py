@@ -740,7 +740,11 @@ async def _page_with_media() -> dict[str, Any]:
     return await _with_travel_photo(page, place)
 
 
-async def _write_caption(page: dict[str, Any], image_jpeg: bytes | None = None) -> str:
+async def _write_caption(
+    page: dict[str, Any],
+    image_jpeg: bytes | None = None,
+    image_jpegs: list[bytes] | None = None,
+) -> str:
     base, model, headers = _require_deepseek()
     source_url = str(page.get("url") or "").strip()
     source_name = str(page.get("source_name") or page.get("title") or "").strip()
@@ -752,9 +756,12 @@ async def _write_caption(page: dict[str, Any], image_jpeg: bytes | None = None) 
         "concierto": "El mismo concierto de la nota. Si no hay artista o fecha, no los inventes.",
         "noticia": "El dato de esa nota en la primera línea.",
     }.get(theme, "Lo mismo que muestra la foto.")
+    images = [item for item in (image_jpegs or []) if item]
+    if image_jpeg:
+        images.insert(0, image_jpeg)
     notes = (
         "Gancho en la primera línea. Luego un dato concreto. Frases cortas."
-        if image_jpeg
+        if images
         else await _style_notes()
     )
     user = (
@@ -765,15 +772,17 @@ async def _write_caption(page: dict[str, Any], image_jpeg: bytes | None = None) 
         f"Título: {page.get('title') or ''}\n"
         f"Material:\n{str(page.get('text') or '')[:1400]}"
     )
-    if image_jpeg:
-        encoded = base64.b64encode(image_jpeg).decode("ascii")
-        user_content: str | list[dict[str, Any]] = [
-            {"type": "text", "text": user},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
-            },
-        ]
+    if images:
+        detail = "low" if len(images) > 4 else "high"
+        user_content: str | list[dict[str, Any]] = [{"type": "text", "text": user}]
+        for shot in images[:10]:
+            encoded = base64.b64encode(shot).decode("ascii")
+            user_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": detail},
+                }
+            )
         model = "deepseek-flash"
     else:
         user_content = user
@@ -789,7 +798,7 @@ async def _write_caption(page: dict[str, Any], image_jpeg: bytes | None = None) 
         ],
     }
     last_error = "DeepSeek no respondió"
-    async with httpx.AsyncClient(timeout=70.0 if image_jpeg else 45.0) as client:
+    async with httpx.AsyncClient(timeout=90.0 if images else 45.0) as client:
         for _ in range(2):
             try:
                 response = await client.post(f"{base}/chat/completions", headers=headers, json=payload)
@@ -1165,21 +1174,50 @@ async def _create_container(ig_id: str, token: str, payload: dict[str, Any]) -> 
         raise
 
 
+async def _create_carousel(ig_id: str, token: str, draft: dict[str, Any]) -> dict[str, Any]:
+    child_ids: list[str] = []
+    for url in draft.get("image_urls") or []:
+        created = await _create_container(
+            ig_id,
+            token,
+            {"image_url": url, "is_carousel_item": "true"},
+        )
+        child_id = str(created.get("id") or "")
+        if not child_id:
+            raise InstagramError("Instagram no creó una foto del carrusel")
+        await _wait_container(child_id, token)
+        child_ids.append(child_id)
+    if len(child_ids) < 2:
+        raise InstagramError("Un carrusel necesita al menos dos fotos")
+    return await _create_container(
+        ig_id,
+        token,
+        {
+            "media_type": "CAROUSEL",
+            "children": ",".join(child_ids),
+            "caption": draft["caption"],
+        },
+    )
+
+
 async def _publish(draft: dict[str, Any]) -> dict[str, Any]:
     conn = _require_connection()
     ig_id = str(conn.get("ig_user_id") or "").strip()
     token = conn["page_access_token"]
     if not ig_id:
         raise InstagramError("Falta la cuenta de Instagram conectada")
-    payload = _container_payload(draft)
-    try:
-        created = await _create_container(ig_id, token, payload)
-    except InstagramError:
-        image_url = str(draft.get("image_url") or "")
-        if draft.get("media_type") != "video" or not image_url:
-            raise
-        draft = {**draft, "media_type": "image", "media_url": image_url}
-        created = await _create_container(ig_id, token, _container_payload(draft))
+    if draft.get("media_type") == "carousel":
+        created = await _create_carousel(ig_id, token, draft)
+    else:
+        payload = _container_payload(draft)
+        try:
+            created = await _create_container(ig_id, token, payload)
+        except InstagramError:
+            image_url = str(draft.get("image_url") or "")
+            if draft.get("media_type") != "video" or not image_url:
+                raise
+            draft = {**draft, "media_type": "image", "media_url": image_url}
+            created = await _create_container(ig_id, token, _container_payload(draft))
     creation_id = str(created.get("id") or "")
     if not creation_id:
         raise InstagramError("Instagram no creó el contenedor del post")
@@ -1225,46 +1263,79 @@ def _flatten_to_jpeg(content: bytes) -> bytes:
     return _jpeg_bytes(image)
 
 
-async def create_instagram_post_from_photo(content: bytes, note: str = "") -> dict[str, Any]:
-    """Publish an uploaded photo. DeepSeek sees the image and writes the caption."""
+def _jpeg_from_upload(content: bytes) -> bytes:
     if len(content) < 800:
-        raise InstagramError("La foto está vacía")
+        raise InstagramError("Una de las fotos está vacía")
     if len(content) > 15_000_000:
-        raise InstagramError("La foto es demasiado pesada")
+        raise InstagramError("Una foto es demasiado pesada")
     try:
-        jpeg = _to_instagram_jpeg(_flatten_to_jpeg(content))
+        return _to_instagram_jpeg(_flatten_to_jpeg(content))
     except (InstagramError, OSError, ValueError) as exc:
-        raise InstagramError("No pude leer esa foto. Usa JPG, PNG o WebP.") from exc
-    hosted = _store_jpeg(jpeg)
+        raise InstagramError("No pude leer una foto. Usa JPG, PNG o WebP.") from exc
+
+
+async def create_instagram_post_from_photo(content: bytes, note: str = "") -> dict[str, Any]:
+    return await create_instagram_post_from_photos([content], note)
+
+
+async def create_instagram_post_from_photos(contents: list[bytes], note: str = "") -> dict[str, Any]:
+    """Publish one photo, or a carousel when there are two or more. DeepSeek sees them all."""
+    shots = [item for item in contents if item]
+    if not shots:
+        raise InstagramError("Sube al menos una foto")
+    if len(shots) > 10:
+        raise InstagramError("Instagram acepta hasta 10 fotos en un carrusel")
+    jpegs = [_jpeg_from_upload(item) for item in shots]
+    hosted = [_store_jpeg(jpeg) for jpeg in jpegs]
     info = await call_reply_tool("get_hostel_info", {})
     if not isinstance(info, dict):
         info = {}
     detail = note.strip()[:500]
+    several = len(jpegs) > 1
     page = {
         "theme": "hotel",
         "url": "https://blackcathostal.com",
         "source_name": "Black Cat Hostal",
         "title": "Santiago",
         "text": (
-            f"Foto subida para publicar.\n"
-            f"Nota de quien la subió: {detail or 'ninguna'}\n"
+            f"{'Carrusel de ' + str(len(jpegs)) + ' fotos' if several else 'Una foto'}, en ese orden.\n"
+            f"Nota de quien las subió: {detail or 'ninguna'}\n"
             f"Hostal en {info.get('address') or 'Compañía de Jesús 1921, Santiago'}. "
             f"Desayuno: {info.get('breakfast_hours') or ''}. "
             f"Check-in: {info.get('check_in_time') or ''}."
         ),
         "focus": (
-            "La imagen adjunta es la foto del post. La primera línea describe lo que se ve, "
-            "incluido el texto escrito en la imagen. Una línea más puede usar un dato real del hostal. "
-            "No hables de otro lugar ni inventes precios."
+            "Las imágenes adjuntas van en el orden del carrusel. "
+            "La primera línea describe el conjunto, no solo la primera foto. "
+            "Si hay texto escrito en alguna, úsalo. Una línea más puede usar un dato real del hostal. "
+            "No inventes precios ni otro lugar."
+            if several
+            else (
+                "La imagen adjunta es la foto del post. La primera línea describe lo que se ve, "
+                "incluido el texto escrito en la imagen. Una línea más puede usar un dato real del hostal. "
+                "No hables de otro lugar ni inventes precios."
+            )
         ),
     }
-    caption = await _write_caption(page, image_jpeg=jpeg)
+    caption = await _write_caption(page, image_jpegs=jpegs)
+    if several:
+        return await _publish(
+            {
+                "caption": caption,
+                "media_type": "carousel",
+                "media_url": hosted[0],
+                "image_url": hosted[0],
+                "image_urls": hosted,
+                "source_url": "https://blackcathostal.com",
+                "source_name": "Black Cat Hostal",
+            }
+        )
     return await _publish(
         {
             "caption": caption,
             "media_type": "image",
-            "media_url": hosted,
-            "image_url": hosted,
+            "media_url": hosted[0],
+            "image_url": hosted[0],
             "source_url": "https://blackcathostal.com",
             "source_name": "Black Cat Hostal",
         }
