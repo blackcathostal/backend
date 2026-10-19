@@ -292,10 +292,8 @@ def _article_photo(media: dict[str, Any], subject: str) -> str:
 
 
 def _photo_media_url(name: str, key: str) -> str:
-    return (
-        f"https://places.googleapis.com/v1/{name}/media"
-        f"?maxHeightPx=1600&maxWidthPx=1200&key={key}"
-    )
+    del key
+    return f"https://places.googleapis.com/v1/{name}/media?maxWidthPx=1600"
 
 
 def _travel_photo_urls(photos: list[Any], key: str) -> list[str]:
@@ -313,7 +311,7 @@ def _travel_photo_urls(photos: list[Any], key: str) -> list[str]:
         penalty = abs(ratio - 0.8) + (0.15 if index == 0 else 0)
         ranked.append((penalty, name))
     ranked.sort()
-    return [_photo_media_url(name, key) for _, name in ranked[:4]]
+    return [_photo_media_url(name, key) for _, name in ranked[:8]]
 
 
 async def _interesting_page(
@@ -813,17 +811,58 @@ def _looks_like_image(content: bytes, content_type: str) -> bool:
     return content_type.startswith("image/") and "svg" not in content_type
 
 
+def _place_photo_resource(url: str) -> str:
+    marker = "places.googleapis.com/v1/"
+    if marker not in url or "/media" not in url:
+        return ""
+    path = url.split(marker, 1)[1]
+    return path.split("/media", 1)[0].split("?", 1)[0]
+
+
+def _image_bytes(response: httpx.Response) -> bytes:
+    kind = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    content = response.content
+    if response.status_code != 200 or kind.startswith("text/") or kind in {"application/json", "text/html"}:
+        raise InstagramError(f"La foto respondió HTTP {response.status_code}")
+    if len(content) < 5000 or len(content) > 12_000_000 or not _looks_like_image(content, kind):
+        raise InstagramError(f"La foto respondió HTTP {response.status_code} sin imagen")
+    return content
+
+
 async def _fetch_photo_bytes(url: str) -> bytes:
     if not str(url).startswith("https://"):
         raise InstagramError("La foto no es una dirección pública")
-    async with httpx.AsyncClient(timeout=25.0, follow_redirects=True, headers=_BROWSER_HEADERS) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        content = response.content
-        kind = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-    if len(content) < 800 or len(content) > 8_000_000 or not _looks_like_image(content, kind):
-        raise InstagramError("La dirección no devolvió una foto")
-    return content
+    key = (settings.google_places_api_key or "").strip()
+    resource = _place_photo_resource(url)
+    async with httpx.AsyncClient(timeout=40.0, follow_redirects=True) as client:
+        if resource and key:
+            media = f"https://places.googleapis.com/v1/{resource}/media"
+            headers = {"X-Goog-Api-Key": key}
+            response = await client.get(
+                media,
+                params={"maxWidthPx": 1600, "key": key},
+                headers=headers,
+            )
+            try:
+                return _image_bytes(response)
+            except InstagramError:
+                alt = await client.get(
+                    media,
+                    params={"maxWidthPx": 1600, "skipHttpRedirect": "true", "key": key},
+                    headers=headers,
+                )
+                photo_uri = ""
+                if alt.status_code == 200:
+                    try:
+                        photo_uri = str(alt.json().get("photoUri") or "")
+                    except ValueError:
+                        photo_uri = ""
+                if not photo_uri.startswith("https://"):
+                    raise InstagramError(f"La foto de Google respondió HTTP {response.status_code}")
+                response = await client.get(photo_uri)
+        else:
+            response = await client.get(url, headers=_BROWSER_HEADERS)
+        return _image_bytes(response)
 
 
 def _to_instagram_jpeg(content: bytes) -> bytes:
@@ -846,28 +885,35 @@ def _to_instagram_jpeg(content: bytes) -> bytes:
     return _jpeg_bytes(image)
 
 
-async def _hosted_jpeg(image_urls: list[str]) -> str:
+async def _hosted_jpeg(image_urls: list[str], failures: list[str] | None = None) -> str:
     for url in image_urls:
         if (
             not url
             or _is_wikipedia(url)
             or "api.blackcathostal.com/api/g/" in url
             or "/cappa/" in url
-            or "blackcathostal.com" in url
+            or ("blackcathostal.com" in url and "places.googleapis.com" not in url)
         ):
             continue
         try:
             content = await _fetch_photo_bytes(url)
             jpeg = _to_instagram_jpeg(content)
-        except (SourceFetchError, InstagramError, OSError, ValueError, httpx.HTTPError):
+        except (SourceFetchError, InstagramError, OSError, ValueError, httpx.HTTPError) as exc:
+            if failures is not None and len(failures) < 3:
+                reason = str(exc)
+                if "AIza" not in reason and "key=" not in reason:
+                    failures.append(reason[:120])
             continue
         return _store_jpeg(jpeg)
     return ""
 
 
-async def _photo_for_page(page: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+async def _photo_for_page(
+    page: dict[str, Any],
+    failures: list[str] | None = None,
+) -> tuple[str, dict[str, Any]]:
     images = [str(url) for url in page.get("chosen_images") or [] if url]
-    hosted = await _hosted_jpeg(images)
+    hosted = await _hosted_jpeg(images, failures)
     if hosted:
         return hosted, page
     queries = [
@@ -883,10 +929,12 @@ async def _photo_for_page(page: dict[str, Any]) -> tuple[str, dict[str, Any]]:
             continue
         seen.add(text)
         place = await _google_place(text)
+        if not place.get("photo_urls") and failures is not None and len(failures) < 3:
+            failures.append(f"Google no devolvió fotos de {text[:60]}")
         urls = [str(url) for url in place.get("photo_urls") or [] if url]
         if place.get("photo_url"):
             urls.append(str(place["photo_url"]))
-        hosted = await _hosted_jpeg(urls)
+        hosted = await _hosted_jpeg(urls, failures)
         if not hosted:
             continue
         if text != str(page.get("subject") or ""):
@@ -904,9 +952,11 @@ async def _photo_for_page(page: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 async def _draft_post() -> dict[str, Any]:
     page = await _page_with_media()
     video = str(page.get("chosen_video") or "")
-    hosted, page = await _photo_for_page(page)
+    failures: list[str] = []
+    hosted, page = await _photo_for_page(page, failures)
     if not hosted and not video:
-        raise InstagramError("No pude bajar una foto para el post. Intenta de nuevo en un momento.")
+        detail = failures[-1] if failures else "Google no devolvió una imagen"
+        raise InstagramError(f"No pude bajar una foto para el post. {detail}")
     caption = await _write_caption(page)
     return {
         "caption": caption,
