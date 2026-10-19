@@ -168,6 +168,16 @@ def _with_source(caption: str, source_name: str, source_url: str) -> str:
     return text[:2200]
 
 
+def _strip_web(caption: str) -> str:
+    text = re.sub(r"https?://\S+", "", caption)
+    text = re.sub(r"\bwww\.\S+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?i)\bblackcathostal\.com\b", "", text)
+    text = re.sub(r"(?im)^lo vi en\b.*$", "", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _with_hashtags(caption: str, theme: str) -> str:
     text = re.sub(r"(?<!\w)#\w+", "", caption)
     text = re.sub(r"[ \t]{2,}", " ", text)
@@ -759,19 +769,27 @@ async def _write_caption(
     images = [item for item in (image_jpegs or []) if item]
     if image_jpeg:
         images.insert(0, image_jpeg)
-    notes = (
-        "Gancho en la primera línea. Luego un dato concreto. Frases cortas."
-        if images
-        else await _style_notes()
-    )
-    user = (
-        f"Tema del post: {theme}. {focus}\n"
-        f"Así abren otros posts. No los copies, copia solo el ritmo:\n{notes}\n\n"
-        f"Fuente: {source_name}\n"
-        f"URL: {source_url}\n"
-        f"Título: {page.get('title') or ''}\n"
-        f"Material:\n{str(page.get('text') or '')[:1400]}"
-    )
+    notes = await _style_notes() if not images else ""
+    if images:
+        user = (
+            f"{focus}\n\n"
+            "Escribe el pie de foto en español, de 8 a 14 líneas.\n"
+            "Tono de quien recibe en Santiago: turístico, ameno, detallado y profesional. "
+            "Cuenta la calle, la luz, la estación y el paseo. Una línea puede nombrar el hostal si la foto es del barrio.\n"
+            "Sin folleto, sin 'descubre la magia' y sin sonar a anuncio.\n"
+            "No escribas ninguna web, URL, www ni 'Lo vi en'. No inventes precios ni horarios que no estén en la nota.\n"
+            "No escribas hashtags.\n\n"
+            f"Nota:\n{str(page.get('text') or '')[:1400]}"
+        )
+    else:
+        user = (
+            f"Tema del post: {theme}. {focus}\n"
+            f"Así abren otros posts. No los copies, copia solo el ritmo:\n{notes}\n\n"
+            f"Fuente: {source_name}\n"
+            f"URL: {source_url}\n"
+            f"Título: {page.get('title') or ''}\n"
+            f"Material:\n{str(page.get('text') or '')[:1400]}"
+        )
     if images:
         detail = "low" if len(images) > 4 else "high"
         user_content: str | list[dict[str, Any]] = [{"type": "text", "text": user}]
@@ -789,11 +807,22 @@ async def _write_caption(
     payload = {
         "model": model,
         "temperature": 0.4,
-        "max_tokens": 500,
+        "max_tokens": 900 if images else 500,
         "thinking": {"type": "disabled"},
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": _SYSTEM},
+            {
+                "role": "system",
+                "content": (
+                    "Eres el anfitrión de Black Cat Hostal Boutique, en Santiago. "
+                    "Escribes pies de foto de turismo: detallados, amenos y profesionales. "
+                    "Hablas de lo que muestra la imagen. No inventas precios ni fechas. "
+                    "No escribes webs, URL, www ni hashtags. "
+                    'Responde solo JSON: {"caption":"..."}'
+                    if images
+                    else _SYSTEM
+                ),
+            },
             {"role": "user", "content": user_content},
         ],
     }
@@ -815,15 +844,17 @@ async def _write_caption(
             except (KeyError, IndexError, TypeError, ValueError) as exc:
                 raise DeepSeekError("DeepSeek devolvió un formato inesperado") from exc
             data = _extract_json(content or "")
-            caption = _with_hashtags(
-                _with_source(str(data.get("caption") or "").strip(), source_name, source_url),
-                theme,
-            )
+            raw_caption = str(data.get("caption") or "").strip()
+            if images:
+                raw_caption = _strip_web(raw_caption)
+            else:
+                raw_caption = _with_source(raw_caption, source_name, source_url)
+            caption = _with_hashtags(raw_caption, theme)
             credit_url = str(page.get("photo_credit_url") or "").strip()
             credit_name = str(page.get("photo_credit_name") or "").strip()
             if credit_url and credit_url not in caption:
                 caption = f"{caption}\n\nLa foto es de {credit_name or 'quien la tomó'}\n{credit_url}"
-            if len(caption) < 20:
+            if len(caption) < (180 if images else 20):
                 raise InstagramError("DeepSeek no escribió el mensaje del post")
             return caption[:2200]
     raise DeepSeekError(last_error)
@@ -1294,7 +1325,7 @@ async def create_instagram_post_from_photos(contents: list[bytes], note: str = "
     several = len(jpegs) > 1
     page = {
         "theme": "hotel",
-        "url": "https://blackcathostal.com",
+        "url": "",
         "source_name": "Black Cat Hostal",
         "title": "Santiago",
         "text": (
@@ -1305,15 +1336,14 @@ async def create_instagram_post_from_photos(contents: list[bytes], note: str = "
             f"Check-in: {info.get('check_in_time') or ''}."
         ),
         "focus": (
-            "Las imágenes adjuntas van en el orden del carrusel. "
-            "La primera línea describe el conjunto, no solo la primera foto. "
-            "Si hay texto escrito en alguna, úsalo. Una línea más puede usar un dato real del hostal. "
-            "No inventes precios ni otro lugar."
+            "Mira las fotos del carrusel en orden. Abre con lo que se ve en el conjunto. "
+            "Luego recorre el paseo: calles, colores, estación, gente, el texto que esté escrito en la imagen. "
+            "Cierra con una invitación a caminarlo, en voz de anfitrión."
             if several
             else (
-                "La imagen adjunta es la foto del post. La primera línea describe lo que se ve, "
-                "incluido el texto escrito en la imagen. Una línea más puede usar un dato real del hostal. "
-                "No hables de otro lugar ni inventes precios."
+                "Mira la foto. Abre con lo que se ve, incluido el texto escrito en la imagen. "
+                "Sigue con el barrio, la luz y el paseo, como una cuenta de turismo que conoce el lugar. "
+                "Cierra con una invitación breve, en voz de anfitrión."
             )
         ),
     }
