@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,8 @@ from app.services.deepseek_instagram import (
     _extract_json,
     _require_deepseek,
 )
+from app.services.google_places_client import places_headers
+from app.services.hostel_directions import directions_to_hostel
 from app.services.instagram import (
     InstagramError,
     _graph_get,
@@ -31,29 +33,54 @@ from app.services.instagram import (
 )
 from app.services.mcp_sources import call_reply_tool
 
-_THEMES = ("concierto", "turismo", "juego", "hotel", "noticia")
+_THEMES = ("concierto", "turismo", "llegada", "juego", "hotel", "noticia")
 _CONCERT_QUERIES = (
-    "conciertos Santiago esta semana cartelera",
-    "agenda conciertos Santiago puntoticket",
-    "recitales Santiago Teatro Municipal",
-    "conciertos GAM Santiago agenda",
+    "conciertos Santiago esta semana",
+    "agenda conciertos Santiago",
+    "recitales Santiago",
+)
+_CONCERT_HOSTS = (
+    "puntoticket.com",
+    "ticketplus.cl",
+    "ticketmaster.cl",
+    "ticketmaster.com",
+    "latercera.com",
+    "emol.com",
+    "biobiochile.cl",
+    "cooperativa.cl",
 )
 _OUTINGS = (
-    ("museos de Santiago horarios y entradas", "museo Santiago"),
-    ("Museo de Bellas Artes y Museo Histórico Nacional Santiago", "museo Santiago"),
-    ("Zoológico Nacional Santiago horarios", "Zoológico Nacional Santiago"),
+    ("Museo Nacional de Bellas Artes Santiago horarios", "Museo Nacional de Bellas Artes"),
+    ("Museo Histórico Nacional Santiago", "Museo Histórico Nacional"),
+    ("Zoológico Nacional Santiago horarios", "Zoológico Nacional de Chile"),
     ("Buin Zoo cómo llegar desde Santiago", "Buin Zoo"),
-    ("parques naturales cerca de Santiago Río Clarillo", "parque nacional Santiago"),
-    ("Parque Aguas de Ramón y Quebrada de Macul", "parque natural Santiago"),
-    ("termas cerca de Santiago horarios", "termas Santiago"),
-    ("Termas de Colina cómo llegar", "Termas de Colina"),
-    ("Termas de Jahuel Los Andes", "Termas de Jahuel"),
-    ("Termas de Cauquenes desde Santiago", "Termas de Cauquenes"),
+    ("Parque Nacional Río Clarillo", "Parque Nacional Río Clarillo"),
+    ("Parque Aguas de Ramón Santiago", "Parque Aguas de Ramón"),
+    ("Termas de Colina", "Termas de Colina"),
+    ("Termas de Jahuel", "Termas de Jahuel"),
+    ("Termas de Cauquenes", "Termas de Cauquenes"),
     ("Baños El Corazón Pirque", "Baños El Corazón"),
-    ("Termas Valle de Colina Cajón del Maipo", "termas cordillera Santiago"),
-    ("qué hacer en Santiago esta semana", "Santiago Chile"),
+    ("Termas Valle de Colina", "Termas Valle de Colina"),
     ("Cerro San Cristóbal teleférico Santiago", "Cerro San Cristóbal"),
-    ("barrio Italia y Bellavista planes", "Bellavista Santiago"),
+    ("barrio Italia Santiago planes", "Barrio Italia"),
+    ("Barrio Bellavista Santiago", "Barrio Bellavista"),
+)
+_ARRIVALS = (
+    ("Aeropuerto de Santiago", "transit"),
+    ("Terminal de Buses Alameda", "transit"),
+    ("Estación Central Santiago", "transit"),
+    ("Metro Santa Ana", "walking"),
+    ("Metro República", "walking"),
+    ("Metro Los Héroes", "walking"),
+    ("Metro Cumming", "walking"),
+    ("Plaza de Armas Santiago", "walking"),
+    ("Costanera Center", "transit"),
+    ("Barrio Italia Santiago", "transit"),
+)
+_ARRIVAL_PHOTOS = (
+    "https://blackcathostal.com/cappa/img/about/patio.webp",
+    "https://blackcathostal.com/cappa/img/barrio/bb-plaza-1.webp",
+    "https://blackcathostal.com/cappa/img/about/interior.webp",
 )
 _SNOW_OUTINGS = (
     ("centros de ski Valle Nevado Farellones abiertos", "Valle Nevado nieve"),
@@ -89,10 +116,14 @@ _BLOG_HOSTS = (
     "wixsite.com",
     "blogger.com",
 )
-_SITE_FILTER = (
-    "(site:latercera.com OR site:emol.com OR site:biobiochile.cl "
-    "OR site:cooperativa.cl OR site:t13.cl OR site:24horas.cl)"
-)
+_HASHTAGS = {
+    "concierto": ("#Santiago", "#Conciertos"),
+    "turismo": ("#Santiago", "#Chile"),
+    "juego": ("#Santiago", "#Chile"),
+    "hotel": ("#BlackCatHostal", "#Santiago", "#BarrioBrasil"),
+    "noticia": ("#Santiago", "#Chile"),
+    "llegada": ("#BlackCatHostal", "#Santiago", "#BarrioBrasil"),
+}
 _HOSTEL_SHOTS = (
     {
         "subject": "Desayuno",
@@ -147,7 +178,7 @@ _HOSTEL_SHOTS = (
 )
 
 _SYSTEM = """Eres el community manager de Black Cat Hostal Boutique, en Santiago.
-Los posts hablan de toda Santiago y de las salidas en cualquier dirección: museos, zoológicos, parques naturales, termas de Colina, Jahuel, Cauquenes, Pirque o la cordillera, cerros, barrios y conciertos. También hay posts de chiste o adivinanza de turismo. La nieve y los centros de ski solo si el material es de temporada. No te quedes solo en Barrio Brasil ni solo en el Cajón del Maipo.
+Los posts hablan de toda Santiago y de las salidas en cualquier dirección: museos, zoológicos, parques naturales, termas de Colina, Jahuel, Cauquenes, Pirque o la cordillera, cerros, barrios y conciertos. También hay cómo llegar al hostal desde el aeropuerto, un terminal o una estación de metro, y posts de chiste o adivinanza. La nieve y los centros de ski solo si el material es de temporada. No te quedes solo en Barrio Brasil ni solo en el Cajón del Maipo.
 Escribes posts de Instagram que la gente se queda a leer.
 
 Cómo se hace un post que engancha, según las cuentas que funcionan:
@@ -156,20 +187,29 @@ Cómo se hace un post que engancha, según las cuentas que funcionan:
 - Frases cortas, una idea por línea. Se puede usar un emoji, no una fila.
 - Cierra con una invitación clara.
 - No copies ejemplos ajenos. No inventes fechas, artistas ni precios.
-- Escribe como una persona del hostal, en voz baja, sin hashtags y sin sonar a anuncio ni a texto generado.
+- Escribe como una persona del hostal, en voz baja, sin sonar a anuncio ni a texto generado.
 - El texto tiene que hablar de lo mismo que muestra la foto. Si la foto es un desayuno, no hables de la ciudad. Si la foto es un concierto, no hables de otra cosa.
-- La fuente es un medio de noticias o la web del hostal. No cites Wikipedia ni un blog.
-- Al final deja la página en una línea natural: "Lo vi en ..." y la URL.
+- Los conciertos salen de Ticketmaster, Puntoticket, Ticketplus o un medio. El cómo llegar sale de Google Maps. No cites Wikipedia ni un blog.
+- No escribas hashtags.
+- Al final deja la página en una línea natural: "Lo vi en ..." y la URL. Si hay un enlace de Google Maps, déjalo.
 Responde solo JSON: {"caption":"..."}
 """
 
 
 def _with_source(caption: str, source_name: str, source_url: str) -> str:
     text = caption.strip()
-    if source_url not in text:
+    if source_url and source_url not in text:
         label = source_name.strip() or "esta página"
         text = f"{text}\n\nLo vi en {label}\n{source_url}"
     return text[:2200]
+
+
+def _with_hashtags(caption: str, theme: str) -> str:
+    text = re.sub(r"(?<!\w)#\w+", "", caption)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    tags = " ".join(_HASHTAGS.get(theme, ("#Santiago", "#Chile"))[:3])
+    return f"{text}\n\n{tags}"[:2200]
 
 
 def _snow_in_season() -> bool:
@@ -220,7 +260,7 @@ def _is_wikipedia(url: str) -> bool:
     return "wikipedia.org" in host or "wikimedia.org" in host
 
 
-def _is_verified_news(url: str) -> bool:
+def _allowed_host(url: str, hosts: tuple[str, ...]) -> bool:
     host = _host(url)
     path = urlparse(url).path.lower()
     if not host or _is_wikipedia(url):
@@ -229,7 +269,12 @@ def _is_verified_news(url: str) -> bool:
         return False
     if path == "/blog" or path.startswith("/blog/") or "/blog/" in path:
         return False
-    return any(host == name or host.endswith(f".{name}") for name in _NEWS_HOSTS)
+    return any(host == name or host.endswith(f".{name}") for name in hosts)
+
+
+def _site_filter(hosts: tuple[str, ...]) -> str:
+    clause = " OR ".join(f"site:{host}" for host in hosts[:8])
+    return f"({clause})"
 
 
 def _tokens(value: str) -> set[str]:
@@ -297,19 +342,24 @@ def _next_hostel_shot() -> dict[str, str]:
     return chosen
 
 
-async def _interesting_page(queries: tuple[str, ...], subject: str) -> dict[str, Any]:
+async def _interesting_page(
+    queries: tuple[str, ...],
+    subject: str,
+    hosts: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    allowed = hosts or _NEWS_HOSTS
     seen: set[str] = set()
     for query in queries:
         found = await call_reply_tool(
             "search_web",
-            {"query": f"{query} {_SITE_FILTER}", "max_results": 5},
+            {"query": f"{query} {_site_filter(allowed)}", "max_results": 5},
         )
         for row in (found.get("results") or [])[:5]:
             url = str(row.get("url") or "").strip()
             title = str(row.get("title") or "")
             snippet = str(row.get("snippet") or "")
             needed = subject or query
-            if not url or url in seen or not _is_verified_news(url):
+            if not url or url in seen or not _allowed_host(url, allowed):
                 continue
             if not _mentions(needed, title, snippet):
                 continue
@@ -387,25 +437,207 @@ def _story(
     }
 
 
+def _cycle_key(filename: str, keys: list[str]) -> int:
+    path = settings.uploads_dir / "cache" / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    current = path.read_text(encoding="utf-8").strip() if path.exists() else ""
+    try:
+        index = keys.index(current)
+    except ValueError:
+        index = -1
+    chosen = (index + 1) % len(keys)
+    path.write_text(keys[chosen], encoding="utf-8")
+    return chosen
+
+
+async def _google_place(query: str) -> dict[str, str]:
+    key = (settings.google_places_api_key or "").strip()
+    text = str(query or "").strip()
+    if not key or len(text) < 2:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                "https://places.googleapis.com/v1/places:searchText",
+                headers=places_headers(
+                    "places.displayName,places.formattedAddress,places.googleMapsUri,"
+                    "places.regularOpeningHours,places.photos"
+                ),
+                json={
+                    "textQuery": f"{text}, Santiago de Chile",
+                    "languageCode": "es",
+                    "regionCode": "CL",
+                    "maxResultCount": 1,
+                },
+            )
+            response.raise_for_status()
+            places = response.json().get("places") or []
+    except (httpx.HTTPError, ValueError):
+        return {}
+    if not places:
+        return {}
+    place = places[0]
+    name = str((place.get("displayName") or {}).get("text") or text)
+    photo_name = str(((place.get("photos") or [{}])[0] or {}).get("name") or "")
+    photo_url = ""
+    if photo_name:
+        photo_url = f"https://places.googleapis.com/v1/{photo_name}/media?maxWidthPx=1400&key={key}"
+    hours = (place.get("regularOpeningHours") or {}).get("weekdayDescriptions") or []
+    return {
+        "name": name,
+        "address": str(place.get("formattedAddress") or ""),
+        "maps_url": str(place.get("googleMapsUri") or ""),
+        "hours": " · ".join(str(item) for item in hours[:2]),
+        "photo_url": photo_url,
+    }
+
+
+def _place_material(place: dict[str, str]) -> str:
+    lines = [place.get("name") or "", place.get("address") or "", place.get("hours") or ""]
+    if place.get("maps_url"):
+        lines.append(f"Google Maps: {place['maps_url']}")
+    return "\n".join(line for line in lines if line)
+
+
+async def _with_google_photo(page: dict[str, Any], query: str) -> dict[str, Any]:
+    if page.get("chosen_images") or page.get("chosen_video"):
+        return page
+    place = await _google_place(query)
+    if not place:
+        page["cover_detail"] = str(page.get("title") or query)
+        return page
+    page["text"] = f"{page.get('text') or ''}\n\n{_place_material(place)}".strip()[:1800]
+    page["title"] = place.get("name") or page.get("title")
+    page["cover_detail"] = place.get("address") or str(page.get("title") or query)
+    if place.get("photo_url"):
+        page["chosen_images"] = [place["photo_url"]]
+    if place.get("maps_url") and str(page.get("url") or "").rstrip("/").endswith("blackcathostal.com"):
+        page["url"] = place["maps_url"]
+        page["source_name"] = "Google Maps"
+    return page
+
+
+async def _ticketmaster_concert() -> dict[str, Any]:
+    key = (settings.ticketmaster_api_key or "").strip()
+    if not key:
+        return {}
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                settings.ticketmaster_events_api_url,
+                params={
+                    "apikey": key,
+                    "city": "Santiago",
+                    "countryCode": "CL",
+                    "classificationName": "music",
+                    "startDateTime": now,
+                    "size": 20,
+                    "sort": "date,asc",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return {}
+    shows = []
+    for event in ((payload.get("_embedded") or {}).get("events") or []):
+        if not isinstance(event, dict):
+            continue
+        name = str(event.get("name") or "").strip()
+        start = (event.get("dates") or {}).get("start") or {}
+        when = str(start.get("localDate") or start.get("dateTime") or "").strip()
+        venue = (((event.get("_embedded") or {}).get("venues") or [{}])[0] or {})
+        venue_name = str(venue.get("name") or "").strip()
+        image = ""
+        widest = 0
+        for item in event.get("images") or []:
+            url = str(item.get("url") or "")
+            width = int(item.get("width") or 0)
+            if url.startswith("https://") and width >= widest and "logo" not in url.lower():
+                image = url
+                widest = width
+        if name and when:
+            shows.append(
+                {
+                    "id": str(event.get("id") or name),
+                    "name": name,
+                    "when": when,
+                    "venue": venue_name,
+                    "url": str(event.get("url") or ""),
+                    "image": image,
+                }
+            )
+    if not shows:
+        return {}
+    index = _cycle_key("instagram_post_concert.txt", [item["id"] for item in shows])
+    show = shows[index]
+    text = f"{show['name']}\nFecha: {show['when']}\nLugar: {show['venue']}\n{show['url']}"
+    page = _story(
+        "concierto",
+        title=show["name"],
+        subject=show["name"],
+        image=show["image"],
+        source_url=show["url"] or "https://www.ticketmaster.cl",
+        source_name="Ticketmaster",
+        text=text,
+        focus=(
+            "La foto es de este concierto. Di el artista, la sala y la fecha solo si están en el material. "
+            "No inventes otro show."
+        ),
+    )
+    page["cover_detail"] = f"{show['when']} · {show['venue']}".strip(" ·")
+    if not show["image"]:
+        page = await _with_google_photo(page, show["venue"] or show["name"])
+    return page
+
+
+def _arrival_page() -> dict[str, Any]:
+    index = _cycle_key("instagram_post_arrival.txt", [item[0] for item in _ARRIVALS])
+    origin, mode = _ARRIVALS[index]
+    route = directions_to_hostel(origin, mode)
+    photo = _ARRIVAL_PHOTOS[index % len(_ARRIVAL_PHOTOS)]
+    return _story(
+        "llegada",
+        title=f"Desde {origin}",
+        subject=origin,
+        image=photo,
+        source_url=str(route.get("maps_url") or "https://blackcathostal.com"),
+        source_name="Google Maps",
+        text=str(route.get("summary") or ""),
+        focus=(
+            f"La foto es del hostal o del barrio al que se llega. Explica cómo llegar desde {origin} "
+            "usando solo el tiempo, la distancia y las líneas del material. Deja el enlace de Google Maps. "
+            "No inventes un recorrido."
+        ),
+    ) | {"cover_detail": str(route.get("summary") or origin)[:180]}
+
+
 async def _page_with_media() -> dict[str, Any]:
-    """A news story or a hostel photo, and a caption about that same photo."""
+    """A real photo of the subject, or a designed card when no photo exists."""
     theme = _next_theme()
     if theme == "concierto":
-        page = await _interesting_page(_CONCERT_QUERIES, "")
+        show = await _ticketmaster_concert()
+        if show:
+            return show
+        page = await _interesting_page(_CONCERT_QUERIES, "", hosts=_CONCERT_HOSTS)
         if page:
             page["theme"] = theme
             page["focus"] = (
-                "La foto es la de esa nota. Habla del mismo concierto, artista o sala. "
+                "La foto es la de esa cartelera. Habla del mismo concierto, artista o sala. "
                 "Si el material no trae el nombre, no lo inventes."
             )
             return page
-        return _story(
+        page = _story(
             theme,
-            title="Música en vivo",
-            subject="Música en vivo",
-            text="No salió una cartelera en un medio. Invita a mirar la agenda de conciertos en Santiago, sin inventar artista ni fecha.",
-            focus="La imagen dice Música en vivo. Habla de música en vivo en Santiago, sin inventar artista, sala ni fecha.",
+            title="Conciertos en Santiago",
+            subject="Conciertos en Santiago",
+            text="No salió un show en Ticketmaster, Puntoticket ni en un medio. No inventes artista ni fecha.",
+            focus="No hay un concierto confirmado. Invita a mirar Puntoticket o Ticketmaster, sin inventar un show.",
         )
+        return await _with_google_photo(page, "sala de conciertos Santiago")
+    if theme == "llegada":
+        return _arrival_page()
     if theme == "juego":
         query, place = _next_outing()
         page = await _interesting_page((query,), place)
@@ -415,20 +647,20 @@ async def _page_with_media() -> dict[str, Any]:
                 f"La foto es de {place}. Escribe una adivinanza corta cuya respuesta sea ese lugar. "
                 "La respuesta va en la última línea. No hables de otro lugar."
             )
-            page["plate"] = _plain_line(place) or page.get("plate") or place
             return page
-        return _story(
+        page = _story(
             theme,
             title=place,
             subject=place,
-            text=f"No salió una nota de {place}. Escribe una adivinanza cuya respuesta sea {place}.",
-            focus=f"La imagen muestra {place}. La adivinanza se responde con ese lugar, en la última línea.",
+            text=f"Escribe una adivinanza cuya respuesta sea {place}.",
+            focus=f"La foto o el diseño es {place}. La adivinanza se responde con ese lugar, en la última línea.",
         )
+        return await _with_google_photo(page, place)
     if theme == "hotel":
         shot = _next_hostel_shot()
         info = await call_reply_tool("get_hostel_info", {})
         rooms = await call_reply_tool("search_rooms", {"query": ""})
-        return _story(
+        page = _story(
             theme,
             title=shot["title"],
             subject=shot["subject"],
@@ -437,19 +669,22 @@ async def _page_with_media() -> dict[str, Any]:
             text=json.dumps({"hostal": info, "habitaciones": rooms}, ensure_ascii=False)[:1800],
             focus=shot["focus"],
         )
+        page["cover_detail"] = shot["subject"]
+        return page
     if theme == "noticia":
         page = await _interesting_page(_NEWS_QUERIES, "")
         if page:
             page["theme"] = theme
             page["focus"] = "La foto es la de esa nota. El dato de la primera línea tiene que ser el de esa misma nota."
             return page
-        return _story(
+        page = _story(
             theme,
             title="Agenda de Santiago",
             subject="Agenda cultural",
             text="No salió una nota de un medio. Invita a revisar la agenda cultural de Santiago, sin inventar una función.",
-            focus="La imagen dice Agenda cultural. No inventes un artista ni una fecha.",
+            focus="No inventes un artista ni una fecha.",
         )
+        return await _with_google_photo(page, "centro cultural Santiago")
     query, place = _next_outing()
     page = await _interesting_page((query,), place)
     if page:
@@ -458,15 +693,15 @@ async def _page_with_media() -> dict[str, Any]:
             f"La foto es de {place}. Habla solo de ese lugar, con un dato que esté en el material. "
             "No cambies el lugar."
         )
-        page["plate"] = _plain_line(place) or page.get("plate") or place
         return page
-    return _story(
+    page = _story(
         "turismo",
         title=place,
         subject=place,
-        text=f"No salió una nota de {place}. Invita a ese plan con un dato general, sin inventar horarios ni precios.",
-        focus=f"La imagen muestra {place}. El texto habla solo de ese lugar.",
+        text=f"Datos de {place}. No inventes horarios ni precios que no estén escritos.",
+        focus=f"La foto es de {place}. El texto habla solo de ese lugar.",
     )
+    return await _with_google_photo(page, place)
 
 
 async def _write_caption(page: dict[str, Any]) -> str:
@@ -519,7 +754,10 @@ async def _write_caption(page: dict[str, Any]) -> str:
             except (KeyError, IndexError, TypeError, ValueError) as exc:
                 raise DeepSeekError("DeepSeek devolvió un formato inesperado") from exc
             data = _extract_json(content or "")
-            caption = _with_source(str(data.get("caption") or "").strip(), source_name, source_url)
+            caption = _with_hashtags(
+                _with_source(str(data.get("caption") or "").strip(), source_name, source_url),
+                theme,
+            )
             credit_url = str(page.get("photo_credit_url") or "").strip()
             credit_name = str(page.get("photo_credit_name") or "").strip()
             if credit_url and credit_url not in caption:
@@ -558,7 +796,13 @@ def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont | ImageFont.F
     return ImageFont.load_default()
 
 
-def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int) -> list[str]:
+def _wrap(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.ImageFont,
+    max_width: int,
+    limit: int = 3,
+) -> list[str]:
     lines: list[str] = []
     current = ""
     for word in text.split():
@@ -569,34 +813,11 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_w
         if current:
             lines.append(current)
         current = word
-    if current:
+        if len(lines) >= limit:
+            break
+    if current and len(lines) < limit:
         lines.append(current)
-    return lines[:2]
-
-
-def _with_plate(image: Image.Image, title: str) -> Image.Image:
-    """Bottom caption bar: kicker, gold rule, title. Not loose type on the sky."""
-    line = _plain_line(title)
-    if not line:
-        return image
-    width, height = image.size
-    framed = image.convert("RGBA")
-    plate = Image.new("RGBA", framed.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(plate)
-    title_font = _font(max(32, width // 18), bold=True)
-    kicker_font = _font(max(14, width // 46))
-    lines = _wrap(draw, line, title_font, int(width * 0.82))
-    panel_h = max(int(height * 0.18), int(title_font.size * (len(lines) + 1.6)))
-    top = height - panel_h
-    draw.rectangle((0, top, width, height), fill=(14, 14, 14, 228))
-    draw.rectangle((0, top, width, top + max(3, width // 280)), fill=(212, 175, 110, 255))
-    margin = int(width * 0.07)
-    draw.text((margin, top + int(panel_h * 0.14)), "SANTIAGO", font=kicker_font, fill=(212, 175, 110, 255))
-    y = top + int(panel_h * 0.40)
-    for row in lines:
-        draw.text((margin, y), row, font=title_font, fill=(255, 255, 255, 255))
-        y += int(title_font.size * 1.15)
-    return Image.alpha_composite(framed, plate).convert("RGB")
+    return lines[:limit]
 
 
 def _store_jpeg(jpeg: bytes) -> str:
@@ -607,21 +828,28 @@ def _store_jpeg(jpeg: bytes) -> str:
     return f"{_public_origin()}/api/instagram/media/{name}"
 
 
-def _title_card(title: str) -> bytes:
-    """Designed frame when the news photo could not be downloaded."""
+def _designed_cover(title: str, detail: str) -> bytes:
+    """A finished card when there is no photograph. Not an empty black square."""
     width, height = 1080, 1350
-    image = Image.new("RGB", (width, height), (18, 18, 18))
+    image = Image.new("RGB", (width, height), (244, 241, 234))
     draw = ImageDraw.Draw(image)
-    draw.rectangle((72, 72, width - 72, height - 72), outline=(212, 175, 110), width=2)
-    kicker = _font(28)
-    draw.text((120, 160), "SANTIAGO", font=kicker, fill=(212, 175, 110))
-    draw.rectangle((120, 220, 280, 224), fill=(212, 175, 110))
-    headline = _plain_line(title) or "Santiago"
-    title_font = _font(78, bold=True)
-    y = 320
-    for row in _wrap(draw, headline, title_font, width - 240):
-        draw.text((120, y), row, font=title_font, fill=(255, 255, 255))
-        y += 96
+    draw.rectangle((0, 0, width, 150), fill=(17, 17, 17))
+    draw.text((72, 58), "BLACK CAT HOSTAL", font=_font(26), fill=(212, 175, 110))
+    title_font = _font(64, bold=True)
+    body_font = _font(30)
+    y = 210
+    for row in _wrap(draw, title or "Santiago", title_font, width - 144, limit=3):
+        draw.text((72, y), row, font=title_font, fill=(22, 22, 22))
+        y += 78
+    y += 12
+    draw.rectangle((72, y, 210, y + 4), fill=(212, 175, 110))
+    y += 36
+    for row in _wrap(draw, detail or "Santiago", body_font, width - 144, limit=5):
+        draw.text((72, y), row, font=body_font, fill=(68, 64, 58))
+        y += 42
+    draw.rectangle((0, height - 140, width, height), fill=(17, 17, 17))
+    draw.text((72, height - 96), "Compañía de Jesús 1921", font=_font(30, bold=True), fill=(255, 255, 255))
+    draw.text((72, height - 52), "Santiago", font=_font(24), fill=(212, 175, 110))
     return _jpeg_bytes(image)
 
 
@@ -631,7 +859,7 @@ def _jpeg_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-def _to_instagram_jpeg(content: bytes, headline: str = "") -> bytes:
+def _to_instagram_jpeg(content: bytes) -> bytes:
     image = Image.open(BytesIO(content)).convert("RGB")
     width, height = image.size
     if width < 2 or height < 2:
@@ -656,22 +884,20 @@ def _to_instagram_jpeg(content: bytes, headline: str = "") -> bytes:
             (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
             Image.Resampling.LANCZOS,
         )
-    if headline:
-        image = _with_plate(image, headline)
     return _jpeg_bytes(image)
 
 
-async def _hosted_jpeg(image_urls: list[str], plate: str = "") -> str:
+async def _hosted_jpeg(image_urls: list[str], *, title: str, detail: str) -> str:
     for url in image_urls:
-        if _is_wikipedia(url):
+        if not url or _is_wikipedia(url):
             continue
         try:
             content, _kind = await download_image(url, timeout_seconds=20, max_bytes=8_000_000)
-            jpeg = _to_instagram_jpeg(content, plate)
+            jpeg = _to_instagram_jpeg(content)
         except (SourceFetchError, InstagramError, OSError, ValueError, httpx.HTTPError):
             continue
         return _store_jpeg(jpeg)
-    return _store_jpeg(_title_card(plate or "Santiago"))
+    return _store_jpeg(_designed_cover(title, detail))
 
 
 async def _draft_post() -> dict[str, Any]:
@@ -679,8 +905,9 @@ async def _draft_post() -> dict[str, Any]:
     images = [str(url) for url in page.get("chosen_images") or [] if url]
     video = str(page.get("chosen_video") or "")
     caption = await _write_caption(page)
-    plate = str(page.get("plate") or page.get("title") or "Santiago")
-    hosted = await _hosted_jpeg(images, plate)
+    title = str(page.get("title") or "Santiago")
+    detail = str(page.get("cover_detail") or title)
+    hosted = await _hosted_jpeg(images, title=title, detail=detail)
     return {
         "caption": caption,
         "media_type": "video" if video else "image",

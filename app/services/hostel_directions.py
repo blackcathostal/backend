@@ -13,6 +13,116 @@ HOSTEL_LNG = -70.6638072
 USER_AGENT = "BlackCatHostal/1.0 (reservas@blackcathostal.com)"
 
 
+def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
+    """Route from a Santiago point to the hostel, with a Google Maps link."""
+    place = (origin or "").strip()
+    travel = "walking" if mode == "walking" else "transit"
+    maps_url = (
+        "https://www.google.com/maps/dir/?api=1"
+        f"&origin={quote(f'{place}, Santiago, Chile')}"
+        f"&destination={quote(HOSTEL_ADDRESS)}"
+        f"&travelmode={travel}"
+    )
+    result: dict[str, Any] = {
+        "ok": True,
+        "origin": place,
+        "destination": HOSTEL_ADDRESS,
+        "mode": travel,
+        "distance": "",
+        "duration": "",
+        "lines": [],
+        "maps_url": maps_url,
+    }
+    located: dict[str, Any] | None = None
+    try:
+        located = _geocode(place)
+    except httpx.HTTPError:
+        located = None
+    route = _google_route(located, travel) if located else None
+    if route is None and located and travel == "walking":
+        route = _foot_summary(located["lat"], located["lng"], HOSTEL_LAT, HOSTEL_LNG)
+    if route:
+        result.update(route)
+    sentences = [f"Desde {place} hasta Black Cat Hostal, {HOSTEL_ADDRESS}."]
+    if result["duration"]:
+        sentences.append(f"Tiempo: {result['duration']}. Distancia: {result['distance']}.")
+    if result["lines"]:
+        sentences.append("En el camino: " + ", ".join(result["lines"]) + ".")
+    sentences.append(f"Google Maps: {maps_url}")
+    result["summary"] = " ".join(sentences)
+    return result
+
+
+def _google_route(origin: dict[str, Any] | None, mode: str) -> dict[str, Any] | None:
+    if not origin:
+        return None
+    from app.core.config import settings
+
+    key = (settings.google_places_api_key or "").strip()
+    if not key:
+        return None
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            response = client.get(
+                "https://maps.googleapis.com/maps/api/directions/json",
+                params={
+                    "origin": f"{origin['lat']},{origin['lng']}",
+                    "destination": f"{HOSTEL_LAT},{HOSTEL_LNG}",
+                    "mode": mode,
+                    "language": "es",
+                    "region": "cl",
+                    "key": key,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    if payload.get("status") != "OK":
+        return None
+    routes = payload.get("routes") or []
+    legs = (routes[0].get("legs") if routes else None) or []
+    if not legs:
+        return None
+    leg = legs[0]
+    lines: list[str] = []
+    for step in leg.get("steps") or []:
+        transit = step.get("transit_details") or {}
+        line = transit.get("line") or {}
+        label = str(line.get("short_name") or line.get("name") or "").strip()
+        vehicle = str((line.get("vehicle") or {}).get("name") or "").strip()
+        if label:
+            lines.append(f"{vehicle} {label}".strip())
+        if len(lines) >= 4:
+            break
+    return {
+        "distance": str((leg.get("distance") or {}).get("text") or ""),
+        "duration": str((leg.get("duration") or {}).get("text") or ""),
+        "lines": lines,
+    }
+
+
+def _foot_summary(lat1: float, lng1: float, lat2: float, lng2: float) -> dict[str, Any] | None:
+    url = f"https://router.project-osrm.org/route/v1/foot/{lng1},{lat1};{lng2},{lat2}"
+    try:
+        with httpx.Client(timeout=12.0, headers={"User-Agent": USER_AGENT}) as client:
+            response = client.get(url, params={"overview": "false", "steps": "false"})
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    routes = payload.get("routes") or []
+    if payload.get("code") != "Ok" or not routes:
+        return None
+    meters = int(routes[0].get("distance") or 0)
+    seconds = int(round(meters / 1.33))
+    return {
+        "distance": _format_distance(meters),
+        "duration": _format_duration(seconds),
+        "lines": [],
+    }
+
+
 def directions_from_hostel(destination: str) -> dict[str, Any]:
     place = (destination or "").strip()
     if len(place) < 2:
