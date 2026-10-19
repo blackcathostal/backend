@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
 from datetime import datetime, timezone
@@ -739,7 +740,7 @@ async def _page_with_media() -> dict[str, Any]:
     return await _with_travel_photo(page, place)
 
 
-async def _write_caption(page: dict[str, Any]) -> str:
+async def _write_caption(page: dict[str, Any], image_jpeg: bytes | None = None) -> str:
     base, model, headers = _require_deepseek()
     source_url = str(page.get("url") or "").strip()
     source_name = str(page.get("source_name") or page.get("title") or "").strip()
@@ -751,7 +752,11 @@ async def _write_caption(page: dict[str, Any]) -> str:
         "concierto": "El mismo concierto de la nota. Si no hay artista o fecha, no los inventes.",
         "noticia": "El dato de esa nota en la primera línea.",
     }.get(theme, "Lo mismo que muestra la foto.")
-    notes = await _style_notes()
+    notes = (
+        "Gancho en la primera línea. Luego un dato concreto. Frases cortas."
+        if image_jpeg
+        else await _style_notes()
+    )
     user = (
         f"Tema del post: {theme}. {focus}\n"
         f"Así abren otros posts. No los copies, copia solo el ritmo:\n{notes}\n\n"
@@ -760,6 +765,18 @@ async def _write_caption(page: dict[str, Any]) -> str:
         f"Título: {page.get('title') or ''}\n"
         f"Material:\n{str(page.get('text') or '')[:1400]}"
     )
+    if image_jpeg:
+        encoded = base64.b64encode(image_jpeg).decode("ascii")
+        user_content: str | list[dict[str, Any]] = [
+            {"type": "text", "text": user},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
+            },
+        ]
+        model = "deepseek-flash"
+    else:
+        user_content = user
     payload = {
         "model": model,
         "temperature": 0.4,
@@ -768,11 +785,11 @@ async def _write_caption(page: dict[str, Any]) -> str:
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": user},
+            {"role": "user", "content": user_content},
         ],
     }
     last_error = "DeepSeek no respondió"
-    async with httpx.AsyncClient(timeout=45.0) as client:
+    async with httpx.AsyncClient(timeout=70.0 if image_jpeg else 45.0) as client:
         for _ in range(2):
             try:
                 response = await client.post(f"{base}/chat/completions", headers=headers, json=payload)
@@ -1192,6 +1209,66 @@ async def _publish(draft: dict[str, Any]) -> dict[str, Any]:
         "source_url": draft["source_url"],
         "source_name": draft["source_name"],
     }
+
+
+def _flatten_to_jpeg(content: bytes) -> bytes:
+    image = Image.open(BytesIO(content))
+    if image.mode == "P":
+        image = image.convert("RGBA")
+    if image.mode in {"RGBA", "LA"}:
+        rgba = image.convert("RGBA")
+        base = Image.new("RGB", rgba.size, (255, 255, 255))
+        base.paste(rgba, mask=rgba.split()[-1])
+        image = base
+    else:
+        image = image.convert("RGB")
+    return _jpeg_bytes(image)
+
+
+async def create_instagram_post_from_photo(content: bytes, note: str = "") -> dict[str, Any]:
+    """Publish an uploaded photo. DeepSeek sees the image and writes the caption."""
+    if len(content) < 800:
+        raise InstagramError("La foto está vacía")
+    if len(content) > 15_000_000:
+        raise InstagramError("La foto es demasiado pesada")
+    try:
+        jpeg = _to_instagram_jpeg(_flatten_to_jpeg(content))
+    except (InstagramError, OSError, ValueError) as exc:
+        raise InstagramError("No pude leer esa foto. Usa JPG, PNG o WebP.") from exc
+    hosted = _store_jpeg(jpeg)
+    info = await call_reply_tool("get_hostel_info", {})
+    if not isinstance(info, dict):
+        info = {}
+    detail = note.strip()[:500]
+    page = {
+        "theme": "hotel",
+        "url": "https://blackcathostal.com",
+        "source_name": "Black Cat Hostal",
+        "title": "Santiago",
+        "text": (
+            f"Foto subida para publicar.\n"
+            f"Nota de quien la subió: {detail or 'ninguna'}\n"
+            f"Hostal en {info.get('address') or 'Compañía de Jesús 1921, Santiago'}. "
+            f"Desayuno: {info.get('breakfast_hours') or ''}. "
+            f"Check-in: {info.get('check_in_time') or ''}."
+        ),
+        "focus": (
+            "La imagen adjunta es la foto del post. La primera línea describe lo que se ve, "
+            "incluido el texto escrito en la imagen. Una línea más puede usar un dato real del hostal. "
+            "No hables de otro lugar ni inventes precios."
+        ),
+    }
+    caption = await _write_caption(page, image_jpeg=jpeg)
+    return await _publish(
+        {
+            "caption": caption,
+            "media_type": "image",
+            "media_url": hosted,
+            "image_url": hosted,
+            "source_url": "https://blackcathostal.com",
+            "source_name": "Black Cat Hostal",
+        }
+    )
 
 
 async def create_instagram_post() -> dict[str, Any]:

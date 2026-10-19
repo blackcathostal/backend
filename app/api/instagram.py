@@ -6,7 +6,7 @@ import re
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -418,6 +418,27 @@ async def generate_instagram_post(_: Users = Depends(get_current_user)) -> dict[
 
     try:
         return await create_instagram_post()
+    except DeepSeekConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ig.InstagramConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/posts/from-photo")
+async def generate_instagram_post_from_photo(
+    photo: UploadFile = File(...),
+    note: str = Form(""),
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    from app.services.instagram_posts import create_instagram_post_from_photo
+
+    content = await photo.read()
+    try:
+        return await create_instagram_post_from_photo(content, note)
     except DeepSeekConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DeepSeekError as exc:
