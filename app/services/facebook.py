@@ -832,6 +832,30 @@ def _inbound_text(item_id: str) -> tuple[dict[str, Any], str]:
     return detail, str(detail.get("text") or "")
 
 
+def _facebook_thread_history(detail: dict[str, Any], inbound_text: str) -> list[dict[str, str]]:
+    """Prior Messenger/comment turns for DeepSeek, without the current inbound."""
+    current = (inbound_text or "").strip()
+    turns: list[dict[str, str]] = []
+    if detail.get("type") == "message":
+        for bubble in detail.get("conversation") or detail.get("messages") or []:
+            text = str(bubble.get("text") or "").strip()
+            if not text:
+                continue
+            own = bool(bubble.get("own")) or bubble.get("role") in {"out", "assistant"}
+            turns.append({"role": "assistant" if own else "user", "content": text[:800]})
+    else:
+        guest = str(detail.get("text") or "").strip()
+        if guest:
+            turns.append({"role": "user", "content": guest[:800]})
+        for reply in detail.get("replies") or []:
+            text = str(reply.get("text") or "").strip()
+            if text:
+                turns.append({"role": "assistant", "content": text[:800]})
+    if current and turns and turns[-1]["role"] == "user" and turns[-1]["content"] == current:
+        turns = turns[:-1]
+    return turns[-16:]
+
+
 async def suggest_inbox_reply(item_id: str) -> dict[str, Any]:
     from app.core.database import SessionLocal
     from app.services.deepseek_instagram import generate_instagram_reply
@@ -844,6 +868,7 @@ async def suggest_inbox_reply(item_id: str) -> dict[str, Any]:
             inbound_text=text,
             item_type="comment" if detail.get("type") == "comment" else "message",
             author_username=detail.get("peer_username") or detail.get("author_username"),
+            thread_history=_facebook_thread_history(detail, text),
         )
     finally:
         db.close()

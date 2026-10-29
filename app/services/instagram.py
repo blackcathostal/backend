@@ -345,6 +345,50 @@ def author_channel_history(
     return {"comments": comments[:6], "messages": messages[:6]}
 
 
+def thread_history_for_reply(
+    item: dict[str, Any],
+    *,
+    inbound_text: str | None = None,
+    limit: int = 16,
+) -> list[dict[str, str]]:
+    """Prior user/assistant turns for DeepSeek, without the current inbound message."""
+    current = (inbound_text if inbound_text is not None else item.get("text") or "").strip()
+    turns: list[dict[str, str]] = []
+
+    if item.get("type") == "message":
+        for turn in conversation_turns(item):
+            text = str(turn.get("text") or "").strip()
+            if not text:
+                continue
+            role = "assistant" if turn.get("role") == "out" else "user"
+            turns.append({"role": role, "content": text[:800]})
+    else:
+        username = str(item.get("author_username") or "").strip().lower().lstrip("@")
+        author = str(item.get("author_id") or "").strip()
+        dated: list[tuple[str, str, str]] = []
+        for row in list_inbox():
+            item_user = str(row.get("author_username") or "").strip().lower().lstrip("@")
+            item_author = str(row.get("author_id") or "").strip()
+            same_user = bool(username and item_user and username == item_user)
+            same_id = bool(author and item_author and author == item_author)
+            if not same_user and not same_id:
+                continue
+            stamp = str(row.get("created_at") or "")
+            guest = str(row.get("text") or "").strip()
+            if guest:
+                dated.append((stamp, "user", guest[:800]))
+            for reply in row.get("replies") or []:
+                reply_text = str(reply.get("text") or "").strip()
+                if reply_text:
+                    dated.append((str(reply.get("created_at") or stamp), "assistant", reply_text[:800]))
+        dated.sort(key=lambda row: row[0])
+        turns = [{"role": role, "content": text} for _, role, text in dated]
+
+    if current and turns and turns[-1]["role"] == "user" and turns[-1]["content"] == current:
+        turns = turns[:-1]
+    return turns[-max(1, limit) :]
+
+
 def auto_reply_enabled() -> bool:
     try:
         if AUTO_REPLY_FILE.exists():
@@ -969,9 +1013,10 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
     try:
         db = SessionLocal()
         try:
+            inbound = item.get("text") or ""
             decision = await generate_instagram_reply(
                 db=db,
-                inbound_text=item.get("text") or "",
+                inbound_text=inbound,
                 item_type=item.get("type") or "message",
                 author_username=item.get("author_username"),
                 person_history=author_channel_history(
@@ -979,6 +1024,7 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
                     author_id=item.get("author_id"),
                     exclude_id=item.get("id"),
                 ),
+                thread_history=thread_history_for_reply(item, inbound_text=inbound),
             )
         finally:
             db.close()
@@ -1007,9 +1053,10 @@ async def suggest_reply(item_id: str) -> dict[str, Any]:
         raise InstagramError("Item de inbox no encontrado")
     db = SessionLocal()
     try:
+        inbound = item.get("text") or ""
         decision = await generate_instagram_reply(
             db=db,
-            inbound_text=item.get("text") or "",
+            inbound_text=inbound,
             item_type=item.get("type") or "message",
             author_username=item.get("author_username"),
             person_history=author_channel_history(
@@ -1017,6 +1064,7 @@ async def suggest_reply(item_id: str) -> dict[str, Any]:
                 author_id=item.get("author_id"),
                 exclude_id=item.get("id"),
             ),
+            thread_history=thread_history_for_reply(item, inbound_text=inbound),
         )
     finally:
         db.close()

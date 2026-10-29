@@ -56,179 +56,213 @@ DEFAULT_SERVICES = [
 
 DEFAULT_ROOMS = [
     {
-        "name": "Single Room",
+        "name": "Habitación Individual",
         "type": "Individual",
         "capacity": 1,
         "price": 35000,
-        "features": "Single bed, private bathroom, Wi-Fi, heating, continental breakfast included.",
+        "features": "Cama individual, baño privado, Wi-Fi, calefacción, desayuno continental incluido.",
     },
     {
-        "name": "Double Room",
-        "type": "Doble",
+        "name": "Habitación Matrimonial",
+        "type": "Matrimonial",
         "capacity": 2,
-        "price": 48000,
-        "features": "Queen/double bed, private bathroom, Wi-Fi, heating, continental breakfast included.",
+        "price": 54000,
+        "features": "Cama matrimonial/queen, baño privado, Wi-Fi, desayuno continental incluido. Tarifa directa WhatsApp $54.000 CLP.",
     },
     {
-        "name": "Triple Room",
+        "name": "Habitación Triple",
         "type": "Triple",
         "capacity": 3,
         "price": 62000,
-        "features": "Twin/triple setup, private bathroom, Wi-Fi, heating, continental breakfast included.",
+        "features": "Disposición twin/triple, baño privado, Wi-Fi, calefacción, desayuno continental incluido.",
     },
     {
-        "name": "Boutique Suite",
+        "name": "Suite Boutique",
         "type": "Suite",
         "capacity": 2,
         "price": 79000,
-        "features": "Superior king bed, higher comfort, private bathroom, Wi-Fi, heating, continental breakfast included.",
+        "features": "Cama king superior, mayor confort, baño privado, Wi-Fi, calefacción, desayuno continental incluido.",
     },
     {
-        "name": "Family Room",
-        "type": "Familiar",
-        "capacity": 4,
-        "price": 89000,
-        "features": "Family/shared layout, multiple beds or bunks, private bathroom, Wi-Fi, heating, breakfast included.",
+        "name": "Dormitorio Compartido",
+        "type": "Dormitorio",
+        "capacity": 6,
+        "price": 15000,
+        "features": (
+            "Cama individual en dormitorio compartido. Capacidad 6 personas. "
+            "Precio por persona/cama ($15.000 CLP), no por habitación completa. "
+            "Wi-Fi y desayuno continental incluidos."
+        ),
     },
 ]
 
 DEFAULT_COMMON_ANSWERS = [
     {
-        "topic": "prices",
-        "keywords": "precio,cuanto,cuánto,tarifa,costo,habitacion,habitación,room,price",
-        "question": "¿Cuánto cuesta una habitación?",
-        "answer_guide": "Consulta las habitaciones y entrega el precio desde, en CLP, según el tipo. Las tarifas son referenciales y pueden variar por temporada. Para fechas exactas, invita a escribir por WhatsApp.",
+        "topic": "checkin",
+        "keywords": "check-in,checkin,check-out,checkout,horario,llegada,salida,recepción,24/7",
+        "question": "¿Cuáles son los horarios de Check-in y Check-out?",
+        "answer_guide": (
+            "Check-in desde las 14:00 hrs / Check-out hasta las 12:00 hrs (mediodía). "
+            "Recepción disponible 24/7."
+        ),
         "sort_order": 1,
     },
     {
-        "topic": "checkin",
-        "keywords": "llegada,check-in,checkin,entrada,arrival",
-        "question": "¿A qué hora es el check-in?",
-        "answer_guide": "Usa el horario de llegada del hostal. Las instrucciones de llegada se envían antes del check-in.",
+        "topic": "flexibility",
+        "keywords": "early,late,check-out,checkout,antes,después,18:00,disponibilidad",
+        "question": "¿Puedo ingresar antes o salir después del horario establecido?",
+        "answer_guide": (
+            "Early Check-in y Late Check-out están sujetos a disponibilidad previa coordinación. "
+            "El Late Check-out posterior a las 12:00 y hasta las 18:00 hrs tiene un cargo de $20.000 CLP. "
+            "Posterior a las 18:00 hrs aplica cobro del 100% de la tarifa diaria."
+        ),
         "sort_order": 2,
     },
     {
-        "topic": "checkout",
-        "keywords": "salida,check-out,checkout,mediodía,departure",
-        "question": "¿A qué hora es el check-out?",
-        "answer_guide": "Usa el horario de salida del hostal. La salida tardía depende de disponibilidad; pide que escriban por WhatsApp.",
+        "topic": "tarifas",
+        "keywords": "tarifa,precio,whatsapp,matrimonial,dormitorio,king,queen,iva",
+        "question": "¿Cuáles son las tarifas para reservas directas por WhatsApp?",
+        "answer_guide": (
+            "Matrimonial Cama King/Queen: $54.000 CLP/noche (Desayuno incluido). "
+            "Dormitorio Compartido (4 o 6 camas): $15.000 CLP por cama. "
+            "Todos los precios incluyen IVA."
+        ),
         "sort_order": 3,
     },
     {
-        "topic": "breakfast",
-        "keywords": "desayuno,incluido,horario,breakfast",
-        "question": "¿El desayuno está incluido? ¿En qué horario?",
-        "answer_guide": "Sí, el desayuno continental está incluido. El horario es el que está guardado en la información del hostal.",
+        "topic": "fans",
+        "keywords": "fans,beneficio,descuento,ota,espumante,cumpleaños,whatsapp",
+        "question": "¿Qué beneficios exclusivos reciben los Black Cat Fans?",
+        "answer_guide": (
+            "Descuento respecto a OTAs, opción de espumante de cortesía por reserva dentro del plazo "
+            "de promoción, horarios flexibles según disponibilidad y hasta 50% de descuento en estadía "
+            "el mes de cumpleaños."
+        ),
         "sort_order": 4,
     },
     {
-        "topic": "parking",
-        "keywords": "estacionamiento,auto,parqueo,parking",
-        "question": "¿Tienen estacionamiento?",
-        "answer_guide": "Usa si hay estacionamiento y las notas de estacionamiento. No inventes disponibilidad de cupos.",
+        "topic": "birthday",
+        "keywords": "cumpleaños,beneficio,cédula,pasaporte,fans,descuento",
+        "question": "¿Cómo aplico el beneficio de cumpleaños?",
+        "answer_guide": (
+            "Presentando tu cédula de identidad/pasaporte vigente en recepción al momento del check-in "
+            "durante el mes de tu cumpleaños."
+        ),
         "sort_order": 5,
     },
     {
-        "topic": "whatsapp",
-        "keywords": "whatsapp,wsp,contacto,reservar,contact",
-        "question": "¿Cómo los contacto? ¿Cuál es el WhatsApp?",
-        "answer_guide": "Comparte el WhatsApp y el correo de la información del hostal.",
+        "topic": "services",
+        "keywords": "servicios,incluye,desayuno,wifi,cocina,cafetería,piscina,equipaje,bicicleta",
+        "question": "¿Qué servicios incluye la estadía?",
+        "answer_guide": (
+            "Desayuno continental, Wifi gratuito, cocina comunitaria equipada, "
+            "cafetería (8:00 a 11:30), piscina, zonas para fumadores, "
+            "guardería de equipaje y arriendo de bicicletas."
+        ),
         "sort_order": 6,
     },
     {
-        "topic": "location",
-        "keywords": "dónde,donde,ubicación,dirección,barrio brasil,location",
-        "question": "¿Dónde están ubicados?",
-        "answer_guide": "Comparte la dirección en Barrio Brasil, Santiago. Ofrece el WhatsApp si necesitan ayuda para llegar.",
+        "topic": "parking",
+        "keywords": "estacionamiento,parking,auto,cupos",
+        "question": "¿Cuentan con estacionamiento?",
+        "answer_guide": (
+            "Sí, disponemos de estacionamiento con cupos limitados, sujeto a confirmación previa."
+        ),
         "sort_order": 7,
     },
     {
-        "topic": "wifi",
-        "keywords": "wifi,wi-fi,internet",
-        "question": "¿Tienen Wi-Fi?",
-        "answer_guide": "Sí, hay Wi-Fi de fibra en las habitaciones y en las áreas comunes.",
+        "topic": "smoking",
+        "keywords": "fumar,humo,multa,patio,fumadores,smoking",
+        "question": "¿Se permite fumar en el hostal?",
+        "answer_guide": (
+            "Está estrictamente prohibido fumar dentro de las habitaciones (sujeto a multa). "
+            "Existen áreas designadas para fumadores en los patios y zonas al aire libre."
+        ),
         "sort_order": 8,
     },
     {
-        "topic": "groups",
-        "keywords": "grupo,equipo,productora,corporativo,group",
-        "question": "¿Reciben grupos o equipos de producción?",
-        "answer_guide": "Sí, trabajamos con grupos y estadías corporativas. Pide fechas y cantidad de personas por WhatsApp para cotizar.",
+        "topic": "diet",
+        "keywords": "desayuno,vegetariano,vegano,gluten,alergia,cafetería",
+        "question": "¿El desayuno contempla opciones vegetarianas, veganas o sin gluten?",
+        "answer_guide": (
+            "Contamos con opciones adaptables como leche vegetal y frutas. "
+            "Solicitamos notificar alergias o restricciones al reservar."
+        ),
         "sort_order": 9,
     },
     {
-        "topic": "children",
-        "keywords": "niños,ninos,familia,edades,children",
-        "question": "¿Hasta qué edad se considera niño?",
-        "answer_guide": "Menores de 12 años. Pide las edades al reservar para asignar la habitación más adecuada.",
+        "topic": "luggage",
+        "keywords": "equipaje,custodia,guardería,check-in,check-out,maleta",
+        "question": "¿Tienen custodia de equipaje antes del check-in o después del check-out?",
+        "answer_guide": (
+            "Sí, ofrecemos servicio de guardería de equipaje sin costo adicional "
+            "para que disfrutes tu día en Santiago."
+        ),
         "sort_order": 10,
     },
     {
-        "topic": "cancellation",
-        "keywords": "cancelar,cancelación,reembolso,cancel",
-        "question": "¿Puedo cancelar mi reserva?",
-        "answer_guide": "Depende de las condiciones de la reserva. Pide que escriban por WhatsApp o correo con el código de reserva.",
+        "topic": "location",
+        "keywords": "dónde,donde,ubicación,dirección,metro,cumming,república,barrio brasil",
+        "question": "¿Dónde están ubicados y cómo llegar?",
+        "answer_guide": (
+            "Compañía de Jesús #1921, Barrio Brasil, Santiago Centro. "
+            "A pasos de estación de Metro Cumming (Línea 5) y República (Línea 1)."
+        ),
         "sort_order": 11,
     },
     {
-        "topic": "availability",
-        "keywords": "disponible,disponibilidad,fechas,available",
-        "question": "¿Hay disponibilidad para estas fechas?",
-        "answer_guide": "No confirmes cupos exactos por Instagram. Pide las fechas por WhatsApp para que una persona lo revise.",
+        "topic": "groups",
+        "keywords": "grupo,rooming,anticipo,pago,anulación,cancelación,penalidad",
+        "question": "¿Cuáles son las condiciones para reservas de grupos y forma de pago?",
+        "answer_guide": (
+            "Requiere envío de Rooming List 72 hrs antes. Anticipo del 50% al reservar "
+            "(30 días antes) y saldo del 50% al Check-in. Anulación sin costo hasta 30 días antes; "
+            "menos de 30 días aplica penalidad del 50%."
+        ),
         "sort_order": 12,
+    },
+    {
+        "topic": "corporate",
+        "keywords": "empresa,corporativo,convenio,factura,iva,exenta",
+        "question": "¿Tienen convenios corporativos o tarifas para empresas?",
+        "answer_guide": (
+            "Sí, ofrecemos tarifas preferenciales y facturación exenta o con IVA según requerimiento. "
+            "Contactar a reservas@blackcathostal.com."
+        ),
+        "sort_order": 13,
+    },
+    {
+        "topic": "payment",
+        "keywords": "pago,transferencia,tarjeta,efectivo,usd,clp,débito,crédito",
+        "question": "¿Cuáles son los métodos de pago aceptados?",
+        "answer_guide": (
+            "Transferencia bancaria (CLP/USD), tarjetas de débito/crédito y efectivo en recepción."
+        ),
+        "sort_order": 14,
+    },
+    {
+        "topic": "dormitory",
+        "keywords": "dormitorio,compartido,cama,hombres,mujeres,sexo,4,6",
+        "question": "¿Cómo funciona el dormitorio compartido?",
+        "answer_guide": (
+            "Es un solo tipo de habitación: dormitorio compartido de 4 o 6 camas. "
+            "Se cobra $15.000 CLP por cama (por persona), no por la habitación completa. "
+            "Las plazas se asignan en dormitorios solo hombres o solo mujeres. Los precios incluyen IVA."
+        ),
+        "sort_order": 15,
+    },
+    {
+        "topic": "breakfast",
+        "keywords": "desayuno,incluido,horario,cafetería,breakfast",
+        "question": "¿El desayuno está incluido? ¿En qué horario?",
+        "answer_guide": (
+            "Sí, el desayuno continental está incluido. La cafetería atiende de 08:00 a 11:30 hrs."
+        ),
+        "sort_order": 16,
     },
 ]
 
-LEGACY_ENGLISH_ANSWERS = {
-    "prices": (
-        "How much does a room cost?",
-        "Call search_rooms and share from-prices in CLP by room type. Say rates are referential and may vary by season. Invite WhatsApp for exact dates.",
-    ),
-    "checkin": (
-        "What time is check-in?",
-        "Use get_hostel_info.check_in_time. Mention arrival instructions are sent before check-in.",
-    ),
-    "checkout": (
-        "What time is check-out?",
-        "Use check_out_time. Late check-out subject to availability; ask them to message WhatsApp.",
-    ),
-    "breakfast": (
-        "Is breakfast included? What are the hours?",
-        "Yes, continental breakfast included. Hours from breakfast_hours in hostel info.",
-    ),
-    "parking": (
-        "Do you have parking?",
-        "Use has_parking and parking_notes. Do not invent space availability.",
-    ),
-    "whatsapp": (
-        "How can I contact you / WhatsApp?",
-        "Share whatsapp_url and email from get_hostel_info.",
-    ),
-    "location": (
-        "Where are you located?",
-        "Share address and Barrio Brasil, Santiago. Offer WhatsApp for arrival help.",
-    ),
-    "wifi": (
-        "Do you have Wi-Fi?",
-        "Yes, fiber Wi-Fi in rooms and common areas.",
-    ),
-    "groups": (
-        "Can you host groups / production crews?",
-        "Yes, we work with groups and corporate stays. Ask for dates and headcount via WhatsApp to quote.",
-    ),
-    "children": (
-        "Until what age are guests considered children?",
-        "Under 12 years old. Ask ages when booking to assign the best room.",
-    ),
-    "cancellation": (
-        "Can I cancel my booking?",
-        "Depends on booking terms. Escalate or ask them to write WhatsApp/email with booking code.",
-    ),
-    "availability": (
-        "Do you have availability for these dates?",
-        "Do not confirm exact inventory on Instagram. Ask for dates via WhatsApp for human review.",
-    ),
-}
+LEGACY_ENGLISH_ANSWERS: dict[str, tuple[str, str]] = {}
 
 
 def seed_database(db: Session) -> None:

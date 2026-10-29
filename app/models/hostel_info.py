@@ -12,14 +12,17 @@ class HostelInfo(Base):
     __tablename__ = "hostel_info"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    check_in_time: Mapped[str] = mapped_column(String(40), nullable=False, default="15:00")
+    check_in_time: Mapped[str] = mapped_column(String(40), nullable=False, default="14:00")
     check_out_time: Mapped[str] = mapped_column(String(40), nullable=False, default="12:00")
-    breakfast_hours: Mapped[str] = mapped_column(String(80), nullable=False, default="08:00-10:00")
-    has_parking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    breakfast_hours: Mapped[str] = mapped_column(String(80), nullable=False, default="08:00-10:30")
+    has_parking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     parking_notes: Mapped[str] = mapped_column(
         Text,
         nullable=False,
-        default="No on-site parking; paid nearby options available in Barrio Brasil.",
+        default=(
+            "Espacios limitados con reserva previa. "
+            "Coordina el estacionamiento al reservar o por WhatsApp."
+        ),
     )
     whatsapp_url: Mapped[str] = mapped_column(
         String(255), nullable=False, default="https://wa.me/56949105984"
