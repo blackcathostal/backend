@@ -61,6 +61,39 @@ class InstagramError(Exception):
         self.details = details
 
 
+WINDOW_CLOSED_MESSAGE = (
+    "La ventana de 24 horas ya cerró. Instagram/Messenger solo permite responder "
+    "si la persona escribió en las últimas 24 horas. Cuando vuelva a escribir, "
+    "ahí sí se puede contestar de nuevo."
+)
+
+
+def _meta_error_message(err: dict[str, Any], fallback: str) -> str:
+    raw = str(err.get("message") or fallback or "").strip()
+    code = err.get("code")
+    sample = raw.lower()
+    if (
+        code in {10, 100}
+        or "fuera del período" in sample
+        or "outside of the allowed window" in sample
+        or "outside the allowed window" in sample
+        or "human agent" in sample
+    ):
+        return WINDOW_CLOSED_MESSAGE
+    return raw or fallback
+
+
+def _is_window_closed_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    if WINDOW_CLOSED_MESSAGE[:40].lower() in text:
+        return True
+    return (
+        "fuera del período" in text
+        or "outside of the allowed window" in text
+        or "outside the allowed window" in text
+    )
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -609,7 +642,7 @@ async def _graph_get(path: str, token: str, params: dict[str, Any] | None = None
     if response.status_code >= 400 or data.get("error"):
         err = data.get("error") or {}
         raise InstagramError(
-            err.get("message") or f"Graph GET {path} falló ({response.status_code})",
+            _meta_error_message(err, f"Graph GET {path} falló ({response.status_code})"),
             details=data,
         )
     return data
@@ -627,7 +660,7 @@ async def _graph_delete(path: str, token: str) -> dict[str, Any]:
     if response.status_code >= 400 or data.get("error"):
         err = data.get("error") or {}
         raise InstagramError(
-            err.get("message") or f"Graph DELETE {path} falló ({response.status_code})",
+            _meta_error_message(err, f"Graph DELETE {path} falló ({response.status_code})"),
             details=data,
         )
     return data
@@ -641,7 +674,7 @@ async def _graph_post(path: str, token: str, payload: dict[str, Any]) -> dict[st
     if response.status_code >= 400 or data.get("error"):
         err = data.get("error") or {}
         raise InstagramError(
-            err.get("message") or f"Graph POST {path} falló ({response.status_code})",
+            _meta_error_message(err, f"Graph POST {path} falló ({response.status_code})"),
             details=data,
         )
     return data
@@ -772,7 +805,7 @@ async def send_dm(recipient_id: str, message: str) -> dict[str, Any]:
     if response.status_code >= 400 or data.get("error"):
         err = data.get("error") or {}
         raise InstagramError(
-            err.get("message") or "No se pudo enviar el DM",
+            _meta_error_message(err, "No se pudo enviar el DM"),
             details=data,
         )
     return data
@@ -969,17 +1002,26 @@ async def send_inbox_reply(item_id: str, message: str, *, source: str = "human")
     if not text:
         raise InstagramError("Mensaje vacío")
 
-    meta_result: dict[str, Any]
-    if item.get("type") == "comment":
-        comment_id = item.get("meta_comment_id")
-        if not comment_id:
-            raise InstagramError("Falta meta_comment_id")
-        meta_result = await reply_to_comment(comment_id, text)
-    else:
-        recipient_id = item.get("author_id")
-        if not recipient_id:
-            raise InstagramError("Falta author_id (IGSID) para DM")
-        meta_result = await send_dm(recipient_id, text)
+    try:
+        meta_result: dict[str, Any]
+        if item.get("type") == "comment":
+            comment_id = item.get("meta_comment_id")
+            if not comment_id:
+                raise InstagramError("Falta meta_comment_id")
+            meta_result = await reply_to_comment(comment_id, text)
+        else:
+            recipient_id = item.get("author_id") or item.get("peer_id")
+            if not recipient_id:
+                raise InstagramError("Falta author_id (IGSID) para DM")
+            meta_result = await send_dm(recipient_id, text)
+    except InstagramError as exc:
+        if item.get("type") == "message" and _is_window_closed_error(exc):
+            item["status"] = "window_closed"
+            item["escalation_reason"] = WINDOW_CLOSED_MESSAGE
+            item["updated_at"] = _now_iso()
+            upsert_inbox_item(item)
+            raise InstagramError(WINDOW_CLOSED_MESSAGE, details=exc.details) from exc
+        raise
 
     reply = {
         "text": text,
