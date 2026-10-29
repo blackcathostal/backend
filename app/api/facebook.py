@@ -1,4 +1,4 @@
-"""Facebook Page admin API: posts and comments."""
+"""Facebook Page admin API: posts, comments, Messenger and DeepSeek inbox."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.core.security import get_current_user
 from app.models.users import Users
 from app.services import facebook as fb
+from app.services.deepseek_instagram import DeepSeekConfigError, DeepSeekError
 
 router = APIRouter(prefix="/facebook", tags=["facebook"])
 
@@ -21,6 +22,10 @@ class PostBody(BaseModel):
 
 class CommentBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+
+
+class InboxTextBody(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
 
 
 def _http(exc: Exception) -> HTTPException:
@@ -187,5 +192,110 @@ async def facebook_reply_comment(
 ) -> dict[str, Any]:
     try:
         return await fb.reply_to_comment(comment_id, body.message)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.get("/inbox")
+def facebook_inbox(
+    type: str | None = Query(default=None, alias="type"),
+    status: str | None = None,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    items = fb.list_inbox_page(item_type=type, status=status)
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/inbox/{item_id}")
+def facebook_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[str, Any]:
+    try:
+        return fb.get_inbox_detail(item_id)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.post("/inbox/{item_id}/reply")
+async def facebook_inbox_reply(
+    item_id: str,
+    body: CommentBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await fb.reply_inbox(item_id, body.message, source="human")
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.post("/inbox/{item_id}/suggest")
+async def facebook_inbox_suggest(
+    item_id: str,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await fb.suggest_inbox_reply(item_id)
+    except DeepSeekConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.post("/inbox/{item_id}/auto-reply")
+async def facebook_inbox_auto_reply(
+    item_id: str,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await fb.auto_inbox_reply(item_id)
+    except DeepSeekConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.put("/inbox/{item_id}/replies/{reply_index}")
+async def facebook_inbox_update_reply(
+    item_id: str,
+    reply_index: int,
+    body: InboxTextBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await fb.update_inbox_reply(item_id, reply_index, body.text)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.delete("/inbox/{item_id}/replies/{reply_index}")
+async def facebook_inbox_delete_reply(
+    item_id: str,
+    reply_index: int,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await fb.delete_inbox_reply(item_id, reply_index)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.delete("/inbox/{item_id}")
+async def facebook_inbox_delete(
+    item_id: str,
+    _: Users = Depends(get_current_user),
+) -> dict[str, bool]:
+    try:
+        await fb.delete_inbox_item(item_id)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+    return {"ok": True}
+
+
+@router.post("/sync-inbox")
+async def facebook_sync_inbox(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    try:
+        return await fb.sync_inbox()
     except (fb.FacebookConfigError, fb.FacebookError) as exc:
         raise _http(exc) from exc
