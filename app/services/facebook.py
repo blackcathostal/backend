@@ -155,6 +155,8 @@ async def list_comments(post_id: str, limit: int = 100) -> dict[str, Any]:
 
 
 async def create_post(message: str, link: str = "") -> dict[str, Any]:
+    from app.services.platform_posts import record_publication
+
     conn = _require_connection()
     text = (message or "").strip()
     url = (link or "").strip()
@@ -166,21 +168,97 @@ async def create_post(message: str, link: str = "") -> dict[str, Any]:
     if url:
         payload["link"] = url
     result = await _graph_post(f"/{conn['page_id']}/feed", conn["page_access_token"], payload)
-    post_id = result.get("id")
+    post_id = str(result.get("id") or "")
+    post: dict[str, Any]
     if post_id:
         try:
-            return await get_post(post_id)
+            post = await get_post(post_id)
         except InstagramError:
-            pass
-    return {
-        "id": post_id or "",
-        "message": text,
-        "created_time": "",
-        "permalink_url": "",
-        "picture": "",
-        "status_type": "",
-        "comment_count": 0,
-    }
+            post = {
+                "id": post_id,
+                "message": text,
+                "created_time": "",
+                "permalink_url": "",
+                "picture": "",
+                "status_type": "",
+                "comment_count": 0,
+            }
+    else:
+        post = {
+            "id": "",
+            "message": text,
+            "created_time": "",
+            "permalink_url": "",
+            "picture": "",
+            "status_type": "",
+            "comment_count": 0,
+        }
+    if post.get("id"):
+        record_publication(
+            network="facebook",
+            kind="post",
+            text=str(post.get("message") or text),
+            external_id=str(post["id"]),
+            permalink=str(post.get("permalink_url") or ""),
+        )
+    return post
+
+
+async def update_post(post_id: str, message: str) -> dict[str, Any]:
+    from app.services.platform_posts import update_publication
+
+    conn = _require_connection()
+    text = (message or "").strip()
+    if not text:
+        raise InstagramError("El texto no puede quedar vacío")
+    code = str(post_id or "").strip()
+    if not code:
+        raise InstagramError("Falta el id de la publicación")
+    await _graph_post(f"/{code}", conn["page_access_token"], {"message": text})
+    update_publication(code, text=text)
+    return await get_post(code)
+
+
+async def delete_post(post_id: str) -> dict[str, bool]:
+    from app.services.platform_posts import remove_publication
+
+    conn = _require_connection()
+    code = str(post_id or "").strip()
+    if not code:
+        raise InstagramError("Falta el id de la publicación")
+    await _graph_delete(f"/{code}", conn["page_access_token"])
+    remove_publication(code)
+    return {"ok": True}
+
+
+async def list_admin_posts(limit: int = 50) -> list[dict[str, Any]]:
+    """Posts created from this admin, enriched with live Graph data when possible."""
+    from app.services.platform_posts import list_publications
+
+    logged = list_publications("facebook")[: max(1, min(limit, 100))]
+    can_live = bool(load_connection())
+    items: list[dict[str, Any]] = []
+    for row in logged:
+        external_id = str(row.get("external_id") or "")
+        live: dict[str, Any] | None = None
+        if can_live and external_id:
+            try:
+                live = await get_post(external_id)
+            except InstagramError:
+                live = None
+        items.append(
+            {
+                "id": external_id or row.get("id"),
+                "message": (live or {}).get("message") or row.get("text") or "",
+                "created_time": (live or {}).get("created_time") or row.get("created_at") or "",
+                "permalink_url": (live or {}).get("permalink_url") or row.get("permalink") or "",
+                "picture": (live or {}).get("picture") or "",
+                "comment_count": (live or {}).get("comment_count") or 0,
+                "from_admin": True,
+                "missing_on_network": can_live and live is None and bool(external_id),
+            }
+        )
+    return items
 
 
 async def comment_on_post(post_id: str, message: str) -> dict[str, Any]:

@@ -27,6 +27,7 @@ from app.services.google_places_client import places_headers
 from app.services.hostel_directions import directions_to_hostel
 from app.services.instagram import (
     InstagramError,
+    _graph_delete,
     _graph_get,
     _graph_post,
     _require_connection,
@@ -1270,14 +1271,104 @@ async def _publish(draft: dict[str, Any]) -> dict[str, Any]:
             permalink = str(info.get("permalink") or "")
         except InstagramError:
             permalink = ""
+    caption = str(draft.get("caption") or "")
+    if media_id:
+        from app.services.platform_posts import record_publication
+
+        record_publication(
+            network="instagram",
+            kind=str(draft.get("media_type") or "post"),
+            text=caption,
+            external_id=media_id,
+            permalink=permalink,
+        )
     return {
         "id": media_id,
         "permalink": permalink,
-        "caption": draft["caption"],
+        "caption": caption,
         "media_type": draft["media_type"],
         "source_url": draft["source_url"],
         "source_name": draft["source_name"],
     }
+
+
+async def get_media(media_id: str) -> dict[str, Any]:
+    conn = _require_connection()
+    code = str(media_id or "").strip()
+    if not code:
+        raise InstagramError("Falta el id de la publicación")
+    data = await _graph_get(
+        f"/{code}",
+        conn["page_access_token"],
+        {"fields": "id,caption,timestamp,permalink,media_type,media_url,thumbnail_url"},
+    )
+    if not data.get("id"):
+        raise InstagramError("Publicación no encontrada")
+    return {
+        "id": str(data.get("id") or ""),
+        "caption": str(data.get("caption") or ""),
+        "created_time": str(data.get("timestamp") or ""),
+        "permalink": str(data.get("permalink") or ""),
+        "media_type": str(data.get("media_type") or "").lower(),
+        "picture": str(data.get("thumbnail_url") or data.get("media_url") or ""),
+    }
+
+
+async def update_media_caption(media_id: str, caption: str) -> dict[str, Any]:
+    from app.services.platform_posts import update_publication
+
+    conn = _require_connection()
+    code = str(media_id or "").strip()
+    text = (caption or "").strip()
+    if not code:
+        raise InstagramError("Falta el id de la publicación")
+    if not text:
+        raise InstagramError("El texto no puede quedar vacío")
+    await _graph_post(f"/{code}", conn["page_access_token"], {"caption": text})
+    update_publication(code, text=text)
+    return await get_media(code)
+
+
+async def delete_media(media_id: str) -> dict[str, bool]:
+    from app.services.platform_posts import remove_publication
+
+    conn = _require_connection()
+    code = str(media_id or "").strip()
+    if not code:
+        raise InstagramError("Falta el id de la publicación")
+    await _graph_delete(f"/{code}", conn["page_access_token"])
+    remove_publication(code)
+    return {"ok": True}
+
+
+async def list_admin_posts(limit: int = 50) -> list[dict[str, Any]]:
+    from app.services.instagram import load_connection
+    from app.services.platform_posts import list_publications
+
+    logged = list_publications("instagram")[: max(1, min(limit, 100))]
+    can_live = bool(load_connection())
+    items: list[dict[str, Any]] = []
+    for row in logged:
+        external_id = str(row.get("external_id") or "")
+        live: dict[str, Any] | None = None
+        if can_live and external_id:
+            try:
+                live = await get_media(external_id)
+            except InstagramError:
+                live = None
+        items.append(
+            {
+                "id": external_id or row.get("id"),
+                "caption": (live or {}).get("caption") or row.get("text") or "",
+                "created_time": (live or {}).get("created_time") or row.get("created_at") or "",
+                "permalink": (live or {}).get("permalink") or row.get("permalink") or "",
+                "picture": (live or {}).get("picture") or "",
+                "media_type": (live or {}).get("media_type") or row.get("kind") or "post",
+                "from_admin": True,
+                "missing_on_network": can_live and live is None and bool(external_id),
+            }
+        )
+    return items
 
 
 def _flatten_to_jpeg(content: bytes) -> bytes:

@@ -412,6 +412,26 @@ def instagram_hosted_media(filename: str) -> FileResponse:
     return FileResponse(path, media_type="image/jpeg")
 
 
+class CaptionBody(BaseModel):
+    caption: str = Field(min_length=1, max_length=2200)
+
+
+@router.get("/posts")
+async def list_instagram_admin_posts(
+    limit: int = Query(default=50, ge=1, le=100),
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    from app.services.instagram_posts import list_admin_posts
+
+    try:
+        items = await list_admin_posts(limit=limit)
+        return {"items": items, "count": len(items)}
+    except ig.InstagramConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/posts/generate")
 async def generate_instagram_post(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     from app.services.instagram_posts import create_instagram_post
@@ -443,6 +463,37 @@ async def generate_instagram_post_from_photo(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DeepSeekError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ig.InstagramConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/posts/{media_id}")
+async def update_instagram_post(
+    media_id: str,
+    body: CaptionBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    from app.services.instagram_posts import update_media_caption
+
+    try:
+        return await update_media_caption(media_id, body.caption)
+    except ig.InstagramConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/posts/{media_id}")
+async def delete_instagram_post(
+    media_id: str,
+    _: Users = Depends(get_current_user),
+) -> dict[str, bool]:
+    from app.services.instagram_posts import delete_media
+
+    try:
+        return await delete_media(media_id)
     except ig.InstagramConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ig.InstagramError as exc:

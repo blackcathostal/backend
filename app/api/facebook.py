@@ -39,10 +39,11 @@ def facebook_status(_: Users = Depends(get_current_user)) -> dict[str, Any]:
 @router.get("/posts")
 async def facebook_posts(
     limit: int = Query(default=25, ge=1, le=50),
+    from_admin: bool = Query(default=False),
     _: Users = Depends(get_current_user),
 ) -> dict[str, Any]:
     try:
-        items = await fb.list_posts(limit=limit)
+        items = await fb.list_admin_posts(limit=limit) if from_admin else await fb.list_posts(limit=limit)
         return {"items": items, "count": len(items)}
     except (fb.FacebookConfigError, fb.FacebookError) as exc:
         raise _http(exc) from exc
@@ -55,6 +56,29 @@ async def facebook_create_post(
 ) -> dict[str, Any]:
     try:
         return await fb.create_post(body.message, body.link)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.put("/posts/{post_id}")
+async def facebook_update_post(
+    post_id: str,
+    body: PostBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        return await fb.update_post(post_id, body.message)
+    except (fb.FacebookConfigError, fb.FacebookError) as exc:
+        raise _http(exc) from exc
+
+
+@router.delete("/posts/{post_id}")
+async def facebook_delete_post(
+    post_id: str,
+    _: Users = Depends(get_current_user),
+) -> dict[str, bool]:
+    try:
+        return await fb.delete_post(post_id)
     except (fb.FacebookConfigError, fb.FacebookError) as exc:
         raise _http(exc) from exc
 
