@@ -33,8 +33,19 @@ def _public_api_origin() -> str:
     return "https://api.blackcathostal.com"
 
 
-def _store_static_map(*, dest_lat: float, dest_lng: float, label: str = "") -> str:
-    """Download a Static Maps image and host it for Instagram image DMs."""
+def _save_map_bytes(content: bytes) -> str:
+    is_jpg = content.startswith(b"\xff\xd8\xff")
+    is_png = content.startswith(b"\x89PNG")
+    if len(content) < 800 or not (is_jpg or is_png):
+        return ""
+    folder = settings.uploads_dir / "maps"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid4().hex}.{'jpg' if is_jpg else 'png'}"
+    (folder / name).write_bytes(content)
+    return f"{_public_api_origin()}/uploads/maps/{name}"
+
+
+def _store_google_static_map(*, dest_lat: float, dest_lng: float) -> str:
     key = (settings.google_places_api_key or "").strip()
     if not key:
         return ""
@@ -61,19 +72,115 @@ def _store_static_map(*, dest_lat: float, dest_lng: float, label: str = "") -> s
                 params=params,
             )
             response.raise_for_status()
-            content = response.content
+            return _save_map_bytes(response.content)
     except (httpx.HTTPError, ValueError):
         return ""
-    # Accept JPEG (preferred) or PNG from Static Maps.
-    is_jpg = content.startswith(b"\xff\xd8\xff")
-    is_png = content.startswith(b"\x89PNG")
-    if len(content) < 800 or not (is_jpg or is_png):
+
+
+def _latlng_to_tile(lat: float, lng: float, zoom: int) -> tuple[float, float]:
+    import math
+
+    lat = min(max(lat, -85.05112878), 85.05112878)
+    n = 2 ** zoom
+    x = (lng + 180.0) / 360.0 * n
+    lat_rad = math.radians(lat)
+    y = (1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * n
+    return x, y
+
+
+def _store_osm_static_map(*, dest_lat: float, dest_lng: float) -> str:
+    """Build a map from OSM tiles when Google Static Maps is blocked on the server."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
         return ""
-    folder = settings.uploads_dir / "maps"
-    folder.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid4().hex}.{'jpg' if is_jpg else 'png'}"
-    (folder / name).write_bytes(content)
-    return f"{_public_api_origin()}/uploads/maps/{name}"
+
+    import math
+
+    zoom = 13
+    width, height = 800, 500
+    mid_lat = (HOSTEL_LAT + dest_lat) / 2.0
+    mid_lng = (HOSTEL_LNG + dest_lng) / 2.0
+    # Zoom out a bit for longer routes.
+    try:
+        dist_km = abs(HOSTEL_LAT - dest_lat) * 111 + abs(HOSTEL_LNG - dest_lng) * 85
+        if dist_km > 4:
+            zoom = 12
+        if dist_km > 8:
+            zoom = 11
+    except Exception:
+        pass
+
+    cx, cy = _latlng_to_tile(mid_lat, mid_lng, zoom)
+    tile_size = 256
+    cols = math.ceil(width / tile_size) + 1
+    rows = math.ceil(height / tile_size) + 1
+    start_x = int(cx) - cols // 2
+    start_y = int(cy) - rows // 2
+    canvas = Image.new("RGB", (cols * tile_size, rows * tile_size), "#e8e8e8")
+    try:
+        with httpx.Client(
+            timeout=20.0,
+            headers={"User-Agent": USER_AGENT},
+            follow_redirects=True,
+        ) as client:
+            for ty in range(rows):
+                for tx in range(cols):
+                    x = start_x + tx
+                    y = start_y + ty
+                    n = 2 ** zoom
+                    if y < 0 or y >= n:
+                        continue
+                    x = x % n
+                    tile_url = f"https://tile.openstreetmap.org/{zoom}/{x}/{y}.png"
+                    try:
+                        response = client.get(tile_url)
+                        response.raise_for_status()
+                        tile = Image.open(__import__("io").BytesIO(response.content)).convert("RGB")
+                        canvas.paste(tile, (tx * tile_size, ty * tile_size))
+                    except (httpx.HTTPError, OSError, ValueError):
+                        continue
+    except httpx.HTTPError:
+        return ""
+
+    # Crop around the center point.
+    center_px = int((cx - start_x) * tile_size)
+    center_py = int((cy - start_y) * tile_size)
+    left = max(0, center_px - width // 2)
+    top = max(0, center_py - height // 2)
+    image = canvas.crop((left, top, left + width, top + height))
+    draw = ImageDraw.Draw(image)
+
+    def _plot(lat: float, lng: float, fill: str) -> None:
+        x, y = _latlng_to_tile(lat, lng, zoom)
+        px = int((x - start_x) * tile_size) - left
+        py = int((y - start_y) * tile_size) - top
+        r = 10
+        draw.ellipse((px - r, py - r, px + r, py + r), fill=fill, outline="#ffffff", width=2)
+
+    _plot(HOSTEL_LAT, HOSTEL_LNG, "#111111")
+    _plot(dest_lat, dest_lng, "#c45a12")
+    # Draw a simple line between markers.
+    x1, y1 = _latlng_to_tile(HOSTEL_LAT, HOSTEL_LNG, zoom)
+    x2, y2 = _latlng_to_tile(dest_lat, dest_lng, zoom)
+    p1 = (int((x1 - start_x) * tile_size) - left, int((y1 - start_y) * tile_size) - top)
+    p2 = (int((x2 - start_x) * tile_size) - left, int((y2 - start_y) * tile_size) - top)
+    draw.line([p1, p2], fill="#1a73e8", width=4)
+
+    import io
+
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=85)
+    return _save_map_bytes(buf.getvalue())
+
+
+def _store_static_map(*, dest_lat: float, dest_lng: float, label: str = "") -> str:
+    """Host a map image for Instagram DMs (Google first, OSM tiles as fallback)."""
+    del label  # reserved for future captioning
+    return _store_google_static_map(dest_lat=dest_lat, dest_lng=dest_lng) or _store_osm_static_map(
+        dest_lat=dest_lat,
+        dest_lng=dest_lng,
+    )
 
 
 def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
@@ -248,12 +355,29 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
             "error": "No encontré una ruta en metro, bus o auto hasta ese lugar.",
         }
 
+    hint = _place_hint(place) or _place_hint(str(dest.get("name") or ""))
+    route_mode = str(route.get("mode") or "")
+    use_hint: dict[str, Any] | None = None
+    # Nearby walks stay as walks. Hints cover Google failures and key metro landmarks.
+    google_missed = not (route.get("has_metro") or route.get("has_bus") or route.get("lines"))
+    prefer_metro_hint = bool(hint and hint.get("has_metro") and not route.get("has_metro"))
+    if hint and route_mode != "walking" and (google_missed or prefer_metro_hint):
+        use_hint = hint
+        route = {
+            **route,
+            "mode": "transit",
+            "has_metro": bool(hint.get("has_metro")),
+            "has_bus": bool(hint.get("has_bus")),
+            "lines": list(hint.get("lines") or []),
+        }
+
     travel = str(route.get("mode") or "transit")
+    travelmode = "transit" if travel == "transit" else ("walking" if travel == "walking" else "driving")
     raw_maps = (
         "https://www.google.com/maps/dir/?api=1"
         f"&origin={quote(HOSTEL_ADDRESS)}"
         f"&destination={quote(dest['name'] + ', Santiago, Chile')}"
-        f"&travelmode={travel}"
+        f"&travelmode={travelmode}"
     )
     maps_url = shorten_url(raw_maps) or ""
     map_image_url = _store_static_map(
@@ -271,6 +395,7 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
         has_bus=bool(route.get("has_bus")),
         maps_url="",
         moves=list(route.get("moves") or []),
+        hint=use_hint,
     )
     return {
         "ok": True,
@@ -312,18 +437,92 @@ def _duration_minutes(duration: str) -> int | None:
     return total if found else None
 
 
+def _place_hint(place: str) -> dict[str, Any] | None:
+    sample = (place or "").strip().lower()
+    if not sample:
+        return None
+    catalog = [
+        (
+            ("estadio nacional",),
+            {
+                "has_metro": True,
+                "has_bus": False,
+                "lines": ["metro L5 (Ñuble o Grecia)"],
+                "es": "Lo más cómodo es el metro Línea 5 (Ñuble o Grecia).",
+                "en": "The easiest way is metro Line 5 (Ñuble or Grecia).",
+                "pt": "O mais cômodo é o metrô Linha 5 (Ñuble ou Grecia).",
+            },
+        ),
+        (
+            ("santander arena", "movistar arena"),
+            {
+                "has_metro": False,
+                "has_bus": True,
+                "lines": ["micro por Beaucheff / Parque O'Higgins"],
+                "es": "Te sirve micro por Beaucheff / Parque O'Higgins; si no, taxi o Uber.",
+                "en": "Take a bus toward Beaucheff / Parque O'Higgins, or a taxi/Uber.",
+                "pt": "Pegue um ônibus por Beaucheff / Parque O'Higgins; senão, táxi ou Uber.",
+            },
+        ),
+        (
+            ("la moneda", "palacio de la moneda", "moneda"),
+            {
+                "has_metro": True,
+                "has_bus": False,
+                "lines": ["metro L1 (La Moneda)"],
+                "es": "Queda cerca; a pie o metro Línea 1 (La Moneda).",
+                "en": "It is close by; walk or take metro Line 1 (La Moneda).",
+                "pt": "Fica perto; a pé ou metrô Linha 1 (La Moneda).",
+            },
+        ),
+    ]
+    for keys, hint in catalog:
+        if any(key in sample for key in keys):
+            return hint
+    return None
+
+
+def _osrm_route(dest_lat: float, dest_lng: float, *, profile: str) -> dict[str, Any] | None:
+    url = (
+        f"https://router.project-osrm.org/route/v1/{profile}/"
+        f"{HOSTEL_LNG},{HOSTEL_LAT};{dest_lng},{dest_lat}"
+    )
+    try:
+        with httpx.Client(timeout=12.0, headers={"User-Agent": USER_AGENT}) as client:
+            response = client.get(url, params={"overview": "false", "steps": "false"})
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    routes = payload.get("routes") or []
+    if payload.get("code") != "Ok" or not routes:
+        return None
+    meters = int(routes[0].get("distance") or 0)
+    seconds = int(routes[0].get("duration") or 0)
+    if profile == "foot":
+        seconds = int(round(meters / 1.33))
+    mode = "walking" if profile == "foot" else "driving"
+    return {
+        "mode": mode,
+        "distance": _format_distance(meters),
+        "duration": _format_duration(seconds),
+        "lines": [],
+        "moves": [],
+        "has_metro": False,
+        "has_bus": False,
+    }
+
+
 def _route_from_hostel(dest_lat: float, dest_lng: float) -> dict[str, Any] | None:
-    """Nearby walk first; else metro/bus, then car; long walk only as last resort."""
+    """Nearby walk first; else metro/bus, then car. Never suggest a long walk as 'simple'."""
     try:
         walking = _walking_route(dest_lat, dest_lng)
     except httpx.HTTPError:
         walking = None
-    if walking:
+    walk_mins = _duration_minutes(str((walking or {}).get("duration") or ""))
+    if walking and walk_mins is not None and walk_mins <= 25:
         walking["mode"] = "walking"
-        walk_mins = _duration_minutes(str(walking.get("duration") or ""))
-        # Under ~25 min on foot is the natural answer for nearby spots.
-        if walk_mins is not None and walk_mins <= 25:
-            return walking
+        return walking
 
     transit = _google_directions(
         origin_lat=HOSTEL_LAT,
@@ -345,17 +544,17 @@ def _route_from_hostel(dest_lat: float, dest_lng: float) -> dict[str, Any] | Non
     if driving:
         return driving
 
+    # Production Google Directions is often blocked: fall back to OSRM car.
+    osrm_car = _osrm_route(dest_lat, dest_lng, profile="driving")
+    if osrm_car and (walk_mins is None or walk_mins > 25):
+        return osrm_car
+
     if walking:
+        walking["mode"] = "walking"
         return walking
     if transit:
         return transit
-    return _google_directions(
-        origin_lat=HOSTEL_LAT,
-        origin_lng=HOSTEL_LNG,
-        dest_lat=dest_lat,
-        dest_lng=dest_lng,
-        mode="walking",
-    )
+    return _osrm_route(dest_lat, dest_lng, profile="foot")
 
 
 def _geocode(place: str) -> dict[str, Any] | None:
@@ -535,6 +734,7 @@ def _guest_replies(
     moves: list[dict[str, str]] | None = None,
     has_metro: bool = False,
     has_bus: bool = False,
+    hint: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     spoken = {
         "es": _spoken_duration(duration, "es"),
@@ -548,6 +748,17 @@ def _guest_replies(
         sample = " ".join(lines).lower()
         has_metro = "metro" in sample
         has_bus = "micro" in sample or "bus" in sample
+
+    # Known landmarks when Google transit is missing: metro tip + realistic car ETA.
+    tip_es = str((hint or {}).get("es") or "").strip()
+    if tip_es and travel != "walking":
+        tip_en = str(hint.get("en") or tip_es).strip()
+        tip_pt = str(hint.get("pt") or tip_es).strip()
+        return {
+            "es": f"{tip_es} En auto o taxi son unos {spoken['es']}." + _map_closing("es"),
+            "en": f"{tip_en} By car/taxi about {spoken['en']}." + _map_closing("en"),
+            "pt": f"{tip_pt} De carro/táxi uns {spoken['pt']}." + _map_closing("pt"),
+        }
 
     # One short human line + optional line name. Distance only once.
     if travel == "transit":
@@ -575,15 +786,15 @@ def _guest_replies(
 
     if travel == "driving":
         return {
-            "es": f"{place} queda a unos {spoken['es']} en auto." + _map_closing("es"),
+            "es": f"{place} queda a unos {spoken['es']} en auto o taxi." + _map_closing("es"),
             "en": (
-                f"{destination} is about a {spoken['en']} drive from the hostel."
+                f"{destination} is about a {spoken['en']} drive/taxi from the hostel."
                 + _map_closing("en")
             ),
-            "pt": f"{destination} fica a uns {spoken['pt']} de carro." + _map_closing("pt"),
+            "pt": f"{destination} fica a uns {spoken['pt']} de carro ou táxi." + _map_closing("pt"),
         }
 
-    # Walking for nearby places — short and natural, never “metro/micro cómodo”.
+    # Walking only for nearby places — short and natural.
     minutes = _duration_minutes(duration)
     if minutes is not None and minutes <= 25:
         return {
@@ -598,15 +809,12 @@ def _guest_replies(
             ),
         }
     return {
-        "es": f"Hasta {place} lo más simple es ir a pie: unos {spoken['es']}." + _map_closing("es"),
+        "es": f"{place} queda a unos {spoken['es']} en auto o taxi." + _map_closing("es"),
         "en": (
-            f"The simplest way to {destination} is on foot — about a {spoken['en']}."
+            f"{destination} is about a {spoken['en']} by car/taxi from the hostel."
             + _map_closing("en")
         ),
-        "pt": (
-            f"Até {destination} o mais simples é ir a pé: uns {spoken['pt']}."
-            + _map_closing("pt")
-        ),
+        "pt": f"{destination} fica a uns {spoken['pt']} de carro ou táxi." + _map_closing("pt"),
     }
 
 
