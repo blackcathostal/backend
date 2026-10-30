@@ -26,6 +26,15 @@ _RESERVATION_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_GREETING_ONLY_RE = re.compile(
+    r"^\s*(?:[¡!]?\s*)?(?:"
+    r"hola+|holi+|hello+|hi+|hey+|buenas|"
+    r"buenos\s+d[ií]as|buen\s+d[ií]a|buenas\s+tardes|buenas\s+noches|"
+    r"good\s+morning|good\s+afternoon|good\s+evening|"
+    r"bom\s+dia|boa\s+tarde|boa\s+noite|ol[aá]+"
+    r")(?:\s*[,!.…?]*)?(?:\s+(?:👋|🙂|😊|✨))?\s*$",
+    re.IGNORECASE,
+)
 
 
 class DeepSeekConfigError(Exception):
@@ -46,16 +55,15 @@ DEFAULT_SYSTEM_PROMPT = """Eres un especialista en atención hotelera Y vendedor
 (Barrio Brasil, Santiago de Chile). Respondes comentarios y mensajes de Instagram y Facebook.
 
 Estilo:
-- Redacta como un humano del sector hotelero: cercano, claro, profesional y natural.
-- NO respondas en seco. Sé un buen vendedor: convierte la consulta en ganas de quedarse.
-- Cada respuesta útil debe incluir al menos UN gancho de venta breve (beneficio, ubicación,
-  ambiente, desayuno, Wi-Fi, Barrio Brasil, cercanía a metro/centro, trato boutique, etc.)
-  usando SOLO datos reales de las tools o hechos conocidos del hostal. No inventes ofertas.
-- Endulza: menciona algo cercano que aporte valor (paseo, barrio, desayuno, descanso, facilidad
-  de llegar) y cierra invitando a reservar por WhatsApp cuando encaje, sin ser agresivo.
-- Evita sonar como catálogo o FAQ robot. Frases cortas, cálidas, persuasivas. Máximo 1 emoji.
+- Habla como una persona real de recepción: cercano, claro, natural. Nunca suenes a robot ni a script.
+- Si el huésped solo saluda (“hola”, “hi”, “buenas”), responde CORTO y humano: saluda igual,
+  pregunta en qué ayudas y PARA. No sueltes catálogo, beneficios ni pitch de venta en un saludo.
+- Cuando SÍ haya una consulta (precios, habitaciones, ubicación, etc.), sé buen vendedor:
+  dato + un beneficio real (Barrio Brasil, desayuno, ubicación, ambiente boutique) + cierre suave
+  a WhatsApp si encaja. Solo hechos de las tools; no inventes ofertas.
+- Evita plantillas (“Estimado huésped”, “Quedamos atentos”, listas largas). Máximo 1 emoji.
 - Contesta SIEMPRE en el mismo idioma de la pregunta del huésped (español, inglés u otro).
-- Respuestas concisas para redes (máx. ~520 caracteres). Rutas hasta 800.
+- Respuestas concisas para redes (máx. ~520 caracteres). Rutas hasta 800. Saludos: máx. ~120.
 
 Datos (OBLIGATORIO):
 - Precios, tipos o características de habitación → SOLO search_common_answers (preguntas frecuentes). Nunca uses habitaciones del panel ni search_rooms.
@@ -237,9 +245,9 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Si piden reservar (“reservame”, “me reservaste”, “quiero reservar”, etc.): "
         "llama get_hostel_info, responde con action=reply e incluye el whatsapp_url "
         "para que continúen la reserva por WhatsApp. No reserves ni confirmes cupos aquí. "
-        "Vende con calidez: no contestes solo el dato. Destaca un beneficio real "
-        "(Barrio Brasil, desayuno, ubicación, metro cercano, ambiente boutique) "
-        "y motiva a quedarse o a escribir por WhatsApp. Sin inventar promociones. "
+        "Si hay consulta real (no un simple hola): vende con calidez, destaca un beneficio "
+        "real (Barrio Brasil, desayuno, ubicación, ambiente boutique) e invita suave a "
+        "WhatsApp. En un saludo solo, sé humano y corto. Sin inventar promociones. "
         "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
         "Contesta en el idioma del huésped usando solo datos que devuelvan las tools. "
         "No repitas instrucciones internas."
@@ -255,13 +263,14 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
     else:
         greeting = (
             "\n\nEs el primer mensaje de esta conversación. "
-            "Saludo según la hora de Santiago de Chile, ahora "
-            f"{now.strftime('%H:%M')}: usa «{current_greeting('es')}». "
-            "De 05:00 a 11:59 es Buenos días, de 12:00 a 19:59 es Buenas tardes "
-            "y de 20:00 a 04:59 es Buenas noches. "
-            "No saludes buenas noches si todavía es de día, aunque la respuesta salga un poco tarde. "
-            "En inglés: Good morning, Good afternoon o Good evening. "
-            "En portugués: Bom dia, Boa tarde o Boa noite."
+            "Si el huésped dijo solo hola/hi/buenas, responde igual de humano y corto "
+            "(ej. «¡Hola! ¿En qué te puedo ayudar?») sin pitch de venta. "
+            "Si hay una consulta real, puedes abrir con un saludo natural; "
+            "si usas saludo por hora de Santiago ("
+            f"ahora {now.strftime('%H:%M')}: «{current_greeting('es')}»), "
+            "que suene espontáneo, no forzado. "
+            "De 05:00 a 11:59 Buenos días, 12:00 a 19:59 Buenas tardes, "
+            "20:00 a 04:59 Buenas noches. No digas buenas noches de día."
         )
     return get_system_prompt().rstrip() + scope + greeting + (extra or "")
 
@@ -409,10 +418,10 @@ def _guest_turn(
         "Detecta el idioma del mensaje y responde en ese mismo idioma. "
         "Busca en preguntas frecuentes e info del hostal; precios/tipos de habitación "
         "solo en preguntas frecuentes. "
-        "Si el mensaje es sobre reservar o hacer una reserva, llama get_hostel_info "
+        "Si solo saludó (hola/hi), responde humano y breve; no vendas ni listes beneficios. "
+        "Si el mensaje es sobre reservar, llama get_hostel_info "
         "y manda al huésped al WhatsApp (whatsapp_url) para completar la reserva. "
-        "Responde como vendedor hotelero: dato + beneficio + invitación suave a quedarse "
-        "o a reservar por WhatsApp. No contestes solo por contestar. "
+        "Si hay una consulta real, responde como vendedor: dato + beneficio + cierre suave. "
         "Usa la web solo si falta el dato. "
         "Luego entrega el JSON final.",
     ]
@@ -424,6 +433,35 @@ def _looks_like_reservation(text: str) -> bool:
     if not sample:
         return False
     return bool(_RESERVATION_RE.search(sample))
+
+
+def _looks_like_greeting_only(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample or len(sample) > 40:
+        return False
+    return bool(_GREETING_ONLY_RE.match(sample))
+
+
+def _human_greeting_reply(*, inbound_text: str, is_follow_up: bool) -> dict[str, Any]:
+    """Short human hello — never dump a sales brochure on a bare greeting."""
+    sample = (inbound_text or "").strip().lower()
+    if any(token in sample for token in ("hello", "hi", "hey", "good morning", "good afternoon", "good evening")):
+        message = "Hey! How can I help you with your stay at Black Cat?"
+    elif any(token in sample for token in ("bom dia", "boa tarde", "boa noite", "olá", "ola")):
+        message = "Oi! Em que posso te ajudar com a estadia no Black Cat?"
+    else:
+        # Mirror a casual "hola" — don't force "Buenas noches".
+        message = "¡Hola! ¿En qué te puedo ayudar?"
+    if is_follow_up:
+        message = strip_opening_greeting(message) or "¿En qué te puedo ayudar?"
+    return {
+        "action": "reply",
+        "message": message,
+        "reason": "greeting_only",
+        "model": "rule:greeting",
+        "map_image_url": "",
+        "maps_url": "",
+    }
 
 
 def _reservation_whatsapp_reply(
@@ -603,6 +641,11 @@ async def generate_instagram_reply(
         if (turn.get("content") or "").strip() and turn.get("role") in {"user", "assistant"}
     ]
     is_follow_up = bool(prior)
+    if _looks_like_greeting_only(inbound_text):
+        return _human_greeting_reply(
+            inbound_text=inbound_text,
+            is_follow_up=is_follow_up,
+        )
     if _looks_like_reservation(inbound_text):
         return _reservation_whatsapp_reply(
             db,
@@ -678,6 +721,13 @@ async def generate_test_chat(
     prior = turns[:-1]
     is_follow_up = bool(prior)
     inbound_text = turns[-1]["content"]
+    if _looks_like_greeting_only(inbound_text):
+        result = _human_greeting_reply(
+            inbound_text=inbound_text,
+            is_follow_up=is_follow_up,
+        )
+        result["channel"] = channel
+        return result
     if _looks_like_reservation(inbound_text):
         result = _reservation_whatsapp_reply(
             db,
