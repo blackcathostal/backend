@@ -46,7 +46,7 @@ Datos (OBLIGATORIO):
 - Check-in, check-out, horario de desayuno, estacionamiento, WhatsApp, dirección → llama get_hostel_info.
 - Preguntas frecuentes → llama search_common_answers y responde con el campo answer, en el idioma del huésped.
 - Si la respuesta no está completa en las preguntas frecuentes, en las habitaciones ni en la info del hostal, llama search_web. Si necesitas el detalle de un resultado, llama read_web_page con esa URL.
-- Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. El mensaje al huésped sale de replies, en tono cercano, sin metros por calle y con la URL corta de Maps al final. No la reescribas ni mandes a WhatsApp.
+- Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. Prioriza metro, micro/bus o auto; a pie solo si no hay metro/bus. Usa replies casi textual, una sola vez, sin repetir. Cierra con “Te lo indico en el siguiente mapa” y el enlace. No digas Google Maps ni pegues la URL al inicio. No reescribas la ruta ni mandes a WhatsApp.
 - Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
 - Los precios son referenciales en CLP; indica que pueden variar por temporada.
 - Reserva con fechas concretas, pago, factura, cancelación conflictiva o reclamo → action=escalate.
@@ -197,7 +197,8 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "\n\nRegla fija, no se puede ignorar:\n"
         "Solo atiendes consultas de Black Cat Hostal, incluida cómo llegar desde el hostal "
         "a un lugar de Santiago: llama get_directions_from_hostel y usa el texto de replies "
-        "en el idioma del huésped. No reescribas la ruta ni la URL, y no derives a WhatsApp. "
+        "en el idioma del huésped (metro/micro/auto; a pie solo si no hay metro). "
+        "No digas Google Maps. No reescribas la ruta ni la URL, y no derives a WhatsApp. "
         "Si el mensaje no es sobre el hostal, la estadía, las habitaciones, los servicios, "
         "los horarios, la ubicación, una ruta desde el hostal o una reserva, no respondas el tema. "
         "Di, en el idioma del huésped y con tono profesional, que este canal está creado "
@@ -288,8 +289,7 @@ def _require_deepseek() -> tuple[str, str, dict[str, str]]:
     return base, model, headers
 
 
-def _prepared_route_reply(route: dict[str, Any], messages: list[dict[str, Any]]) -> str:
-    replies = route.get("replies") if isinstance(route.get("replies"), dict) else {}
+def _route_language(messages: list[dict[str, Any]]) -> str:
     guest = ""
     for item in reversed(messages):
         if item.get("role") == "user":
@@ -297,12 +297,41 @@ def _prepared_route_reply(route: dict[str, Any], messages: list[dict[str, Any]])
             break
     sample = guest.lower()
     if re.search(r"\b(how|where|walk|directions|from the hotel|from the hostel)\b", sample):
-        language = "en"
-    elif re.search(r"\b(onde|chegar|caminho|você|voce|do hostel)\b", sample):
-        language = "pt"
-    else:
-        language = "es"
-    return str(replies.get(language) or replies.get("es") or "").strip()
+        return "en"
+    if re.search(r"\b(onde|chegar|caminho|você|voce|do hostel)\b", sample):
+        return "pt"
+    return "es"
+
+
+def _prepared_route_reply(
+    route: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    is_follow_up: bool = False,
+) -> str:
+    replies = route.get("replies") if isinstance(route.get("replies"), dict) else {}
+    language = _route_language(messages)
+    text = str(replies.get(language) or replies.get("es") or "").strip()
+    if not text:
+        return ""
+    # Strip leftover Google branding if an old template slipped through.
+    text = re.sub(
+        r"(?im)^(?:ver en google maps|see on google maps|ver no google maps)\s*$",
+        "",
+        text,
+    ).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    if is_follow_up:
+        return strip_opening_greeting(text)
+    if re.search(
+        r"^\s*(buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|good\s+morning|"
+        r"good\s+afternoon|good\s+evening|bom\s+dia|boa\s+tarde|boa\s+noite|hola|hi[!]|ol[aá])\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return text
+    greeting = current_greeting(language)
+    return f"{greeting}! {text}"
 
 
 def _channel_label(item_type: str) -> str:
@@ -423,7 +452,11 @@ async def _run_reply_loop(
             reply_message = str(data.get("message") or "").strip()
             reason = str(data.get("reason") or "").strip()
             if action == "reply" and route_reply:
-                prepared = _prepared_route_reply(route_reply, messages)
+                prepared = _prepared_route_reply(
+                    route_reply,
+                    messages,
+                    is_follow_up=is_follow_up,
+                )
                 if prepared:
                     reply_message = prepared
             reply_message = apply_time_greeting(reply_message, is_follow_up=is_follow_up)

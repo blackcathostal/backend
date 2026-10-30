@@ -1030,6 +1030,12 @@ async def send_inbox_reply(item_id: str, message: str, *, source: str = "human")
         "meta_message_id": meta_result.get("id") or meta_result.get("message_id"),
     }
     replies = list(item.get("replies") or [])
+    # Avoid storing the same outbound bubble twice (double-click / echo race).
+    last = replies[-1] if replies else None
+    if last and str(last.get("text") or "").strip() == text:
+        item["status"] = "replied_deepseek" if source == "deepseek" else "replied_human"
+        item["updated_at"] = _now_iso()
+        return upsert_inbox_item(item)
     replies.append(reply)
     item["replies"] = replies
     item["status"] = "replied_deepseek" if source == "deepseek" else "replied_human"
@@ -1192,18 +1198,31 @@ def conversation_turns(item: dict[str, Any]) -> list[dict[str, Any]]:
             )
         return turns
 
-    turns: list[dict[str, Any]] = []
+    related = _related_dm_items(item)
     seen_out: set[str] = set()
-    for row in _related_dm_items(item):
-        for index, reply in enumerate(row.get("replies") or []):
+    # Collect every stored outbound reply first so Meta echo bubbles do not duplicate them.
+    for row in related:
+        for reply in row.get("replies") or []:
             mid = str(reply.get("meta_message_id") or "").strip()
             if mid:
                 seen_out.add(f"message:{mid}")
-            seen_out.add(f"text:{(reply.get('text') or '').strip()}")
+                seen_out.add(f"message:message:{mid}")
+            text = str(reply.get("text") or "").strip()
+            if text:
+                seen_out.add(f"text:{text}")
+                seen_out.add(f"text:{_normalize_bubble(text)}")
+
+    turns: list[dict[str, Any]] = []
+    for row in related:
         direction = "out" if row.get("direction") == "out" else "in"
         external_id = str(row.get("external_id") or "")
         text = str(row.get("text") or "").strip()
-        if direction == "out" and (external_id in seen_out or f"text:{text}" in seen_out):
+        if direction == "out" and (
+            external_id in seen_out
+            or f"message:{external_id}" in seen_out
+            or f"text:{text}" in seen_out
+            or f"text:{_normalize_bubble(text)}" in seen_out
+        ):
             continue
         turns.append(
             {
@@ -1218,6 +1237,7 @@ def conversation_turns(item: dict[str, Any]) -> list[dict[str, Any]]:
         )
         if direction == "in":
             for index, reply in enumerate(row.get("replies") or []):
+                reply_text = str(reply.get("text") or "").strip()
                 turns.append(
                     {
                         "role": "out",
@@ -1229,8 +1249,30 @@ def conversation_turns(item: dict[str, Any]) -> list[dict[str, Any]]:
                         "reply_index": index,
                     }
                 )
+                if reply_text:
+                    seen_out.add(f"text:{reply_text}")
+                    seen_out.add(f"text:{_normalize_bubble(reply_text)}")
     turns.sort(key=lambda turn: str(turn.get("created_at") or ""))
-    return turns
+    return _dedupe_turns(turns)
+
+
+def _normalize_bubble(text: str) -> str:
+    return " ".join(str(text or "").split()).casefold()
+
+
+def _dedupe_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop consecutive outbound bubbles with the same text (reply + Meta echo)."""
+    cleaned: list[dict[str, Any]] = []
+    seen_out_text: set[str] = set()
+    for turn in turns:
+        if turn.get("role") == "out":
+            key = _normalize_bubble(str(turn.get("text") or ""))
+            if key and key in seen_out_text:
+                continue
+            if key:
+                seen_out_text.add(key)
+        cleaned.append(turn)
+    return cleaned
 
 
 def _own_instagram_ids() -> set[str]:

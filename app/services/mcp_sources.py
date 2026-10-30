@@ -141,7 +141,8 @@ async def search_google_places(query: str, max_results: int = 5) -> dict[str, An
 @mcp.tool(
     name="directions_from_hostel",
     description=(
-        "Ruta a pie desde Black Cat Hostal, Compañía de Jesús 1921, hasta un lugar de Santiago. "
+        "Cómo llegar desde Black Cat Hostal (Compañía de Jesús 1921) a un lugar de Santiago. "
+        "Prioriza metro o micro, luego auto; a pie solo si no hay metro/bus. "
         "Úsala cuando pregunten cómo llegar a La Moneda, un museo o una estación."
     ),
     structured_output=True,
@@ -218,7 +219,8 @@ def get_hostel_info_tool() -> dict[str, Any]:
 @mcp.tool(
     name="get_directions_from_hostel",
     description=(
-        "Ruta a pie desde Black Cat Hostal, Compañía de Jesús 1921, hasta un lugar de Santiago."
+        "Cómo llegar desde Black Cat Hostal (Compañía de Jesús 1921) a un lugar de Santiago. "
+        "Prioriza metro o micro, luego auto; a pie solo si no hay metro/bus."
     ),
     structured_output=True,
 )

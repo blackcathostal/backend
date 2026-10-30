@@ -386,10 +386,10 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "get_directions_from_hostel",
             "description": (
-                "Walking route from Black Cat Hostal (Compañía de Jesús 1921, Barrio Brasil) "
-                "to a place in Santiago, such as Palacio de La Moneda, a museum or a metro station. "
-                "Use this when a guest asks how to get somewhere from the hostel. "
-                "Answer with the returned duration, distance and steps. Do not send them to WhatsApp."
+                "How to get from Black Cat Hostal (Compañía de Jesús 1921, Barrio Brasil) "
+                "to a place in Santiago. Prefers metro/bus, then car; walking only if transit "
+                "is unavailable. Use when a guest asks how to get somewhere from the hostel. "
+                "Answer with the returned replies text. Do not send them to WhatsApp."
             ),
             "parameters": {
                 "type": "object",

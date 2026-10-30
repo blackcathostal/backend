@@ -1,4 +1,4 @@
-"""Walking route from Black Cat Hostal to a named place in Santiago."""
+"""Routes from Black Cat Hostal to a place in Santiago (metro/bus, car, walk last)."""
 
 from __future__ import annotations
 
@@ -13,6 +13,8 @@ HOSTEL_ADDRESS = "Compañía de Jesús 1921, Barrio Brasil, Santiago, Chile"
 HOSTEL_LAT = -33.4396639
 HOSTEL_LNG = -70.6638072
 USER_AGENT = "BlackCatHostal/1.0 (reservas@blackcathostal.com)"
+# Prefer public transport, then car. Walking only if metro/bus is not available.
+FROM_HOSTEL_MODES = ("transit", "driving", "walking")
 
 
 def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
@@ -60,6 +62,23 @@ def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
 def _google_route(origin: dict[str, Any] | None, mode: str) -> dict[str, Any] | None:
     if not origin:
         return None
+    return _google_directions(
+        origin_lat=float(origin["lat"]),
+        origin_lng=float(origin["lng"]),
+        dest_lat=HOSTEL_LAT,
+        dest_lng=HOSTEL_LNG,
+        mode=mode,
+    )
+
+
+def _google_directions(
+    *,
+    origin_lat: float,
+    origin_lng: float,
+    dest_lat: float,
+    dest_lng: float,
+    mode: str,
+) -> dict[str, Any] | None:
     from app.core.config import settings
 
     key = (settings.google_places_api_key or "").strip()
@@ -70,8 +89,8 @@ def _google_route(origin: dict[str, Any] | None, mode: str) -> dict[str, Any] | 
             response = client.get(
                 "https://maps.googleapis.com/maps/api/directions/json",
                 params={
-                    "origin": f"{origin['lat']},{origin['lng']}",
-                    "destination": f"{HOSTEL_LAT},{HOSTEL_LNG}",
+                    "origin": f"{origin_lat},{origin_lng}",
+                    "destination": f"{dest_lat},{dest_lng}",
                     "mode": mode,
                     "language": "es",
                     "region": "cl",
@@ -90,19 +109,38 @@ def _google_route(origin: dict[str, Any] | None, mode: str) -> dict[str, Any] | 
         return None
     leg = legs[0]
     lines: list[str] = []
+    has_metro = False
+    has_bus = False
     for step in leg.get("steps") or []:
         transit = step.get("transit_details") or {}
         line = transit.get("line") or {}
+        vehicle_info = line.get("vehicle") or {}
+        vehicle = str(vehicle_info.get("name") or vehicle_info.get("type") or "").strip()
+        vehicle_type = str(vehicle_info.get("type") or "").strip().upper()
         label = str(line.get("short_name") or line.get("name") or "").strip()
-        vehicle = str((line.get("vehicle") or {}).get("name") or "").strip()
+        is_metro = vehicle_type in {"SUBWAY", "METRO", "HEAVY_RAIL", "COMMUTER_TRAIN"} or "metro" in vehicle.lower()
+        is_bus = vehicle_type in {"BUS", "TROLLEYBUS"} or "bus" in vehicle.lower() or "micro" in vehicle.lower()
+        if is_metro:
+            has_metro = True
+        if is_bus:
+            has_bus = True
         if label:
-            lines.append(f"{vehicle} {label}".strip())
+            if is_metro:
+                lines.append(f"metro {label}")
+            elif is_bus:
+                lines.append(f"micro {label}")
+            else:
+                lines.append(f"{vehicle} {label}".strip() if vehicle else label)
         if len(lines) >= 4:
             break
     return {
+        "mode": mode,
         "distance": str((leg.get("distance") or {}).get("text") or ""),
         "duration": str((leg.get("duration") or {}).get("text") or ""),
         "lines": lines,
+        "has_metro": has_metro,
+        "has_bus": has_bus,
+        "moves": [],
     }
 
 
@@ -128,6 +166,7 @@ def _foot_summary(lat1: float, lng1: float, lat2: float, lng2: float) -> dict[st
 
 
 def directions_from_hostel(destination: str) -> dict[str, Any]:
+    """How to get from the hostel: metro/bus first, then car; walk only if no transit."""
     place = (destination or "").strip()
     if len(place) < 2:
         return {"ok": False, "error": "Indica el lugar de destino."}
@@ -142,42 +181,93 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
             "error": f"No encontré '{place}' en Santiago. Pide un nombre más preciso.",
         }
 
-    try:
-        route = _walking_route(dest["lat"], dest["lng"])
-    except httpx.HTTPError as exc:
-        return {"ok": False, "destination": dest["name"], "error": f"No se pudo calcular la ruta: {exc}"}
+    route = _route_from_hostel(dest["lat"], dest["lng"])
     if not route:
-        return {"ok": False, "destination": dest["name"], "error": "No hay una ruta a pie disponible."}
+        return {
+            "ok": False,
+            "destination": dest["name"],
+            "error": "No encontré una ruta en metro, bus o auto hasta ese lugar.",
+        }
 
-    maps_url = (
+    travel = str(route.get("mode") or "transit")
+    raw_maps = (
         "https://www.google.com/maps/dir/?api=1"
         f"&origin={quote(HOSTEL_ADDRESS)}"
         f"&destination={quote(dest['name'] + ', Santiago, Chile')}"
-        "&travelmode=walking"
+        f"&travelmode={travel}"
     )
+    maps_url = shorten_url(raw_maps) or raw_maps
     replies = _guest_replies(
         destination=dest["name"],
         distance=route["distance"],
         duration=route["duration"],
-        moves=route["moves"],
+        mode=travel,
+        lines=list(route.get("lines") or []),
+        has_metro=bool(route.get("has_metro")),
+        has_bus=bool(route.get("has_bus")),
         maps_url=maps_url,
+        moves=list(route.get("moves") or []),
     )
     return {
         "ok": True,
         "origin": HOSTEL_ADDRESS,
         "destination": dest["name"],
         "destination_address": dest["address"],
-        "mode": "walking",
+        "mode": travel,
         "distance": route["distance"],
         "duration": route["duration"],
+        "lines": list(route.get("lines") or []),
         "summary": replies["es"].split("\n\n", 1)[0],
         "maps_url": maps_url,
         "replies": replies,
         "instruction": (
-            "Usa replies según el idioma del huésped, casi textual. "
-            "No reescribas las calles ni armes otra URL. No mandes a WhatsApp."
+            "Usa replies según el idioma del huésped, casi textual y UNA sola vez. "
+            "No repitas el mismo párrafo. Prioriza metro/micro/auto. "
+            "El mapa va al final, después de «Te lo indico en el siguiente mapa». "
+            "No digas Google Maps ni pongas el enlace al inicio. No mandes a WhatsApp."
         ),
     }
+
+
+def _route_from_hostel(dest_lat: float, dest_lng: float) -> dict[str, Any] | None:
+    """Transit (metro/bus) → driving → walking only when transit is unavailable."""
+    transit = _google_directions(
+        origin_lat=HOSTEL_LAT,
+        origin_lng=HOSTEL_LNG,
+        dest_lat=dest_lat,
+        dest_lng=dest_lng,
+        mode="transit",
+    )
+    if transit and (transit.get("has_metro") or transit.get("has_bus") or transit.get("lines")):
+        return transit
+
+    driving = _google_directions(
+        origin_lat=HOSTEL_LAT,
+        origin_lng=HOSTEL_LNG,
+        dest_lat=dest_lat,
+        dest_lng=dest_lng,
+        mode="driving",
+    )
+    if driving:
+        return driving
+
+    # No metro/bus route: walking is the last option.
+    if transit:
+        return transit
+    try:
+        walking = _walking_route(dest_lat, dest_lng)
+    except httpx.HTTPError:
+        walking = None
+    if walking:
+        walking["mode"] = "walking"
+        return walking
+    return _google_directions(
+        origin_lat=HOSTEL_LAT,
+        origin_lng=HOSTEL_LNG,
+        dest_lat=dest_lat,
+        dest_lng=dest_lng,
+        mode="walking",
+    )
 
 
 def _geocode(place: str) -> dict[str, Any] | None:
@@ -224,9 +314,13 @@ def _walking_route(dest_lat: float, dest_lng: float) -> dict[str, Any] | None:
     # The public OSRM foot profile reports car-like times. Use a normal walking pace.
     seconds = int(round(meters / 1.33))
     return {
+        "mode": "walking",
         "distance": _format_distance(meters),
         "duration": _format_duration(seconds),
+        "lines": [],
         "moves": moves,
+        "has_metro": False,
+        "has_bus": False,
     }
 
 
@@ -333,13 +427,29 @@ def _route_clauses(moves: list[dict[str, str]], language: str) -> str:
     return "Es una caminata corta desde el hostal"
 
 
+def _map_closing(maps_url: str, language: str) -> str:
+    """Human cue first, map link last. Never say Google Maps."""
+    url = (maps_url or "").strip()
+    if not url:
+        return ""
+    if language == "en":
+        return f"\n\nHere is the map:\n{url}"
+    if language == "pt":
+        return f"\n\nTe indico no mapa a seguir:\n{url}"
+    return f"\n\nTe lo indico en el siguiente mapa:\n{url}"
+
+
 def _guest_replies(
     *,
     destination: str,
     distance: str,
     duration: str,
-    moves: list[dict[str, str]],
+    mode: str,
+    lines: list[str],
     maps_url: str,
+    moves: list[dict[str, str]] | None = None,
+    has_metro: bool = False,
+    has_bus: bool = False,
 ) -> dict[str, str]:
     spoken = {
         "es": _spoken_duration(duration, "es"),
@@ -347,24 +457,66 @@ def _guest_replies(
         "pt": _spoken_duration(duration, "pt"),
     }
     place = _with_article(destination)
-    es_path = _route_clauses(moves, "es")
-    en_path = _route_clauses(moves, "en")
-    pt_path = _route_clauses(moves, "pt")
+    travel = (mode or "transit").lower()
+    line_text = _join_clauses(lines) if lines else ""
+    if not has_metro and not has_bus and lines:
+        sample = " ".join(lines).lower()
+        has_metro = "metro" in sample
+        has_bus = "micro" in sample or "bus" in sample
+
+    # One short human line + optional line name. Distance only once.
+    if travel == "transit":
+        if has_metro and not has_bus:
+            es = f"{place} queda a unos {spoken['es']} en metro."
+            en = f"{destination} is about a {spoken['en']} metro ride from the hostel."
+            pt = f"{destination} fica a uns {spoken['pt']} de metrô."
+        elif has_bus and not has_metro:
+            es = f"{place} queda a unos {spoken['es']} en micro."
+            en = f"{destination} is about a {spoken['en']} bus ride from the hostel."
+            pt = f"{destination} fica a uns {spoken['pt']} de ônibus."
+        else:
+            es = f"{place} queda a unos {spoken['es']} en metro o micro."
+            en = f"{destination} is about {spoken['en']} by metro or bus from the hostel."
+            pt = f"{destination} fica a uns {spoken['pt']} de metrô ou ônibus."
+        if line_text:
+            es += f" Te sirve {line_text}."
+            en += f" Take {line_text}."
+            pt += f" Pode pegar {line_text}."
+        return {
+            "es": es + _map_closing(maps_url, "es"),
+            "en": en + _map_closing(maps_url, "en"),
+            "pt": pt + _map_closing(maps_url, "pt"),
+        }
+
+    if travel == "driving":
+        return {
+            "es": (
+                f"{place} queda a unos {spoken['es']} en auto."
+                + _map_closing(maps_url, "es")
+            ),
+            "en": (
+                f"{destination} is about a {spoken['en']} drive from the hostel."
+                + _map_closing(maps_url, "en")
+            ),
+            "pt": (
+                f"{destination} fica a uns {spoken['pt']} de carro."
+                + _map_closing(maps_url, "pt")
+            ),
+        }
+
+    # Walking only when metro/bus was not available — keep it brief.
     return {
         "es": (
-            f"¡Hola! {place} queda a unos {spoken['es']} a pie, cerca de {distance}. "
-            f"{es_path}. Ahí lo encuentras, en pleno centro.\n\n"
-            f"Ver en Google Maps\n{maps_url}"
+            f"Hasta {place} no hay metro/micro cómodo; a pie son unos {spoken['es']}."
+            + _map_closing(maps_url, "es")
         ),
         "en": (
-            f"Hi! {destination} is about a {spoken['en']} walk from the hostel, around {distance}. "
-            f"{en_path}. You will find it right there, in the center.\n\n"
-            f"See on Google Maps\n{maps_url}"
+            f"There is no handy metro/bus to {destination}; on foot it is about a {spoken['en']}."
+            + _map_closing(maps_url, "en")
         ),
         "pt": (
-            f"Olá! {destination} fica a uns {spoken['pt']} a pé, cerca de {distance}. "
-            f"{pt_path}. Você encontra logo ali, no centro.\n\n"
-            f"Ver no Google Maps\n{maps_url}"
+            f"Não há metrô/ônibus cômodo até {destination}; a pé são uns {spoken['pt']}."
+            + _map_closing(maps_url, "pt")
         ),
     }
 
