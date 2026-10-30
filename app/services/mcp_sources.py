@@ -18,14 +18,15 @@ from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.users import Users
 from app.services.ai_api_sources import collect_external_api_materials
 from app.services.hostel_directions import directions_from_hostel
-from app.services.instagram_knowledge import hostel_info_dict, search_common_answers, search_rooms
+from app.services.instagram_knowledge import hostel_info_dict, search_common_answers
 from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content
 
 mcp = FastMCP(
     "Black Cat Tourism Sources",
     instructions=(
-        "Responde con datos del hostal, las habitaciones, las preguntas frecuentes "
-        "y, si falta algo, con búsqueda en la web. No inventes datos."
+        "Responde con datos del hostal y las preguntas frecuentes. "
+        "Para precios y tipos de habitación usa solo preguntas frecuentes. "
+        "Si falta algo, busca en la web. No inventes datos."
     ),
     streamable_http_path="/",
 )
@@ -167,8 +168,9 @@ def _faq_payload(query: str = "") -> dict[str, Any]:
 @mcp.tool(
     name="search_frequent_questions",
     description=(
-        "Lee las preguntas frecuentes de Black Cat Hostal guardadas en configuraciones, "
-        "cada una con su respuesta. Úsala antes de contestar una duda del huésped."
+        "Lee las preguntas frecuentes de Black Cat Hostal. "
+        "Úsala SIEMPRE para precios, tipos de habitación y qué incluye cada una, "
+        "además de otras dudas del huésped. No uses el listado de habitaciones."
     ),
     structured_output=True,
 )
@@ -179,8 +181,9 @@ def search_frequent_questions(query: str = "") -> dict[str, Any]:
 @mcp.tool(
     name="search_common_answers",
     description=(
-        "Lee las preguntas frecuentes guardadas en configuraciones. "
-        "Úsala primero. Si la respuesta no está completa, busca también en la web."
+        "Lee las preguntas frecuentes. Úsala SIEMPRE para precios y tipos de habitación "
+        "(no uses habitaciones del panel). También para otras dudas. "
+        "Si la respuesta no está completa, busca también en la web (excepto precios)."
     ),
     structured_output=True,
 )
@@ -191,15 +194,23 @@ def search_common_answers_tool(query: str = "") -> dict[str, Any]:
 @mcp.tool(
     name="search_rooms",
     description=(
-        "Lee nombre, tipo, capacidad y precio actual de las habitaciones del panel. "
-        "Úsala siempre que pregunten precios o qué incluye una habitación."
+        "NO usar en respuestas de Instagram/Facebook para precios o tipos de habitación. "
+        "Esos datos salen solo de preguntas frecuentes (search_common_answers / "
+        "search_frequent_questions)."
     ),
     structured_output=True,
 )
 def search_rooms_tool(query: str = "") -> dict[str, Any]:
-    with SessionLocal() as db:
-        rooms = search_rooms(db, query)
-    return {"ok": True, "query": str(query or "").strip(), "rooms": rooms}
+    # Soft-block: redirect the model to FAQ instead of the rooms catalog.
+    return {
+        "ok": False,
+        "query": str(query or "").strip(),
+        "rooms": [],
+        "error": (
+            "No uses el listado de habitaciones. Para precios y tipos de habitación "
+            "llama search_common_answers o search_frequent_questions."
+        ),
+    }
 
 
 @mcp.tool(
@@ -305,8 +316,8 @@ async def _wikipedia_search(query: str, limit: int) -> list[dict[str, str]]:
 @mcp.tool(
     name="search_web",
     description=(
-        "Busca en la web cuando la respuesta no está en las preguntas frecuentes, "
-        "en las habitaciones ni en la información del hostal. "
+        "Busca en la web cuando la respuesta no está en las preguntas frecuentes "
+        "ni en la información del hostal. No la uses para precios de habitación. "
         "Sirve para lugares de Santiago, horarios públicos y datos que no están en el panel."
     ),
     structured_output=True,
@@ -578,14 +589,18 @@ def tool_result_payload(result: Any) -> dict[str, Any]:
 
 async def call_reply_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run one MCP tool for a DeepSeek Instagram or Facebook reply."""
+    tool_name = str(name or "").strip()
+    if tool_name == "search_rooms":
+        # Prices / room types must come only from FAQ.
+        return await call_reply_tool("search_common_answers", arguments or {})
     try:
-        result = await mcp.call_tool(name, arguments or {})
+        result = await mcp.call_tool(tool_name, arguments or {})
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     payload = tool_result_payload(result)
     if payload:
         return payload
-    return {"ok": False, "error": f"La tool {name} no devolvió datos."}
+    return {"ok": False, "error": f"La tool {tool_name} no devolvió datos."}
 
 
 async def collect_google_places(queries: list[str]) -> list[dict[str, Any]]:

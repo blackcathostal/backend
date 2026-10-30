@@ -292,25 +292,6 @@ DEEPSEEK_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "search_rooms",
-            "description": (
-                "Search the rooms table: type, price in CLP, capacity, features and status. "
-                "ALWAYS use this when guests ask about prices, room types or what each room includes."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Optional filter (e.g. double, family, twin, price)",
-                    }
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_hostel_info",
             "description": (
                 "Get official check-in/out times, breakfast hours, parking, WhatsApp URL, "
@@ -324,9 +305,11 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "search_common_answers",
             "description": (
-                "Lee las preguntas frecuentes. El campo answer ya trae los datos reales "
-                "(WhatsApp, correo, horarios, dirección o precios). "
+                "Lee las preguntas frecuentes. Úsala SIEMPRE para precios, tipos de habitación "
+                "y qué incluye cada una: el campo answer ya trae esos datos. "
+                "También sirve para WhatsApp, correo, horarios y dirección. "
                 "Escribe esos valores en la respuesta, en el idioma del huésped. "
+                "No uses el listado de habitaciones del panel. "
                 "No contestes con instrucciones como 'comparte el WhatsApp'."
             ),
             "parameters": {
@@ -345,9 +328,10 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "search_web",
             "description": (
-                "Search the public web when the answer is not in the frequent questions, "
-                "the rooms or the hostel info. Use it for places in Santiago, public hours "
-                "and facts that are not saved in the admin panel."
+                "Search the public web when the answer is not in the frequent questions "
+                "or the hostel info. Use it for places in Santiago, public hours "
+                "and facts that are not saved in the admin panel. "
+                "Do not use it for room prices or room types."
             ),
             "parameters": {
                 "type": "object",

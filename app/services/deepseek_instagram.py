@@ -42,10 +42,10 @@ Estilo:
 - Respuestas concisas para redes sociales (máx. ~450 caracteres). Para una ruta puedes usar hasta 800.
 
 Datos (OBLIGATORIO):
-- Precios, tipos o características de habitación → llama search_rooms.
+- Precios, tipos o características de habitación → SOLO search_common_answers (preguntas frecuentes). Nunca uses habitaciones del panel ni search_rooms.
 - Check-in, check-out, horario de desayuno, estacionamiento, WhatsApp, dirección → llama get_hostel_info.
-- Preguntas frecuentes → llama search_common_answers y responde con el campo answer, en el idioma del huésped.
-- Si la respuesta no está completa en las preguntas frecuentes, en las habitaciones ni en la info del hostal, llama search_web. Si necesitas el detalle de un resultado, llama read_web_page con esa URL.
+- Otras dudas del hostal → llama search_common_answers y responde con el campo answer, en el idioma del huésped.
+- Si la respuesta no está completa en las preguntas frecuentes ni en la info del hostal, llama search_web. Si necesitas el detalle de un resultado, llama read_web_page con esa URL. No uses la web para inventar precios de habitación.
 - Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. Prioriza metro, micro/bus o auto; a pie solo si no hay metro/bus. Usa replies casi textual, una sola vez, sin repetir. Cierra con “Te lo indico en el siguiente mapa.” sin pegar ninguna URL (la imagen del mapa se envía aparte). No digas Google Maps. No reescribas la ruta ni mandes a WhatsApp.
 - Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
 - Los precios son referenciales en CLP; indica que pueden variar por temporada.
@@ -211,7 +211,9 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Un mensaje privado puede ser un poco más completo. "
         "Si escribió por los dos, usa lo que ya dijo en el otro canal y no repitas la misma respuesta. "
         "No inventes que escribió por un canal si el turno dice que no.\n"
-        "Busca la respuesta en las preguntas frecuentes, en las habitaciones y en la info del hostal. "
+        "Busca la respuesta en las preguntas frecuentes y en la info del hostal. "
+        "Precios y tipos de habitación: SOLO preguntas frecuentes (search_common_answers), "
+        "nunca el listado de habitaciones del panel. "
         "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
         "Contesta en el idioma del huésped usando solo datos que devuelvan las tools. "
         "No repitas instrucciones internas."
@@ -379,7 +381,8 @@ def _guest_turn(
         f"Mensaje del huésped:\n{(text or '').strip() or '(vacío)'}",
         "",
         "Detecta el idioma del mensaje y responde en ese mismo idioma. "
-        "Busca en preguntas frecuentes, habitaciones, info del hostal y en la web si falta el dato. "
+        "Busca en preguntas frecuentes e info del hostal; precios/tipos de habitación "
+        "solo en preguntas frecuentes. Usa la web solo si falta el dato. "
         "Luego entrega el JSON final.",
     ]
     return "\n".join(lines)
