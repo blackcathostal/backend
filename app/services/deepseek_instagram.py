@@ -46,7 +46,7 @@ Datos (OBLIGATORIO):
 - Check-in, check-out, horario de desayuno, estacionamiento, WhatsApp, dirección → llama get_hostel_info.
 - Preguntas frecuentes → llama search_common_answers y responde con el campo answer, en el idioma del huésped.
 - Si la respuesta no está completa en las preguntas frecuentes, en las habitaciones ni en la info del hostal, llama search_web. Si necesitas el detalle de un resultado, llama read_web_page con esa URL.
-- Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. Prioriza metro, micro/bus o auto; a pie solo si no hay metro/bus. Usa replies casi textual, una sola vez, sin repetir. Cierra con “Te lo indico en el siguiente mapa” y el enlace. No digas Google Maps ni pegues la URL al inicio. No reescribas la ruta ni mandes a WhatsApp.
+- Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. Prioriza metro, micro/bus o auto; a pie solo si no hay metro/bus. Usa replies casi textual, una sola vez, sin repetir. Cierra con “Te lo indico en el siguiente mapa.” sin pegar ninguna URL (la imagen del mapa se envía aparte). No digas Google Maps. No reescribas la ruta ni mandes a WhatsApp.
 - Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
 - Los precios son referenciales en CLP; indica que pueden variar por temporada.
 - Reserva con fechas concretas, pago, factura, cancelación conflictiva o reclamo → action=escalate.
@@ -198,7 +198,8 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Solo atiendes consultas de Black Cat Hostal, incluida cómo llegar desde el hostal "
         "a un lugar de Santiago: llama get_directions_from_hostel y usa el texto de replies "
         "en el idioma del huésped (metro/micro/auto; a pie solo si no hay metro). "
-        "No digas Google Maps. No reescribas la ruta ni la URL, y no derives a WhatsApp. "
+        "Cierra con “Te lo indico en el siguiente mapa.” sin pegar URLs. "
+        "No digas Google Maps. No reescribas la ruta, y no derives a WhatsApp. "
         "Si el mensaje no es sobre el hostal, la estadía, las habitaciones, los servicios, "
         "los horarios, la ubicación, una ruta desde el hostal o una reserva, no respondas el tema. "
         "Di, en el idioma del huésped y con tono profesional, que este canal está creado "
@@ -314,13 +315,18 @@ def _prepared_route_reply(
     text = str(replies.get(language) or replies.get("es") or "").strip()
     if not text:
         return ""
-    # Strip leftover Google branding if an old template slipped through.
+    # Strip leftover Google branding / URLs if an old template slipped through.
     text = re.sub(
         r"(?im)^(?:ver en google maps|see on google maps|ver no google maps)\s*$",
         "",
         text,
-    ).strip()
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    )
+    text = re.sub(
+        r"https?://(?:www\.)?(?:google\.com/maps|maps\.google\.com|goo\.gl/maps|maps\.app\.goo\.gl)\S*",
+        "",
+        text,
+    )
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if is_follow_up:
         return strip_opening_greeting(text)
     if re.search(
@@ -451,6 +457,8 @@ async def _run_reply_loop(
                 action = "escalate"
             reply_message = str(data.get("message") or "").strip()
             reason = str(data.get("reason") or "").strip()
+            map_image_url = ""
+            maps_url = ""
             if action == "reply" and route_reply:
                 prepared = _prepared_route_reply(
                     route_reply,
@@ -459,7 +467,16 @@ async def _run_reply_loop(
                 )
                 if prepared:
                     reply_message = prepared
+                map_image_url = str(route_reply.get("map_image_url") or "").strip()
+                maps_url = str(route_reply.get("maps_url") or "").strip()
             reply_message = apply_time_greeting(reply_message, is_follow_up=is_follow_up)
+            # Never leave a raw Google Maps URL in the guest text (IG puts the preview on top).
+            reply_message = re.sub(
+                r"https?://(?:www\.)?(?:google\.com/maps|maps\.google\.com)\S*",
+                "",
+                reply_message or "",
+            )
+            reply_message = re.sub(r"\n{3,}", "\n\n", reply_message).strip()
             if action == "reply" and not reply_message:
                 action = "escalate"
                 reason = reason or "empty_reply"
@@ -468,6 +485,8 @@ async def _run_reply_loop(
                 "message": reply_message,
                 "reason": reason,
                 "model": model,
+                "map_image_url": map_image_url,
+                "maps_url": maps_url,
             }
 
     raise DeepSeekError("DeepSeek agotó el límite de tool calls sin respuesta final")

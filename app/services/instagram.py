@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import uuid
@@ -811,6 +812,37 @@ async def send_dm(recipient_id: str, message: str) -> dict[str, Any]:
     return data
 
 
+async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
+    """Send a map (or other) image as the next bubble after the text."""
+    conn = _require_connection()
+    page_id = conn["page_id"]
+    url = str(image_url or "").strip()
+    if not url.startswith("https://"):
+        raise InstagramError("Falta la URL pública de la imagen del mapa")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{_graph_base()}/{page_id}/messages",
+            params={"access_token": conn["page_access_token"]},
+            json={
+                "recipient": {"id": recipient_id},
+                "message": {
+                    "attachment": {
+                        "type": "image",
+                        "payload": {"url": url},
+                    }
+                },
+            },
+        )
+    data = response.json() if response.content else {}
+    if response.status_code >= 400 or data.get("error"):
+        err = data.get("error") or {}
+        raise InstagramError(
+            _meta_error_message(err, "No se pudo enviar la imagen del mapa"),
+            details=data,
+        )
+    return data
+
+
 async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
     """Pull recent media comments into local inbox (best-effort)."""
     conn = _require_connection()
@@ -994,13 +1026,30 @@ async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, 
     return synced
 
 
-async def send_inbox_reply(item_id: str, message: str, *, source: str = "human") -> dict[str, Any]:
+def _strip_maps_urls(text: str) -> str:
+    cleaned = re.sub(
+        r"https?://(?:www\.)?(?:google\.com/maps|maps\.google\.com|goo\.gl/maps|maps\.app\.goo\.gl)\S*",
+        "",
+        text or "",
+    )
+    cleaned = re.sub(r"(?im)^\s*ver en google maps\s*$", "", cleaned)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+async def send_inbox_reply(
+    item_id: str,
+    message: str,
+    *,
+    source: str = "human",
+    map_image_url: str = "",
+) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
-    text = (message or "").strip()
+    text = _strip_maps_urls(message or "")
     if not text:
         raise InstagramError("Mensaje vacío")
+    image = str(map_image_url or item.get("pending_map_image") or "").strip()
 
     try:
         meta_result: dict[str, Any]
@@ -1008,12 +1057,32 @@ async def send_inbox_reply(item_id: str, message: str, *, source: str = "human")
             comment_id = item.get("meta_comment_id")
             if not comment_id:
                 raise InstagramError("Falta meta_comment_id")
+            # Comments cannot attach images; keep a short maps link only if we have bit.ly.
             meta_result = await reply_to_comment(comment_id, text)
         else:
             recipient_id = item.get("author_id") or item.get("peer_id")
             if not recipient_id:
                 raise InstagramError("Falta author_id (IGSID) para DM")
+            # Text first (no URL) so Instagram does not put the map preview on top.
             meta_result = await send_dm(recipient_id, text)
+            if image.startswith("https://"):
+                try:
+                    img = await send_dm_image(recipient_id, image)
+                    replies = list(item.get("replies") or [])
+                    replies.append(
+                        {
+                            "text": "",
+                            "source": source,
+                            "created_at": _now_iso(),
+                            "meta_message_id": img.get("message_id") or img.get("id") or "",
+                            "is_map": True,
+                            "image_url": image,
+                        }
+                    )
+                    item["replies"] = replies
+                except InstagramError:
+                    # Image failed; do not fall back to a long Google URL in chat.
+                    pass
     except InstagramError as exc:
         if item.get("type") == "message" and _is_window_closed_error(exc):
             item["status"] = "window_closed"
@@ -1035,11 +1104,19 @@ async def send_inbox_reply(item_id: str, message: str, *, source: str = "human")
     if last and str(last.get("text") or "").strip() == text:
         item["status"] = "replied_deepseek" if source == "deepseek" else "replied_human"
         item["updated_at"] = _now_iso()
+        item.pop("pending_map_image", None)
         return upsert_inbox_item(item)
-    replies.append(reply)
+    # Keep map bubble after the text bubble in local history.
+    if replies and replies[-1].get("is_map"):
+        map_bubble = replies.pop()
+        replies.append(reply)
+        replies.append(map_bubble)
+    else:
+        replies.append(reply)
     item["replies"] = replies
     item["status"] = "replied_deepseek" if source == "deepseek" else "replied_human"
     item["updated_at"] = _now_iso()
+    item.pop("pending_map_image", None)
     return upsert_inbox_item(item)
 
 
@@ -1092,7 +1169,12 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
         item["updated_at"] = _now_iso()
         return upsert_inbox_item(item)
 
-    return await send_inbox_reply(item_id, decision["message"], source="deepseek")
+    return await send_inbox_reply(
+        item_id,
+        decision["message"],
+        source="deepseek",
+        map_image_url=str(decision.get("map_image_url") or ""),
+    )
 
 
 async def suggest_reply(item_id: str) -> dict[str, Any]:
@@ -1116,9 +1198,16 @@ async def suggest_reply(item_id: str) -> dict[str, Any]:
         )
     finally:
         db.close()
-    item["deepseek_draft"] = decision.get("message") or ""
+    draft = _strip_maps_urls(decision.get("message") or "")
+    decision["message"] = draft
+    item["deepseek_draft"] = draft
     item["deepseek_action"] = decision.get("action")
     item["escalation_reason"] = decision.get("reason")
+    map_image = str(decision.get("map_image_url") or "").strip()
+    if map_image.startswith("https://"):
+        item["pending_map_image"] = map_image
+    else:
+        item.pop("pending_map_image", None)
     item["updated_at"] = _now_iso()
     upsert_inbox_item(item)
     return decision
@@ -1194,6 +1283,8 @@ def conversation_turns(item: dict[str, Any]) -> list[dict[str, Any]]:
                     "source": reply.get("source") or "human",
                     "item_id": item.get("id"),
                     "reply_index": index,
+                    "is_map": bool(reply.get("is_map")),
+                    "image_url": reply.get("image_url") or "",
                 }
             )
         return turns
@@ -1247,6 +1338,8 @@ def conversation_turns(item: dict[str, Any]) -> list[dict[str, Any]]:
                         "author": "DeepSeek" if reply.get("source") == "deepseek" else "Tú",
                         "item_id": row.get("id"),
                         "reply_index": index,
+                        "is_map": bool(reply.get("is_map")),
+                        "image_url": reply.get("image_url") or "",
                     }
                 )
                 if reply_text:

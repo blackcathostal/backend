@@ -29,6 +29,7 @@ router = APIRouter(prefix="/instagram", tags=["instagram"])
 
 class ReplyBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+    map_image_url: str = ""
 
 
 class TestChatTurn(BaseModel):
@@ -203,7 +204,12 @@ async def reply_inbox_item(
     _: Users = Depends(get_current_user),
 ) -> dict[str, Any]:
     try:
-        return await ig.send_inbox_reply(item_id, body.message, source="human")
+        return await ig.send_inbox_reply(
+            item_id,
+            body.message,
+            source="human",
+            map_image_url=body.map_image_url or "",
+        )
     except ig.InstagramConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ig.InstagramError as exc:

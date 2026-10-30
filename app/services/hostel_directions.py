@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 from urllib.parse import quote
+from uuid import uuid4
 
 import httpx
 
+from app.core.config import settings
 from app.services.short_links import shorten_url
 
 HOSTEL_ADDRESS = "Compañía de Jesús 1921, Barrio Brasil, Santiago, Chile"
@@ -15,6 +17,62 @@ HOSTEL_LNG = -70.6638072
 USER_AGENT = "BlackCatHostal/1.0 (reservas@blackcathostal.com)"
 # Prefer public transport, then car. Walking only if metro/bus is not available.
 FROM_HOSTEL_MODES = ("transit", "driving", "walking")
+
+
+def _public_api_origin() -> str:
+    """Instagram must fetch the map image over public HTTPS (not localhost)."""
+    redirect = (settings.meta_redirect_uri or "").strip()
+    if redirect.startswith("https://"):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(redirect)
+        host = (parsed.netloc or "").lower()
+        if host and "localhost" not in host and not host.startswith("127."):
+            return f"https://{parsed.netloc}"
+    return "https://api.blackcathostal.com"
+
+
+def _store_static_map(*, dest_lat: float, dest_lng: float, label: str = "") -> str:
+    """Download a Static Maps image and host it for Instagram image DMs."""
+    key = (settings.google_places_api_key or "").strip()
+    if not key:
+        return ""
+    origin = f"{HOSTEL_LAT},{HOSTEL_LNG}"
+    dest = f"{dest_lat},{dest_lng}"
+    params = {
+        "size": "800x500",
+        "scale": "2",
+        "format": "jpg",
+        "maptype": "roadmap",
+        "language": "es",
+        "region": "cl",
+        "markers": [
+            f"color:0x111111|label:H|{origin}",
+            f"color:0xc45a12|label:D|{dest}",
+        ],
+        "path": f"color:0x1a73e8ff|weight:5|{origin}|{dest}",
+        "key": key,
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            response = client.get(
+                "https://maps.googleapis.com/maps/api/staticmap",
+                params=params,
+            )
+            response.raise_for_status()
+            content = response.content
+    except (httpx.HTTPError, ValueError):
+        return ""
+    # Accept JPEG (preferred) or PNG from Static Maps.
+    is_jpg = content.startswith(b"\xff\xd8\xff")
+    is_png = content.startswith(b"\x89PNG")
+    if len(content) < 800 or not (is_jpg or is_png):
+        return ""
+    folder = settings.uploads_dir / "maps"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid4().hex}.{'jpg' if is_jpg else 'png'}"
+    (folder / name).write_bytes(content)
+    return f"{_public_api_origin()}/uploads/maps/{name}"
 
 
 def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
@@ -196,7 +254,12 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
         f"&destination={quote(dest['name'] + ', Santiago, Chile')}"
         f"&travelmode={travel}"
     )
-    maps_url = shorten_url(raw_maps) or raw_maps
+    maps_url = shorten_url(raw_maps) or ""
+    map_image_url = _store_static_map(
+        dest_lat=float(dest["lat"]),
+        dest_lng=float(dest["lng"]),
+        label=str(dest["name"] or place),
+    )
     replies = _guest_replies(
         destination=dest["name"],
         distance=route["distance"],
@@ -205,7 +268,7 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
         lines=list(route.get("lines") or []),
         has_metro=bool(route.get("has_metro")),
         has_bus=bool(route.get("has_bus")),
-        maps_url=maps_url,
+        maps_url="",
         moves=list(route.get("moves") or []),
     )
     return {
@@ -219,12 +282,13 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
         "lines": list(route.get("lines") or []),
         "summary": replies["es"].split("\n\n", 1)[0],
         "maps_url": maps_url,
+        "map_image_url": map_image_url,
         "replies": replies,
         "instruction": (
             "Usa replies según el idioma del huésped, casi textual y UNA sola vez. "
             "No repitas el mismo párrafo. Prioriza metro/micro/auto. "
-            "El mapa va al final, después de «Te lo indico en el siguiente mapa». "
-            "No digas Google Maps ni pongas el enlace al inicio. No mandes a WhatsApp."
+            "Cierra con «Te lo indico en el siguiente mapa.» sin pegar ninguna URL. "
+            "La imagen del mapa se envía aparte. No digas Google Maps. No mandes a WhatsApp."
         ),
     }
 
@@ -427,16 +491,13 @@ def _route_clauses(moves: list[dict[str, str]], language: str) -> str:
     return "Es una caminata corta desde el hostal"
 
 
-def _map_closing(maps_url: str, language: str) -> str:
-    """Human cue first, map link last. Never say Google Maps."""
-    url = (maps_url or "").strip()
-    if not url:
-        return ""
+def _map_closing(language: str) -> str:
+    """Cue only — the map image is sent as the next Instagram bubble."""
     if language == "en":
-        return f"\n\nHere is the map:\n{url}"
+        return "\n\nHere is the map."
     if language == "pt":
-        return f"\n\nTe indico no mapa a seguir:\n{url}"
-    return f"\n\nTe lo indico en el siguiente mapa:\n{url}"
+        return "\n\nTe indico o mapa a seguir."
+    return "\n\nTe lo indico en el siguiente mapa."
 
 
 def _guest_replies(
@@ -483,40 +544,34 @@ def _guest_replies(
             en += f" Take {line_text}."
             pt += f" Pode pegar {line_text}."
         return {
-            "es": es + _map_closing(maps_url, "es"),
-            "en": en + _map_closing(maps_url, "en"),
-            "pt": pt + _map_closing(maps_url, "pt"),
+            "es": es + _map_closing("es"),
+            "en": en + _map_closing("en"),
+            "pt": pt + _map_closing("pt"),
         }
 
     if travel == "driving":
         return {
-            "es": (
-                f"{place} queda a unos {spoken['es']} en auto."
-                + _map_closing(maps_url, "es")
-            ),
+            "es": f"{place} queda a unos {spoken['es']} en auto." + _map_closing("es"),
             "en": (
                 f"{destination} is about a {spoken['en']} drive from the hostel."
-                + _map_closing(maps_url, "en")
+                + _map_closing("en")
             ),
-            "pt": (
-                f"{destination} fica a uns {spoken['pt']} de carro."
-                + _map_closing(maps_url, "pt")
-            ),
+            "pt": f"{destination} fica a uns {spoken['pt']} de carro." + _map_closing("pt"),
         }
 
     # Walking only when metro/bus was not available — keep it brief.
     return {
         "es": (
             f"Hasta {place} no hay metro/micro cómodo; a pie son unos {spoken['es']}."
-            + _map_closing(maps_url, "es")
+            + _map_closing("es")
         ),
         "en": (
             f"There is no handy metro/bus to {destination}; on foot it is about a {spoken['en']}."
-            + _map_closing(maps_url, "en")
+            + _map_closing("en")
         ),
         "pt": (
             f"Não há metrô/ônibus cômodo até {destination}; a pé são uns {spoken['pt']}."
-            + _map_closing(maps_url, "pt")
+            + _map_closing("pt")
         ),
     }
 
