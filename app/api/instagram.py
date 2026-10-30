@@ -23,6 +23,10 @@ from app.services.deepseek_instagram import (
     DeepSeekError,
     generate_test_chat,
 )
+from app.services.hostel_directions import (
+    google_static_maps_health,
+    set_google_maps_api_key,
+)
 
 router = APIRouter(prefix="/instagram", tags=["instagram"])
 
@@ -30,6 +34,10 @@ router = APIRouter(prefix="/instagram", tags=["instagram"])
 class ReplyBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     map_image_url: str = ""
+
+
+class GoogleMapsKeyBody(BaseModel):
+    key: str = Field(default="", max_length=200)
 
 
 class TestChatTurn(BaseModel):
@@ -127,6 +135,21 @@ def update_auto_reply(
 ) -> dict[str, bool]:
     enabled = ig.set_auto_reply_enabled(body.enabled)
     return {"enabled": enabled}
+
+
+@router.get("/maps/health")
+def maps_health(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    """Whether Google Static Maps works on this server (needed for Instagram map images)."""
+    return google_static_maps_health()
+
+
+@router.put("/maps/google-key")
+def maps_google_key(
+    body: GoogleMapsKeyBody,
+    _: Users = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Set a Maps Static–capable Google key used only for map images / directions."""
+    return set_google_maps_api_key(body.key)
 
 
 @router.get("/inbox")

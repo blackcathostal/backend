@@ -45,8 +45,72 @@ def _save_map_bytes(content: bytes) -> str:
     return f"{_public_api_origin()}/uploads/maps/{name}"
 
 
+def _google_api_key() -> str:
+    """Prefer a Maps-capable key from cache (production often blocks Static Maps on the .env key)."""
+    override = settings.uploads_dir / "cache" / "google_maps_api_key.txt"
+    try:
+        if override.is_file():
+            value = override.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+    except OSError:
+        pass
+    return (settings.google_places_api_key or "").strip()
+
+
+def set_google_maps_api_key(key: str) -> dict[str, Any]:
+    """Store/replace the Maps Static key used for Instagram map images."""
+    folder = settings.uploads_dir / "cache"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "google_maps_api_key.txt"
+    cleaned = (key or "").strip()
+    if cleaned:
+        path.write_text(cleaned + "\n", encoding="utf-8")
+    elif path.exists():
+        path.unlink()
+    probe = google_static_maps_health()
+    return {"ok": bool(probe.get("ok")), "saved": bool(cleaned), **probe}
+
+
+def google_static_maps_health() -> dict[str, Any]:
+    """Check whether Google Static Maps works with the active key (no key returned)."""
+    key = _google_api_key()
+    if not key:
+        return {"ok": False, "provider": "none", "detail": "missing_key"}
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(
+                "https://maps.googleapis.com/maps/api/staticmap",
+                params={
+                    "size": "200x200",
+                    "center": f"{HOSTEL_LAT},{HOSTEL_LNG}",
+                    "zoom": "14",
+                    "format": "jpg",
+                    "key": key,
+                },
+            )
+            content = response.content
+    except httpx.HTTPError as exc:
+        return {"ok": False, "provider": "google", "detail": f"http_error:{exc}"}
+    if response.status_code == 200 and (
+        content.startswith(b"\xff\xd8\xff") or content.startswith(b"\x89PNG")
+    ):
+        return {"ok": True, "provider": "google", "detail": "ok", "bytes": len(content)}
+    detail = ""
+    try:
+        detail = content.decode("utf-8", errors="replace")[:180]
+    except Exception:
+        detail = f"status_{response.status_code}"
+    return {
+        "ok": False,
+        "provider": "google",
+        "detail": detail or f"status_{response.status_code}",
+        "status_code": response.status_code,
+    }
+
+
 def _google_static_map_params(*, dest_lat: float, dest_lng: float) -> dict[str, Any] | None:
-    key = (settings.google_places_api_key or "").strip()
+    key = _google_api_key()
     if not key:
         return None
     origin = f"{HOSTEL_LAT},{HOSTEL_LNG}"
@@ -207,12 +271,13 @@ def _store_osm_static_map(*, dest_lat: float, dest_lng: float) -> str:
 
 
 def _store_static_map(*, dest_lat: float, dest_lng: float, label: str = "") -> str:
-    """Map image for Instagram DMs. Prefer Google; if the server key blocks it, host OSM."""
+    """Google Maps image for Instagram DMs (hosted on our API — never the giant /maps/dir URL)."""
     del label  # reserved for future captioning
-    return _store_google_static_map(
-        dest_lat=dest_lat,
-        dest_lng=dest_lng,
-    ) or _store_osm_static_map(dest_lat=dest_lat, dest_lng=dest_lng)
+    google = _store_google_static_map(dest_lat=dest_lat, dest_lng=dest_lng)
+    if google:
+        return google
+    # Do not fall back to OSM: the guest expects a Google map image.
+    return ""
 
 
 def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
@@ -277,9 +342,7 @@ def _google_directions(
     dest_lng: float,
     mode: str,
 ) -> dict[str, Any] | None:
-    from app.core.config import settings
-
-    key = (settings.google_places_api_key or "").strip()
+    key = _google_api_key()
     if not key:
         return None
     try:
@@ -747,12 +810,12 @@ def _route_clauses(moves: list[dict[str, str]], language: str) -> str:
 
 
 def _map_closing(language: str) -> str:
-    """Cue only — the map image is sent as the next Instagram bubble."""
+    """Cue only — the Google map image is sent as the next Instagram bubble."""
     if language == "en":
-        return "\n\nHere is the map."
+        return "\n\nHere is the map:"
     if language == "pt":
-        return "\n\nTe indico o mapa a seguir."
-    return "\n\nTe lo indico en el siguiente mapa."
+        return "\n\nTe indico o mapa a seguir:"
+    return "\n\nTe lo indico en el siguiente mapa:"
 
 
 def _guest_replies(
