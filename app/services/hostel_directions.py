@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
@@ -293,8 +294,37 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
     }
 
 
+def _duration_minutes(duration: str) -> int | None:
+    text = str(duration or "").strip().lower()
+    if not text:
+        return None
+    total = 0
+    found = False
+    for match in re.finditer(r"(\d+)\s*(h|hr|hora|horas|min|mins|minute|minutes)?", text):
+        value = int(match.group(1))
+        unit = (match.group(2) or "").lower()
+        if unit.startswith("h"):
+            total += value * 60
+            found = True
+        elif unit.startswith("min") or not unit:
+            total += value
+            found = True
+    return total if found else None
+
+
 def _route_from_hostel(dest_lat: float, dest_lng: float) -> dict[str, Any] | None:
-    """Transit (metro/bus) → driving → walking only when transit is unavailable."""
+    """Nearby walk first; else metro/bus, then car; long walk only as last resort."""
+    try:
+        walking = _walking_route(dest_lat, dest_lng)
+    except httpx.HTTPError:
+        walking = None
+    if walking:
+        walking["mode"] = "walking"
+        walk_mins = _duration_minutes(str(walking.get("duration") or ""))
+        # Under ~25 min on foot is the natural answer for nearby spots.
+        if walk_mins is not None and walk_mins <= 25:
+            return walking
+
     transit = _google_directions(
         origin_lat=HOSTEL_LAT,
         origin_lng=HOSTEL_LNG,
@@ -315,16 +345,10 @@ def _route_from_hostel(dest_lat: float, dest_lng: float) -> dict[str, Any] | Non
     if driving:
         return driving
 
-    # No metro/bus route: walking is the last option.
+    if walking:
+        return walking
     if transit:
         return transit
-    try:
-        walking = _walking_route(dest_lat, dest_lng)
-    except httpx.HTTPError:
-        walking = None
-    if walking:
-        walking["mode"] = "walking"
-        return walking
     return _google_directions(
         origin_lat=HOSTEL_LAT,
         origin_lng=HOSTEL_LNG,
@@ -559,18 +583,28 @@ def _guest_replies(
             "pt": f"{destination} fica a uns {spoken['pt']} de carro." + _map_closing("pt"),
         }
 
-    # Walking only when metro/bus was not available — keep it brief.
+    # Walking for nearby places — short and natural, never “metro/micro cómodo”.
+    minutes = _duration_minutes(duration)
+    if minutes is not None and minutes <= 25:
+        return {
+            "es": f"{place} queda cerca: a pie son unos {spoken['es']}." + _map_closing("es"),
+            "en": (
+                f"{destination} is close by — about a {spoken['en']} walk from the hostel."
+                + _map_closing("en")
+            ),
+            "pt": (
+                f"{destination} fica perto: a pé são uns {spoken['pt']}."
+                + _map_closing("pt")
+            ),
+        }
     return {
-        "es": (
-            f"Hasta {place} no hay metro/micro cómodo; a pie son unos {spoken['es']}."
-            + _map_closing("es")
-        ),
+        "es": f"Hasta {place} lo más simple es ir a pie: unos {spoken['es']}." + _map_closing("es"),
         "en": (
-            f"There is no handy metro/bus to {destination}; on foot it is about a {spoken['en']}."
+            f"The simplest way to {destination} is on foot — about a {spoken['en']}."
             + _map_closing("en")
         ),
         "pt": (
-            f"Não há metrô/ônibus cômodo até {destination}; a pé são uns {spoken['pt']}."
+            f"Até {destination} o mais simples é ir a pé: uns {spoken['pt']}."
             + _map_closing("pt")
         ),
     }
