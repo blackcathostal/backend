@@ -445,12 +445,16 @@ def _looks_like_greeting_only(text: str) -> bool:
 def _human_greeting_reply(*, inbound_text: str, is_follow_up: bool) -> dict[str, Any]:
     """Short human hello — never dump a sales brochure on a bare greeting."""
     sample = (inbound_text or "").strip().lower()
-    if any(token in sample for token in ("hello", "hi", "hey", "good morning", "good afternoon", "good evening")):
+    # Use word boundaries — "ola" must NOT match inside Spanish "hola".
+    if re.search(
+        r"\b(hello|hi|hey|good\s+morning|good\s+afternoon|good\s+evening)\b",
+        sample,
+    ):
         message = "Hey! How can I help you with your stay at Black Cat?"
-    elif any(token in sample for token in ("bom dia", "boa tarde", "boa noite", "olá", "ola")):
+    elif re.search(r"\b(bom\s+dia|boa\s+tarde|boa\s+noite|ol[áa])\b", sample) and "hola" not in sample:
         message = "Oi! Em que posso te ajudar com a estadia no Black Cat?"
     else:
-        # Mirror a casual "hola" — don't force "Buenas noches".
+        # Default Spanish for hola / buenas / anything unclear.
         message = "¡Hola! ¿En qué te puedo ayudar?"
     if is_follow_up:
         message = strip_opening_greeting(message) or "¿En qué te puedo ayudar?"
