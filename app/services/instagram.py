@@ -812,35 +812,111 @@ async def send_dm(recipient_id: str, message: str) -> dict[str, Any]:
     return data
 
 
+def _local_map_bytes(image_url: str) -> bytes:
+    """Read a hosted /uploads/maps image from disk when possible."""
+    url = str(image_url or "").strip()
+    marker = "/uploads/maps/"
+    if marker not in url:
+        return b""
+    name = url.split(marker, 1)[1].split("?", 1)[0].strip("/")
+    if not name or "/" in name or "\\" in name:
+        return b""
+    path = settings.uploads_dir / "maps" / name
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return b""
+    if data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG"):
+        return data
+    return b""
+
+
+async def _download_image_bytes(image_url: str) -> bytes:
+    local = _local_map_bytes(image_url)
+    if local:
+        return local
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        response = await client.get(image_url)
+        response.raise_for_status()
+        content = response.content
+    if not (content.startswith(b"\xff\xd8\xff") or content.startswith(b"\x89PNG")):
+        raise InstagramError("La imagen del mapa no es un JPEG/PNG válido")
+    return content
+
+
 async def _upload_message_image(image_url: str) -> str:
-    """Upload a reusable image to Meta; returns attachment_id."""
+    """Upload map bytes to Meta (multipart). Avoids Meta fetching our public URL."""
     conn = _require_connection()
     page_id = conn["page_id"]
     url = str(image_url or "").strip()
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    try:
+        content = await _download_image_bytes(url)
+    except (httpx.HTTPError, InstagramError) as exc:
+        raise InstagramError(f"No se pudo leer la imagen del mapa: {exc}") from exc
+
+    filename = "mapa.jpg" if content.startswith(b"\xff\xd8\xff") else "mapa.png"
+    mime = "image/jpeg" if filename.endswith(".jpg") else "image/png"
+    message = json.dumps(
+        {"attachment": {"type": "image", "payload": {"is_reusable": True}}}
+    )
+    files = {"filedata": (filename, content, mime)}
+    data = {"message": message}
+    async with httpx.AsyncClient(timeout=90.0) as client:
         response = await client.post(
             f"{_graph_base()}/{page_id}/message_attachments",
             params={"access_token": conn["page_access_token"]},
-            json={
-                "message": {
-                    "attachment": {
-                        "type": "image",
-                        "payload": {"url": url, "is_reusable": True},
+            data=data,
+            files=files,
+        )
+    payload = response.json() if response.content else {}
+    if response.status_code >= 400 or payload.get("error"):
+        # Fallback: let Meta fetch the public HTTPS URL.
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{_graph_base()}/{page_id}/message_attachments",
+                params={"access_token": conn["page_access_token"]},
+                json={
+                    "message": {
+                        "attachment": {
+                            "type": "image",
+                            "payload": {"url": url, "is_reusable": True},
+                        }
                     }
-                }
-            },
-        )
-    data = response.json() if response.content else {}
-    if response.status_code >= 400 or data.get("error"):
-        err = data.get("error") or {}
-        raise InstagramError(
-            _meta_error_message(err, "No se pudo subir la imagen del mapa"),
-            details=data,
-        )
-    attachment_id = str(data.get("attachment_id") or "").strip()
+                },
+            )
+        payload = response.json() if response.content else {}
+        if response.status_code >= 400 or payload.get("error"):
+            err = payload.get("error") or {}
+            raise InstagramError(
+                _meta_error_message(err, "No se pudo subir la imagen del mapa a Meta"),
+                details=payload,
+            )
+    attachment_id = str(payload.get("attachment_id") or "").strip()
     if not attachment_id:
-        raise InstagramError("Meta no devolvió attachment_id del mapa", details=data)
+        raise InstagramError("Meta no devolvió attachment_id del mapa", details=payload)
     return attachment_id
+
+
+async def test_map_image_upload(image_url: str = "") -> dict[str, Any]:
+    """Admin diagnostic: generate/upload a map image to Meta without messaging a guest."""
+    url = str(image_url or "").strip()
+    if not url.startswith("https://"):
+        from app.services.hostel_directions import directions_from_hostel
+
+        route = directions_from_hostel("Santander Arena")
+        url = str(route.get("map_image_url") or "").strip()
+        if not url:
+            return {"ok": False, "error": "No se pudo generar map_image_url", "route_ok": route.get("ok")}
+    try:
+        attachment_id = await _upload_message_image(url)
+    except InstagramError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "details": exc.details,
+            "map_image_url": url,
+        }
+    return {"ok": True, "attachment_id": attachment_id, "map_image_url": url}
 
 
 async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
@@ -851,38 +927,17 @@ async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
     if not url.startswith("https://"):
         raise InstagramError("Falta la URL pública de la imagen del mapa")
 
-    # Prefer upload+attachment_id (more reliable than Meta re-fetching our URL).
-    attachment_id = ""
-    upload_error: dict[str, Any] | None = None
-    try:
-        attachment_id = await _upload_message_image(url)
-    except InstagramError as exc:
-        upload_error = exc.details if isinstance(exc.details, dict) else {"error": str(exc)}
-
-    payload: dict[str, Any]
-    if attachment_id:
-        payload = {
-            "recipient": {"id": recipient_id},
-            "messaging_type": "RESPONSE",
-            "message": {
-                "attachment": {
-                    "type": "image",
-                    "payload": {"attachment_id": attachment_id},
-                }
-            },
-        }
-    else:
-        payload = {
-            "recipient": {"id": recipient_id},
-            "messaging_type": "RESPONSE",
-            "message": {
-                "attachment": {
-                    "type": "image",
-                    "payload": {"url": url, "is_reusable": True},
-                }
-            },
-        }
-
+    attachment_id = await _upload_message_image(url)
+    payload = {
+        "recipient": {"id": recipient_id},
+        "messaging_type": "RESPONSE",
+        "message": {
+            "attachment": {
+                "type": "image",
+                "payload": {"attachment_id": attachment_id},
+            }
+        },
+    }
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
             f"{_graph_base()}/{page_id}/messages",
@@ -892,8 +947,6 @@ async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
     data = response.json() if response.content else {}
     if response.status_code >= 400 or data.get("error"):
         err = data.get("error") or {}
-        if upload_error:
-            data = {"send_error": data, "upload_error": upload_error}
         raise InstagramError(
             _meta_error_message(err, "No se pudo enviar la imagen del mapa"),
             details=data,

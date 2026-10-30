@@ -153,6 +153,17 @@ def maps_google_key(
     return set_google_maps_api_key(body.key)
 
 
+@router.post("/maps/test-upload")
+async def maps_test_upload(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    """Upload a sample Google map image to Meta (no guest DM)."""
+    try:
+        return await ig.test_map_image_upload()
+    except ig.InstagramConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/inbox")
 def get_inbox(
     type: str | None = Query(default=None, alias="type"),
