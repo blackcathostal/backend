@@ -62,7 +62,11 @@ Estilo:
   dato + un beneficio real (Barrio Brasil, desayuno, ubicación, ambiente boutique) + cierre suave
   a WhatsApp si encaja. Solo hechos de las tools; no inventes ofertas.
 - Evita plantillas (“Estimado huésped”, “Quedamos atentos”, listas largas). Máximo 1 emoji.
-- Contesta SIEMPRE en el mismo idioma de la pregunta del huésped (español, inglés u otro).
+- Contesta SIEMPRE en el mismo idioma de la pregunta del huésped.
+- Idioma (OBLIGATORIO): por defecto español. Nombres de lugares en inglés o mixtos
+  (Costanera Center, Sky Costanera, Mall Plaza, Uber, etc.) NO cambian el idioma:
+  si el resto del mensaje es español o solo es el nombre del lugar, responde en español.
+  Nunca contestes en francés, alemán u otro idioma salvo que el huésped escriba claramente en ese idioma.
 - Respuestas concisas para redes (máx. ~520 caracteres). Rutas hasta 800. Saludos: máx. ~120.
 
 Datos (OBLIGATORIO):
@@ -248,6 +252,8 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Si hay consulta real (no un simple hola): vende con calidez, destaca un beneficio "
         "real (Barrio Brasil, desayuno, ubicación, ambiente boutique) e invita suave a "
         "WhatsApp. En un saludo solo, sé humano y corto. Sin inventar promociones. "
+        "Lugares con nombre en inglés (Costanera Center, etc.) = español si el huésped "
+        "no escribió claramente en otro idioma. Nunca contestes en francés sin que lo pidan. "
         "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
         "Contesta en el idioma del huésped usando solo datos que devuelvan las tools. "
         "No repitas instrucciones internas."
@@ -333,10 +339,20 @@ def _route_language(messages: list[dict[str, Any]]) -> str:
         if item.get("role") == "user":
             guest = str(item.get("content") or "")
             break
-    sample = guest.lower()
-    if re.search(r"\b(how|where|walk|directions|from the hotel|from the hostel)\b", sample):
+    # Prefer the raw guest line inside our wrapped turn, not the instruction tail.
+    raw = guest
+    marker = "Mensaje del huésped:\n"
+    if marker in guest:
+        raw = guest.split(marker, 1)[1]
+        raw = raw.split("\n\n", 1)[0]
+    sample = raw.lower().strip()
+    # English place names alone (Costanera Center) must stay Spanish.
+    if re.search(
+        r"\b(how|where|walk|directions|from the hotel|from the hostel|please|can you)\b",
+        sample,
+    ):
         return "en"
-    if re.search(r"\b(onde|chegar|caminho|você|voce|do hostel)\b", sample):
+    if re.search(r"\b(onde|chegar|caminho|você|voce|do hostel|por favor)\b", sample):
         return "pt"
     return "es"
 
@@ -416,6 +432,9 @@ def _guest_turn(
         f"Mensaje del huésped:\n{(text or '').strip() or '(vacío)'}",
         "",
         "Detecta el idioma del mensaje y responde en ese mismo idioma. "
+        "Si solo nombran un lugar de Santiago (ej. Costanera Center) o escriben en español "
+        "con un nombre en inglés, responde en español y usa get_directions_from_hostel. "
+        "Nunca respondas en francés u otro idioma no pedido. "
         "Busca en preguntas frecuentes e info del hostal; precios/tipos de habitación "
         "solo en preguntas frecuentes. "
         "Si solo saludó (hola/hi), responde humano y breve; no vendas ni listes beneficios. "

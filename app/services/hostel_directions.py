@@ -571,6 +571,17 @@ def _place_hint(place: str) -> dict[str, Any] | None:
                 "pt": "Fica perto; a pé ou metrô Linha 1 (La Moneda).",
             },
         ),
+        (
+            ("costanera center", "costanera centre", "sky costanera", "mall costanera"),
+            {
+                "has_metro": True,
+                "has_bus": False,
+                "lines": ["metro L1 o L6 (Tobalaba)"],
+                "es": "Te sirve el metro hasta Tobalaba (L1 o L6); Costanera Center queda ahí mismo.",
+                "en": "Take the metro to Tobalaba (L1 or L6); Costanera Center is right there.",
+                "pt": "Pegue o metrô até Tobalaba (L1 ou L6); o Costanera Center fica bem ali.",
+            },
+        ),
     ]
     for keys, hint in catalog:
         if any(key in sample for key in keys):
