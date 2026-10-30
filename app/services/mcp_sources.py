@@ -27,7 +27,8 @@ mcp = FastMCP(
         "Responde con datos del hostal y las preguntas frecuentes. "
         "Para precios y tipos de habitación usa solo preguntas frecuentes. "
         "Si piden reservar, usa get_hostel_info y envíalos al WhatsApp. "
-        "Si falta algo, busca en la web. No inventes datos."
+        "Sé vendedor: combina el dato con un beneficio real e invita a quedarse. "
+        "Si falta algo, busca en la web. No inventes datos ni promociones."
     ),
     streamable_http_path="/",
 )

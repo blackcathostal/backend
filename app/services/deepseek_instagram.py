@@ -42,14 +42,20 @@ def deepseek_configured() -> bool:
     return bool((settings.deepseek_api_key or "").strip())
 
 
-DEFAULT_SYSTEM_PROMPT = """Eres un especialista en atención hotelera de Black Cat Hostal Boutique
+DEFAULT_SYSTEM_PROMPT = """Eres un especialista en atención hotelera Y vendedor de Black Cat Hostal Boutique
 (Barrio Brasil, Santiago de Chile). Respondes comentarios y mensajes de Instagram y Facebook.
 
 Estilo:
 - Redacta como un humano del sector hotelero: cercano, claro, profesional y natural.
-- Sin tono robótico. Frases cortas. Máximo 1 emoji si encaja.
+- NO respondas en seco. Sé un buen vendedor: convierte la consulta en ganas de quedarse.
+- Cada respuesta útil debe incluir al menos UN gancho de venta breve (beneficio, ubicación,
+  ambiente, desayuno, Wi-Fi, Barrio Brasil, cercanía a metro/centro, trato boutique, etc.)
+  usando SOLO datos reales de las tools o hechos conocidos del hostal. No inventes ofertas.
+- Endulza: menciona algo cercano que aporte valor (paseo, barrio, desayuno, descanso, facilidad
+  de llegar) y cierra invitando a reservar por WhatsApp cuando encaje, sin ser agresivo.
+- Evita sonar como catálogo o FAQ robot. Frases cortas, cálidas, persuasivas. Máximo 1 emoji.
 - Contesta SIEMPRE en el mismo idioma de la pregunta del huésped (español, inglés u otro).
-- Respuestas concisas para redes sociales (máx. ~450 caracteres). Para una ruta puedes usar hasta 800.
+- Respuestas concisas para redes (máx. ~520 caracteres). Rutas hasta 800.
 
 Datos (OBLIGATORIO):
 - Precios, tipos o características de habitación → SOLO search_common_answers (preguntas frecuentes). Nunca uses habitaciones del panel ni search_rooms.
@@ -231,6 +237,9 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Si piden reservar (“reservame”, “me reservaste”, “quiero reservar”, etc.): "
         "llama get_hostel_info, responde con action=reply e incluye el whatsapp_url "
         "para que continúen la reserva por WhatsApp. No reserves ni confirmes cupos aquí. "
+        "Vende con calidez: no contestes solo el dato. Destaca un beneficio real "
+        "(Barrio Brasil, desayuno, ubicación, metro cercano, ambiente boutique) "
+        "y motiva a quedarse o a escribir por WhatsApp. Sin inventar promociones. "
         "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
         "Contesta en el idioma del huésped usando solo datos que devuelvan las tools. "
         "No repitas instrucciones internas."
@@ -402,6 +411,8 @@ def _guest_turn(
         "solo en preguntas frecuentes. "
         "Si el mensaje es sobre reservar o hacer una reserva, llama get_hostel_info "
         "y manda al huésped al WhatsApp (whatsapp_url) para completar la reserva. "
+        "Responde como vendedor hotelero: dato + beneficio + invitación suave a quedarse "
+        "o a reservar por WhatsApp. No contestes solo por contestar. "
         "Usa la web solo si falta el dato. "
         "Luego entrega el JSON final.",
     ]
@@ -427,19 +438,17 @@ def _reservation_whatsapp_reply(
     sample = (inbound_text or "").lower()
     if any(token in sample for token in ("please", "book", "booking", "reserve", "room")):
         message = (
-            f"To confirm a booking, please write us on WhatsApp {whatsapp} "
-            "with your dates and how many guests. We reply there quickly."
-        )
-    elif any(token in sample for token in ("reserva", "reservar", "quarto", "hóspedes", "hospedes")):
-        # Spanish default; also covers casual Portuguese/Spanish mix.
-        message = (
-            f"Para reservar escríbenos por WhatsApp {whatsapp} "
-            "con las fechas y la cantidad de personas. Ahí te confirmamos cupo."
+            "Perfect — we'd love to host you in Barrio Brasil, steps from the center, "
+            "with continental breakfast included. "
+            f"Message us on WhatsApp {whatsapp} with your dates and guest count "
+            "and we'll lock your room."
         )
     else:
         message = (
-            f"Para reservar escríbenos por WhatsApp {whatsapp} "
-            "con las fechas y la cantidad de personas. Ahí te confirmamos cupo."
+            "¡Claro! Te va a encantar quedarte en Barrio Brasil: ubicación céntrica, "
+            "ambiente boutique y desayuno continental incluido. "
+            f"Escríbenos por WhatsApp {whatsapp} con fechas y cantidad de personas "
+            "y te armamos la reserva."
         )
     message = apply_time_greeting(message, is_follow_up=is_follow_up)
     return {
