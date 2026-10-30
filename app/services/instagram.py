@@ -21,7 +21,6 @@ from app.services.deepseek_instagram import (
     deepseek_configured,
     generate_instagram_reply,
 )
-from app.services.short_links import ver_mapa_message
 
 CONNECTION_FILE = settings.uploads_dir / "cache" / "instagram_connection.json"
 INBOX_FILE = settings.uploads_dir / "cache" / "instagram_inbox.json"
@@ -1086,13 +1085,20 @@ async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, 
 
 
 def _strip_maps_urls(text: str) -> str:
-    """Remove directions links from DM text. The map goes as an image bubble instead."""
+    """Remove map/directions links from DM text. The map goes as an image bubble instead."""
     cleaned = re.sub(
         r"https?://(?:www\.)?(?:google\.com/maps|maps\.googleapis\.com|maps\.google\.com|goo\.gl/maps|maps\.app\.goo\.gl)\S*",
         "",
         text or "",
     )
-    cleaned = re.sub(r"(?im)^\s*ver en google maps\s*$", "", cleaned)
+    cleaned = re.sub(
+        r"https?://(?:api\.)?blackcathostal\.com/api/g/[a-z0-9]+\S*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"https?://bit\.ly/\S+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?im)^\s*(ver en google maps|ver mapa|open map)\s*$", "", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
@@ -1111,11 +1117,8 @@ async def send_inbox_reply(
     if not text:
         raise InstagramError("Mensaje vacío")
     image = str(map_image_url or item.get("pending_map_image") or "").strip()
-    open_url = str(maps_url or item.get("pending_maps_url") or "").strip()
-    # Never put a long Google /maps/dir URL in the guest chat.
-    if "google.com/maps/dir" in open_url or "maps.google.com" in open_url:
-        open_url = ""
-    ver_mapa = ver_mapa_message(open_url) if open_url.startswith("https://") else ""
+    # maps_url kept for callers/admin only — guest chat gets text + map image, no link bubble.
+    _ = maps_url or item.get("pending_maps_url") or ""
 
     try:
         meta_result: dict[str, Any]
@@ -1123,15 +1126,12 @@ async def send_inbox_reply(
             comment_id = item.get("meta_comment_id")
             if not comment_id:
                 raise InstagramError("Falta meta_comment_id")
-            # Comments: short "Ver mapa" link only (no image attachment).
-            comment_text = text if not ver_mapa else f"{text}\n\n{ver_mapa}"
-            meta_result = await reply_to_comment(comment_id, comment_text)
-            text = comment_text
+            meta_result = await reply_to_comment(comment_id, text)
         else:
             recipient_id = item.get("author_id") or item.get("peer_id")
             if not recipient_id:
                 raise InstagramError("Falta author_id (IGSID) para DM")
-            # 1) directions text  2) Google map image  3) "Ver mapa" short link
+            # Text first, then Google map image only (no URL underneath).
             meta_result = await send_dm(recipient_id, text)
             if image.startswith("https://"):
                 try:
@@ -1152,22 +1152,6 @@ async def send_inbox_reply(
                 except InstagramError as map_exc:
                     item["map_send_error"] = str(map_exc)
                     item["pending_map_image"] = image
-            if ver_mapa:
-                try:
-                    link_meta = await send_dm(recipient_id, ver_mapa)
-                    replies = list(item.get("replies") or [])
-                    replies.append(
-                        {
-                            "text": ver_mapa,
-                            "source": source,
-                            "created_at": _now_iso(),
-                            "meta_message_id": link_meta.get("message_id") or link_meta.get("id") or "",
-                            "is_map_link": True,
-                        }
-                    )
-                    item["replies"] = replies
-                except InstagramError:
-                    pass
     except InstagramError as exc:
         if item.get("type") == "message" and _is_window_closed_error(exc):
             item["status"] = "window_closed"
@@ -1192,9 +1176,9 @@ async def send_inbox_reply(
         item.pop("pending_map_image", None)
         item.pop("pending_maps_url", None)
         return upsert_inbox_item(item)
-    # Order local history: text → map image → Ver mapa link.
+    # Order local history: text → map image.
     extras: list[dict[str, Any]] = []
-    while replies and (replies[-1].get("is_map") or replies[-1].get("is_map_link")):
+    while replies and replies[-1].get("is_map"):
         extras.insert(0, replies.pop())
     replies.append(reply)
     replies.extend(extras)
