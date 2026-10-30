@@ -49,7 +49,11 @@ Datos (OBLIGATORIO):
 - Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. Prioriza metro, micro/bus o auto; a pie solo si no hay metro/bus. Usa replies casi textual, una sola vez, sin repetir. Cierra con “Te lo indico en el siguiente mapa.” sin pegar ninguna URL (la imagen del mapa se envía aparte). No digas Google Maps. No reescribas la ruta ni mandes a WhatsApp.
 - Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
 - Los precios son referenciales en CLP; indica que pueden variar por temporada.
-- Reserva con fechas concretas, pago, factura, cancelación conflictiva o reclamo → action=escalate.
+- Reserva / reservar / “reservame” / “me reservaste” / “quiero reservar” / “hazme una reserva”
+  o cualquier pedido de reserva (con o sin fechas) → action=reply. Llama get_hostel_info,
+  incluye el whatsapp_url real en el message y pide que escriban por WhatsApp con fechas
+  y cantidad de personas. No confirmes ni hagas la reserva por Instagram/Facebook.
+- Pago, factura, cancelación conflictiva o reclamo → action=escalate.
 - Elogios: agradece y ofrece WhatsApp/correo de la info del hostal.
 - Spam o mensaje vacío → escalate.
 
@@ -214,6 +218,9 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Busca la respuesta en las preguntas frecuentes y en la info del hostal. "
         "Precios y tipos de habitación: SOLO preguntas frecuentes (search_common_answers), "
         "nunca el listado de habitaciones del panel. "
+        "Si piden reservar (“reservame”, “me reservaste”, “quiero reservar”, etc.): "
+        "llama get_hostel_info, responde con action=reply e incluye el whatsapp_url "
+        "para que continúen la reserva por WhatsApp. No reserves ni confirmes cupos aquí. "
         "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
         "Contesta en el idioma del huésped usando solo datos que devuelvan las tools. "
         "No repitas instrucciones internas."
@@ -382,7 +389,10 @@ def _guest_turn(
         "",
         "Detecta el idioma del mensaje y responde en ese mismo idioma. "
         "Busca en preguntas frecuentes e info del hostal; precios/tipos de habitación "
-        "solo en preguntas frecuentes. Usa la web solo si falta el dato. "
+        "solo en preguntas frecuentes. "
+        "Si el mensaje es sobre reservar o hacer una reserva, llama get_hostel_info "
+        "y manda al huésped al WhatsApp (whatsapp_url) para completar la reserva. "
+        "Usa la web solo si falta el dato. "
         "Luego entrega el JSON final.",
     ]
     return "\n".join(lines)

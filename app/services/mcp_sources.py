@@ -26,6 +26,7 @@ mcp = FastMCP(
     instructions=(
         "Responde con datos del hostal y las preguntas frecuentes. "
         "Para precios y tipos de habitación usa solo preguntas frecuentes. "
+        "Si piden reservar, usa get_hostel_info y envíalos al WhatsApp. "
         "Si falta algo, busca en la web. No inventes datos."
     ),
     streamable_http_path="/",
@@ -217,7 +218,8 @@ def search_rooms_tool(query: str = "") -> dict[str, Any]:
     name="get_hostel_info",
     description=(
         "Lee check-in, check-out, desayuno, estacionamiento, WhatsApp, correo y dirección "
-        "guardados en la información del hostal."
+        "guardados en la información del hostal. "
+        "Úsala siempre si piden reservar: incluye whatsapp_url en la respuesta."
     ),
     structured_output=True,
 )

@@ -295,7 +295,9 @@ DEEPSEEK_TOOLS = [
             "name": "get_hostel_info",
             "description": (
                 "Get official check-in/out times, breakfast hours, parking, WhatsApp URL, "
-                "address and email for Black Cat Hostal."
+                "address and email for Black Cat Hostal. "
+                "ALWAYS call this when the guest wants to book/reserve (“reservame”, "
+                "“quiero reservar”, etc.) and put whatsapp_url in the reply."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
