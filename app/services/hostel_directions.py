@@ -89,6 +89,7 @@ def _google_static_map_direct_url(*, dest_lat: float, dest_lng: float) -> str:
 
 
 def _store_google_static_map(*, dest_lat: float, dest_lng: float) -> str:
+    """Download Google Static Maps and host it. Never return a broken Google URL."""
     params = _google_static_map_params(dest_lat=dest_lat, dest_lng=dest_lng)
     if not params:
         return ""
@@ -99,13 +100,13 @@ def _store_google_static_map(*, dest_lat: float, dest_lng: float) -> str:
                 params=params,
             )
             response.raise_for_status()
-            hosted = _save_map_bytes(response.content)
-            if hosted:
-                return hosted
+            content = response.content
     except (httpx.HTTPError, ValueError):
-        pass
-    # Server IP may be blocked by the Google key; Meta can still fetch Google’s image.
-    return _google_static_map_direct_url(dest_lat=dest_lat, dest_lng=dest_lng)
+        return ""
+    # Google returns 403/error text bodies that must not be sent to Instagram.
+    if not (content.startswith(b"\xff\xd8\xff") or content.startswith(b"\x89PNG")):
+        return ""
+    return _save_map_bytes(content)
 
 
 def _latlng_to_tile(lat: float, lng: float, zoom: int) -> tuple[float, float]:
@@ -206,13 +207,12 @@ def _store_osm_static_map(*, dest_lat: float, dest_lng: float) -> str:
 
 
 def _store_static_map(*, dest_lat: float, dest_lng: float, label: str = "") -> str:
-    """Google Maps image for Instagram (never the giant directions URL in the text)."""
+    """Map image for Instagram DMs. Prefer Google; if the server key blocks it, host OSM."""
     del label  # reserved for future captioning
-    google = _store_google_static_map(dest_lat=dest_lat, dest_lng=dest_lng)
-    if google:
-        return google
-    # Last resort only if Google key is missing entirely.
-    return _store_osm_static_map(dest_lat=dest_lat, dest_lng=dest_lng)
+    return _store_google_static_map(
+        dest_lat=dest_lat,
+        dest_lng=dest_lng,
+    ) or _store_osm_static_map(dest_lat=dest_lat, dest_lng=dest_lng)
 
 
 def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
@@ -480,9 +480,9 @@ def _place_hint(place: str) -> dict[str, Any] | None:
                 "has_metro": True,
                 "has_bus": False,
                 "lines": ["metro L5 (Ñuble o Grecia)"],
-                "es": "Lo más cómodo es el metro Línea 5 (Ñuble o Grecia).",
-                "en": "The easiest way is metro Line 5 (Ñuble or Grecia).",
-                "pt": "O mais cômodo é o metrô Linha 5 (Ñuble ou Grecia).",
+                "es": "Te sirve el metro Línea 5, estaciones Ñuble o Grecia.",
+                "en": "Take metro Line 5 to Ñuble or Grecia.",
+                "pt": "Pegue o metrô Linha 5, estações Ñuble ou Grecia.",
             },
         ),
         (
@@ -490,10 +490,10 @@ def _place_hint(place: str) -> dict[str, Any] | None:
             {
                 "has_metro": False,
                 "has_bus": True,
-                "lines": ["micro por Beaucheff / Parque O'Higgins"],
-                "es": "Te sirve micro por Beaucheff / Parque O'Higgins; si no, taxi o Uber.",
-                "en": "Take a bus toward Beaucheff / Parque O'Higgins, or a taxi/Uber.",
-                "pt": "Pegue um ônibus por Beaucheff / Parque O'Higgins; senão, táxi ou Uber.",
+                "lines": ["micro 121"],
+                "es": "Te sirve la micro 121 (Beaucheff / Parque O'Higgins). Si no, taxi o Uber.",
+                "en": "Take bus 121 (Beaucheff / Parque O'Higgins), or a taxi/Uber.",
+                "pt": "Pegue o ônibus 121 (Beaucheff / Parque O'Higgins); senão, táxi ou Uber.",
             },
         ),
         (
@@ -502,7 +502,7 @@ def _place_hint(place: str) -> dict[str, Any] | None:
                 "has_metro": True,
                 "has_bus": False,
                 "lines": ["metro L1 (La Moneda)"],
-                "es": "Queda cerca; a pie o metro Línea 1 (La Moneda).",
+                "es": "Queda cerca; a pie o metro Línea 1 (estación La Moneda).",
                 "en": "It is close by; walk or take metro Line 1 (La Moneda).",
                 "pt": "Fica perto; a pé ou metrô Linha 1 (La Moneda).",
             },
@@ -807,7 +807,13 @@ def _guest_replies(
             en = f"{destination} is about {spoken['en']} by metro or bus from the hostel."
             pt = f"{destination} fica a uns {spoken['pt']} de metrô ou ônibus."
         if line_text:
-            es += f" Te sirve {line_text}."
+            lower = line_text.lower()
+            if lower.startswith("micro "):
+                es += f" Te sirve la {line_text}."
+            elif lower.startswith("metro "):
+                es += f" Te sirve el {line_text}."
+            else:
+                es += f" Te sirve {line_text}."
             en += f" Take {line_text}."
             pt += f" Pode pegar {line_text}."
         return {
