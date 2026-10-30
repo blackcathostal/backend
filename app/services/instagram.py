@@ -924,49 +924,68 @@ async def test_map_image_upload(image_url: str = "") -> dict[str, Any]:
     return {"ok": True, "attachment_id": attachment_id, "map_image_url": url}
 
 
-async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
-    """Send a Google map image as the next bubble after the text."""
+async def send_dm_map_card(
+    recipient_id: str,
+    *,
+    image_url: str,
+    open_url: str,
+    title: str = "Google Maps",
+    subtitle: str = "Toca para abrir la ruta",
+) -> dict[str, Any]:
+    """Send Google Static Map as a tappable card that opens Google Maps (no URL in text)."""
     conn = _require_connection()
     page_id = conn["page_id"]
-    url = str(image_url or "").strip()
-    if not url.startswith("https://"):
+    image = str(image_url or "").strip()
+    link = str(open_url or "").strip()
+    if not image.startswith("https://"):
         raise InstagramError("Falta la URL pública de la imagen del mapa")
+    if not link.startswith("https://"):
+        raise InstagramError("Falta el enlace de Google Maps para abrir al tocar")
 
-    attempts: list[dict[str, Any]] = []
-    # 1) Public URL — Instagram Messaging supports image URL payloads reliably.
-    attempts.append(
+    element: dict[str, Any] = {
+        "title": (title or "Google Maps")[:80],
+        "subtitle": (subtitle or "Toca para abrir la ruta")[:80],
+        "image_url": image,
+        "default_action": {
+            "type": "web_url",
+            "url": link,
+        },
+        "buttons": [
+            {
+                "type": "web_url",
+                "url": link,
+                "title": "Abrir mapa",
+            }
+        ],
+    }
+    attempts: list[dict[str, Any]] = [
+        # Preferred: generic template — tap image/card opens Google Maps.
+        {
+            "recipient": {"id": recipient_id},
+            "message": {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "generic",
+                        "elements": [element],
+                    },
+                }
+            },
+        },
+        # Fallback: plain image (not tappable to Maps).
         {
             "recipient": {"id": recipient_id},
             "message": {
                 "attachment": {
                     "type": "image",
-                    "payload": {"url": url, "is_reusable": True},
+                    "payload": {"url": image, "is_reusable": True},
                 }
             },
-        }
-    )
-    # 2) Multipart upload → attachment_id (when Meta cannot fetch our URL).
-    try:
-        attachment_id = await _upload_message_image(url)
-        attempts.append(
-            {
-                "recipient": {"id": recipient_id},
-                "message": {
-                    "attachment": {
-                        "type": "image",
-                        "payload": {"attachment_id": attachment_id},
-                    }
-                },
-            }
-        )
-    except InstagramError as exc:
-        attempts.append({"_upload_failed": str(exc), "_upload_details": exc.details})
-
+        },
+    ]
     last_error: dict[str, Any] = {}
     async with httpx.AsyncClient(timeout=60.0) as client:
         for payload in attempts:
-            if "_upload_failed" in payload:
-                continue
             response = await client.post(
                 f"{_graph_base()}/{page_id}/messages",
                 params={"access_token": conn["page_access_token"]},
@@ -974,13 +993,49 @@ async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
             )
             data = response.json() if response.content else {}
             if response.status_code < 400 and not data.get("error"):
+                data["_map_card"] = payload["message"]["attachment"]["type"]
                 return data
             last_error = data
     err = (last_error.get("error") or {}) if isinstance(last_error, dict) else {}
     raise InstagramError(
-        _meta_error_message(err, "No se pudo enviar la imagen del mapa"),
+        _meta_error_message(err, "No se pudo enviar el mapa de Google"),
         details=last_error,
     )
+
+
+async def send_dm_image(recipient_id: str, image_url: str, *, open_url: str = "") -> dict[str, Any]:
+    """Send Google map: tappable card when open_url is set, else plain image."""
+    link = str(open_url or "").strip()
+    if link.startswith("https://"):
+        return await send_dm_map_card(recipient_id, image_url=image_url, open_url=link)
+    # Plain image fallback (no open link available).
+    conn = _require_connection()
+    page_id = conn["page_id"]
+    url = str(image_url or "").strip()
+    if not url.startswith("https://"):
+        raise InstagramError("Falta la URL pública de la imagen del mapa")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{_graph_base()}/{page_id}/messages",
+            params={"access_token": conn["page_access_token"]},
+            json={
+                "recipient": {"id": recipient_id},
+                "message": {
+                    "attachment": {
+                        "type": "image",
+                        "payload": {"url": url, "is_reusable": True},
+                    }
+                },
+            },
+        )
+    data = response.json() if response.content else {}
+    if response.status_code >= 400 or data.get("error"):
+        err = data.get("error") or {}
+        raise InstagramError(
+            _meta_error_message(err, "No se pudo enviar la imagen del mapa"),
+            details=data,
+        )
+    return data
 
 
 async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
@@ -1199,8 +1254,14 @@ async def send_inbox_reply(
     if not text:
         raise InstagramError("Mensaje vacío")
     image = str(map_image_url or item.get("pending_map_image") or "").strip()
-    # maps_url kept for callers/admin only — guest chat gets text + map image, no link bubble.
-    _ = maps_url or item.get("pending_maps_url") or ""
+    open_url = str(maps_url or item.get("pending_maps_url") or "").strip()
+    # Tap target for the map card only (never shown as plain text in the first bubble).
+    if open_url and not (
+        "google.com/maps" in open_url
+        or "/api/g/" in open_url
+        or "bit.ly/" in open_url
+    ):
+        open_url = ""
 
     try:
         meta_result: dict[str, Any]
@@ -1213,11 +1274,15 @@ async def send_inbox_reply(
             recipient_id = item.get("author_id") or item.get("peer_id")
             if not recipient_id:
                 raise InstagramError("Falta author_id (IGSID) para DM")
-            # Text first, then Google map image only (no URL underneath).
+            # Text first (no URL). Then Google map card — tap opens Google Maps.
             meta_result = await send_dm(recipient_id, text)
             if image.startswith("https://"):
                 try:
-                    img = await send_dm_image(recipient_id, image)
+                    img = await send_dm_image(
+                        recipient_id,
+                        image,
+                        open_url=open_url if open_url.startswith("https://") else "",
+                    )
                     replies = list(item.get("replies") or [])
                     replies.append(
                         {
@@ -1227,6 +1292,8 @@ async def send_inbox_reply(
                             "meta_message_id": img.get("message_id") or img.get("id") or "",
                             "is_map": True,
                             "image_url": image,
+                            "maps_url": open_url,
+                            "map_card": img.get("_map_card") or "image",
                         }
                     )
                     item["replies"] = replies
@@ -1368,7 +1435,9 @@ async def suggest_reply(item_id: str) -> dict[str, Any]:
         item["pending_map_image"] = map_image
     else:
         item.pop("pending_map_image", None)
-    if maps_url.startswith("https://") and "google.com/maps/dir" not in maps_url:
+    if maps_url.startswith("https://") and (
+        "google.com/maps" in maps_url or "/api/g/" in maps_url or "bit.ly/" in maps_url
+    ):
         item["pending_maps_url"] = maps_url
     else:
         item.pop("pending_maps_url", None)
