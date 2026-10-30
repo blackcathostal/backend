@@ -1027,8 +1027,9 @@ async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, 
 
 
 def _strip_maps_urls(text: str) -> str:
+    """Remove directions links from DM text. The map goes as an image bubble instead."""
     cleaned = re.sub(
-        r"https?://(?:www\.)?(?:google\.com/maps|maps\.google\.com|goo\.gl/maps|maps\.app\.goo\.gl)\S*",
+        r"https?://(?:www\.)?(?:google\.com/maps|maps\.googleapis\.com|maps\.google\.com|goo\.gl/maps|maps\.app\.goo\.gl)\S*",
         "",
         text or "",
     )

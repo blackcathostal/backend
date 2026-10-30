@@ -45,13 +45,13 @@ def _save_map_bytes(content: bytes) -> str:
     return f"{_public_api_origin()}/uploads/maps/{name}"
 
 
-def _store_google_static_map(*, dest_lat: float, dest_lng: float) -> str:
+def _google_static_map_params(*, dest_lat: float, dest_lng: float) -> dict[str, Any] | None:
     key = (settings.google_places_api_key or "").strip()
     if not key:
-        return ""
+        return None
     origin = f"{HOSTEL_LAT},{HOSTEL_LNG}"
     dest = f"{dest_lat},{dest_lng}"
-    params = {
+    return {
         "size": "800x500",
         "scale": "2",
         "format": "jpg",
@@ -65,6 +65,33 @@ def _store_google_static_map(*, dest_lat: float, dest_lng: float) -> str:
         "path": f"color:0x1a73e8ff|weight:5|{origin}|{dest}",
         "key": key,
     }
+
+
+def _google_static_map_direct_url(*, dest_lat: float, dest_lng: float) -> str:
+    """Google Static Maps image URL (not the giant /maps/dir directions link)."""
+    params = _google_static_map_params(dest_lat=dest_lat, dest_lng=dest_lng)
+    if not params:
+        return ""
+    # markers/path are repeated keys; build manually for a clean URL.
+    parts = [
+        f"size={params['size']}",
+        f"scale={params['scale']}",
+        f"format={params['format']}",
+        f"maptype={params['maptype']}",
+        f"language={params['language']}",
+        f"region={params['region']}",
+    ]
+    for marker in params["markers"]:
+        parts.append(f"markers={quote(marker, safe=':|,')}")
+    parts.append(f"path={quote(str(params['path']), safe=':|,')}")
+    parts.append(f"key={quote(str(params['key']), safe='')}")
+    return "https://maps.googleapis.com/maps/api/staticmap?" + "&".join(parts)
+
+
+def _store_google_static_map(*, dest_lat: float, dest_lng: float) -> str:
+    params = _google_static_map_params(dest_lat=dest_lat, dest_lng=dest_lng)
+    if not params:
+        return ""
     try:
         with httpx.Client(timeout=20.0) as client:
             response = client.get(
@@ -72,9 +99,13 @@ def _store_google_static_map(*, dest_lat: float, dest_lng: float) -> str:
                 params=params,
             )
             response.raise_for_status()
-            return _save_map_bytes(response.content)
+            hosted = _save_map_bytes(response.content)
+            if hosted:
+                return hosted
     except (httpx.HTTPError, ValueError):
-        return ""
+        pass
+    # Server IP may be blocked by the Google key; Meta can still fetch Google’s image.
+    return _google_static_map_direct_url(dest_lat=dest_lat, dest_lng=dest_lng)
 
 
 def _latlng_to_tile(lat: float, lng: float, zoom: int) -> tuple[float, float]:
@@ -175,12 +206,13 @@ def _store_osm_static_map(*, dest_lat: float, dest_lng: float) -> str:
 
 
 def _store_static_map(*, dest_lat: float, dest_lng: float, label: str = "") -> str:
-    """Host a map image for Instagram DMs (Google first, OSM tiles as fallback)."""
+    """Google Maps image for Instagram (never the giant directions URL in the text)."""
     del label  # reserved for future captioning
-    return _store_google_static_map(dest_lat=dest_lat, dest_lng=dest_lng) or _store_osm_static_map(
-        dest_lat=dest_lat,
-        dest_lng=dest_lng,
-    )
+    google = _store_google_static_map(dest_lat=dest_lat, dest_lng=dest_lng)
+    if google:
+        return google
+    # Last resort only if Google key is missing entirely.
+    return _store_osm_static_map(dest_lat=dest_lat, dest_lng=dest_lng)
 
 
 def directions_to_hostel(origin: str, mode: str = "transit") -> dict[str, Any]:
