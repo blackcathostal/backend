@@ -474,6 +474,7 @@ def directions_from_hostel(destination: str) -> dict[str, Any]:
         f"&destination={quote(dest['name'] + ', Santiago, Chile')}"
         f"&travelmode={travelmode}"
     )
+    # Short "Ver mapa" link (bit.ly or /api/g/xxxx) — never the giant /maps/dir URL in chat.
     maps_url = shorten_url(raw_maps) or ""
     map_image_url = _store_static_map(
         dest_lat=float(dest["lat"]),

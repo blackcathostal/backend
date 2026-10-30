@@ -21,6 +21,7 @@ from app.services.deepseek_instagram import (
     deepseek_configured,
     generate_instagram_reply,
 )
+from app.services.short_links import ver_mapa_message
 
 CONNECTION_FILE = settings.uploads_dir / "cache" / "instagram_connection.json"
 INBOX_FILE = settings.uploads_dir / "cache" / "instagram_inbox.json"
@@ -812,30 +813,88 @@ async def send_dm(recipient_id: str, message: str) -> dict[str, Any]:
     return data
 
 
-async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
-    """Send a map (or other) image as the next bubble after the text."""
+async def _upload_message_image(image_url: str) -> str:
+    """Upload a reusable image to Meta; returns attachment_id."""
     conn = _require_connection()
     page_id = conn["page_id"]
     url = str(image_url or "").strip()
-    if not url.startswith("https://"):
-        raise InstagramError("Falta la URL pública de la imagen del mapa")
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            f"{_graph_base()}/{page_id}/messages",
+            f"{_graph_base()}/{page_id}/message_attachments",
             params={"access_token": conn["page_access_token"]},
             json={
-                "recipient": {"id": recipient_id},
                 "message": {
                     "attachment": {
                         "type": "image",
-                        "payload": {"url": url},
+                        "payload": {"url": url, "is_reusable": True},
                     }
-                },
+                }
             },
         )
     data = response.json() if response.content else {}
     if response.status_code >= 400 or data.get("error"):
         err = data.get("error") or {}
+        raise InstagramError(
+            _meta_error_message(err, "No se pudo subir la imagen del mapa"),
+            details=data,
+        )
+    attachment_id = str(data.get("attachment_id") or "").strip()
+    if not attachment_id:
+        raise InstagramError("Meta no devolvió attachment_id del mapa", details=data)
+    return attachment_id
+
+
+async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
+    """Send a Google map image as the next bubble after the text."""
+    conn = _require_connection()
+    page_id = conn["page_id"]
+    url = str(image_url or "").strip()
+    if not url.startswith("https://"):
+        raise InstagramError("Falta la URL pública de la imagen del mapa")
+
+    # Prefer upload+attachment_id (more reliable than Meta re-fetching our URL).
+    attachment_id = ""
+    upload_error: dict[str, Any] | None = None
+    try:
+        attachment_id = await _upload_message_image(url)
+    except InstagramError as exc:
+        upload_error = exc.details if isinstance(exc.details, dict) else {"error": str(exc)}
+
+    payload: dict[str, Any]
+    if attachment_id:
+        payload = {
+            "recipient": {"id": recipient_id},
+            "messaging_type": "RESPONSE",
+            "message": {
+                "attachment": {
+                    "type": "image",
+                    "payload": {"attachment_id": attachment_id},
+                }
+            },
+        }
+    else:
+        payload = {
+            "recipient": {"id": recipient_id},
+            "messaging_type": "RESPONSE",
+            "message": {
+                "attachment": {
+                    "type": "image",
+                    "payload": {"url": url, "is_reusable": True},
+                }
+            },
+        }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{_graph_base()}/{page_id}/messages",
+            params={"access_token": conn["page_access_token"]},
+            json=payload,
+        )
+    data = response.json() if response.content else {}
+    if response.status_code >= 400 or data.get("error"):
+        err = data.get("error") or {}
+        if upload_error:
+            data = {"send_error": data, "upload_error": upload_error}
         raise InstagramError(
             _meta_error_message(err, "No se pudo enviar la imagen del mapa"),
             details=data,
@@ -1043,6 +1102,7 @@ async def send_inbox_reply(
     *,
     source: str = "human",
     map_image_url: str = "",
+    maps_url: str = "",
 ) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
@@ -1051,6 +1111,11 @@ async def send_inbox_reply(
     if not text:
         raise InstagramError("Mensaje vacío")
     image = str(map_image_url or item.get("pending_map_image") or "").strip()
+    open_url = str(maps_url or item.get("pending_maps_url") or "").strip()
+    # Never put a long Google /maps/dir URL in the guest chat.
+    if "google.com/maps/dir" in open_url or "maps.google.com" in open_url:
+        open_url = ""
+    ver_mapa = ver_mapa_message(open_url) if open_url.startswith("https://") else ""
 
     try:
         meta_result: dict[str, Any]
@@ -1058,13 +1123,15 @@ async def send_inbox_reply(
             comment_id = item.get("meta_comment_id")
             if not comment_id:
                 raise InstagramError("Falta meta_comment_id")
-            # Comments cannot attach images; keep a short maps link only if we have bit.ly.
-            meta_result = await reply_to_comment(comment_id, text)
+            # Comments: short "Ver mapa" link only (no image attachment).
+            comment_text = text if not ver_mapa else f"{text}\n\n{ver_mapa}"
+            meta_result = await reply_to_comment(comment_id, comment_text)
+            text = comment_text
         else:
             recipient_id = item.get("author_id") or item.get("peer_id")
             if not recipient_id:
                 raise InstagramError("Falta author_id (IGSID) para DM")
-            # Text first (no URL) so Instagram does not put the map preview on top.
+            # 1) directions text  2) Google map image  3) "Ver mapa" short link
             meta_result = await send_dm(recipient_id, text)
             if image.startswith("https://"):
                 try:
@@ -1081,8 +1148,25 @@ async def send_inbox_reply(
                         }
                     )
                     item["replies"] = replies
+                    item.pop("map_send_error", None)
+                except InstagramError as map_exc:
+                    item["map_send_error"] = str(map_exc)
+                    item["pending_map_image"] = image
+            if ver_mapa:
+                try:
+                    link_meta = await send_dm(recipient_id, ver_mapa)
+                    replies = list(item.get("replies") or [])
+                    replies.append(
+                        {
+                            "text": ver_mapa,
+                            "source": source,
+                            "created_at": _now_iso(),
+                            "meta_message_id": link_meta.get("message_id") or link_meta.get("id") or "",
+                            "is_map_link": True,
+                        }
+                    )
+                    item["replies"] = replies
                 except InstagramError:
-                    # Image failed; do not fall back to a long Google URL in chat.
                     pass
     except InstagramError as exc:
         if item.get("type") == "message" and _is_window_closed_error(exc):
@@ -1106,18 +1190,19 @@ async def send_inbox_reply(
         item["status"] = "replied_deepseek" if source == "deepseek" else "replied_human"
         item["updated_at"] = _now_iso()
         item.pop("pending_map_image", None)
+        item.pop("pending_maps_url", None)
         return upsert_inbox_item(item)
-    # Keep map bubble after the text bubble in local history.
-    if replies and replies[-1].get("is_map"):
-        map_bubble = replies.pop()
-        replies.append(reply)
-        replies.append(map_bubble)
-    else:
-        replies.append(reply)
+    # Order local history: text → map image → Ver mapa link.
+    extras: list[dict[str, Any]] = []
+    while replies and (replies[-1].get("is_map") or replies[-1].get("is_map_link")):
+        extras.insert(0, replies.pop())
+    replies.append(reply)
+    replies.extend(extras)
     item["replies"] = replies
     item["status"] = "replied_deepseek" if source == "deepseek" else "replied_human"
     item["updated_at"] = _now_iso()
     item.pop("pending_map_image", None)
+    item.pop("pending_maps_url", None)
     return upsert_inbox_item(item)
 
 
@@ -1175,6 +1260,7 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
         decision["message"],
         source="deepseek",
         map_image_url=str(decision.get("map_image_url") or ""),
+        maps_url=str(decision.get("maps_url") or ""),
     )
 
 
@@ -1205,10 +1291,15 @@ async def suggest_reply(item_id: str) -> dict[str, Any]:
     item["deepseek_action"] = decision.get("action")
     item["escalation_reason"] = decision.get("reason")
     map_image = str(decision.get("map_image_url") or "").strip()
+    maps_url = str(decision.get("maps_url") or "").strip()
     if map_image.startswith("https://"):
         item["pending_map_image"] = map_image
     else:
         item.pop("pending_map_image", None)
+    if maps_url.startswith("https://") and "google.com/maps/dir" not in maps_url:
+        item["pending_maps_url"] = maps_url
+    else:
+        item.pop("pending_maps_url", None)
     item["updated_at"] = _now_iso()
     upsert_inbox_item(item)
     return decision

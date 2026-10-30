@@ -1,8 +1,9 @@
-"""Turn a long Google Maps URL into a bit.ly link. Never publish the API host."""
+"""Short Google Maps links for Instagram (bit.ly or /api/g/xxxx redirect)."""
 
 from __future__ import annotations
 
 import json
+import secrets
 from urllib.parse import urlparse
 
 import httpx
@@ -57,8 +58,41 @@ def _is_bitly(url: str) -> bool:
     return host == "bit.ly" or host == "bitly.com" or host.endswith(".bitly.com")
 
 
+def _public_short_origin() -> str:
+    redirect = str(settings.meta_redirect_uri or "").strip()
+    parsed = urlparse(redirect)
+    if parsed.scheme == "https" and parsed.netloc and "localhost" not in parsed.netloc.lower():
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return "https://api.blackcathostal.com"
+
+
+def create_maps_redirect(url: str) -> str:
+    """Store a short /api/g/xxxx link that 302-redirects to Google Maps."""
+    target = str(url or "").strip()
+    if not target.startswith("https://") or not _maps_host(target):
+        return ""
+    store = _load()
+    for code, saved in store.items():
+        if saved == target and 4 <= len(code) <= 8:
+            return f"{_public_short_origin()}/api/g/{code}"
+    code = ""
+    for _ in range(12):
+        candidate = secrets.token_hex(3)  # 6 chars
+        if candidate not in store:
+            code = candidate
+            break
+    if not code:
+        return ""
+    store[code] = target
+    path = _store_path()
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(path)
+    return f"{_public_short_origin()}/api/g/{code}"
+
+
 def shorten_url(url: str) -> str:
-    """Return a bit.ly link. An empty string means the caption must not show a URL."""
+    """Prefer bit.ly; otherwise a short /api/g/ redirect that opens Google Maps."""
     target = str(url or "").strip()
     if _is_bitly(target):
         return target
@@ -69,30 +103,29 @@ def shorten_url(url: str) -> str:
     if _is_bitly(saved):
         return saved
     token = (settings.bitly_access_token or "").strip()
-    if not token:
-        return ""
-    try:
-        response = httpx.post(
-            "https://api-ssl.bitly.com/v4/shorten",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={"long_url": target, "domain": "bit.ly"},
-            timeout=12.0,
-        )
-        response.raise_for_status()
-        link = str(response.json().get("link") or "")
-    except (httpx.HTTPError, ValueError):
-        return ""
-    if not _is_bitly(link):
-        return ""
-    cached[target] = link
-    path = _bitly_path()
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(cached, ensure_ascii=False), encoding="utf-8")
-    temporary.replace(path)
-    return link
+    if token:
+        try:
+            response = httpx.post(
+                "https://api-ssl.bitly.com/v4/shorten",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={"long_url": target, "domain": "bit.ly"},
+                timeout=12.0,
+            )
+            response.raise_for_status()
+            link = str(response.json().get("link") or "")
+        except (httpx.HTTPError, ValueError):
+            link = ""
+        if _is_bitly(link):
+            cached[target] = link
+            path = _bitly_path()
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(cached, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(path)
+            return link
+    return create_maps_redirect(target)
 
 
 def resolve_short_link(code: str) -> str:
@@ -103,3 +136,15 @@ def resolve_short_link(code: str) -> str:
     if target.startswith("https://") and _maps_host(target):
         return target
     return ""
+
+
+def ver_mapa_message(maps_url: str, *, language: str = "es") -> str:
+    """Short tap target for Instagram: label + clickable short URL."""
+    url = str(maps_url or "").strip()
+    if not url.startswith("https://"):
+        return ""
+    if language == "en":
+        return f"Open map\n{url}"
+    if language == "pt":
+        return f"Ver mapa\n{url}"
+    return f"Ver mapa\n{url}"

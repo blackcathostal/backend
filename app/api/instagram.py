@@ -34,6 +34,7 @@ router = APIRouter(prefix="/instagram", tags=["instagram"])
 class ReplyBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     map_image_url: str = ""
+    maps_url: str = ""
 
 
 class GoogleMapsKeyBody(BaseModel):
@@ -232,6 +233,7 @@ async def reply_inbox_item(
             body.message,
             source="human",
             map_image_url=body.map_image_url or "",
+            maps_url=body.maps_url or "",
         )
     except ig.InstagramConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

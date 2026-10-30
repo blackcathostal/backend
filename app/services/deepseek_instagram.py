@@ -470,9 +470,9 @@ async def _run_reply_loop(
                 map_image_url = str(route_reply.get("map_image_url") or "").strip()
                 maps_url = str(route_reply.get("maps_url") or "").strip()
             reply_message = apply_time_greeting(reply_message, is_follow_up=is_follow_up)
-            # Never leave a raw Google Maps URL in the guest text (IG puts the preview on top).
+            # Never leave a raw Google Maps /maps/dir URL in the guest text (IG puts preview on top).
             reply_message = re.sub(
-                r"https?://(?:www\.)?(?:google\.com/maps|maps\.google\.com)\S*",
+                r"https?://(?:www\.)?(?:google\.com/maps|maps\.googleapis\.com|maps\.google\.com|goo\.gl/maps|maps\.app\.goo\.gl)\S*",
                 "",
                 reply_message or "",
             )
