@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import datetime
@@ -12,10 +13,19 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.services.instagram_knowledge import DEEPSEEK_TOOLS
+from app.services.instagram_knowledge import DEEPSEEK_TOOLS, hostel_info_dict
 from app.services.mcp_sources import call_reply_tool
 
 SANTIAGO = ZoneInfo("America/Santiago")
+REPLY_LOOP_TIMEOUT_SECONDS = 70.0
+_RESERVATION_RE = re.compile(
+    r"("
+    r"reserv(?:a|ar|ame|arme|anos|arte|aste|astes|ó|o|amos|aron)?"
+    r"|booking|book(?:ing|ed|\s*me)?"
+    r"|hacer\s+una\s+reserva|quiero\s+reservar|necesito\s+reservar"
+    r")",
+    re.IGNORECASE,
+)
 
 
 class DeepSeekConfigError(Exception):
@@ -398,6 +408,50 @@ def _guest_turn(
     return "\n".join(lines)
 
 
+def _looks_like_reservation(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample:
+        return False
+    return bool(_RESERVATION_RE.search(sample))
+
+
+def _reservation_whatsapp_reply(
+    db: Session,
+    *,
+    inbound_text: str,
+    is_follow_up: bool,
+) -> dict[str, Any]:
+    """Fast path: never hang on DeepSeek when the guest asks to book."""
+    info = hostel_info_dict(db)
+    whatsapp = str(info.get("whatsapp_url") or "").strip() or "https://wa.me/56949105984"
+    sample = (inbound_text or "").lower()
+    if any(token in sample for token in ("please", "book", "booking", "reserve", "room")):
+        message = (
+            f"To confirm a booking, please write us on WhatsApp {whatsapp} "
+            "with your dates and how many guests. We reply there quickly."
+        )
+    elif any(token in sample for token in ("reserva", "reservar", "quarto", "hóspedes", "hospedes")):
+        # Spanish default; also covers casual Portuguese/Spanish mix.
+        message = (
+            f"Para reservar escríbenos por WhatsApp {whatsapp} "
+            "con las fechas y la cantidad de personas. Ahí te confirmamos cupo."
+        )
+    else:
+        message = (
+            f"Para reservar escríbenos por WhatsApp {whatsapp} "
+            "con las fechas y la cantidad de personas. Ahí te confirmamos cupo."
+        )
+    message = apply_time_greeting(message, is_follow_up=is_follow_up)
+    return {
+        "action": "reply",
+        "message": message,
+        "reason": "reservation_whatsapp",
+        "model": "rule:reservation",
+        "map_image_url": "",
+        "maps_url": "",
+    }
+
+
 async def _run_reply_loop(
     *,
     db: Session,
@@ -409,8 +463,8 @@ async def _run_reply_loop(
 ) -> dict[str, Any]:
     route_reply: dict[str, Any] | None = None
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        for _ in range(6):
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        for _ in range(4):
             response = await client.post(
                 f"{base}/chat/completions",
                 headers=headers,
@@ -447,7 +501,16 @@ async def _run_reply_loop(
                     fn = call.get("function") or {}
                     name = fn.get("name") or ""
                     args = _parse_tool_args(fn.get("arguments"))
-                    result = await call_reply_tool(name, args)
+                    try:
+                        result = await asyncio.wait_for(
+                            call_reply_tool(name, args),
+                            timeout=35.0,
+                        )
+                    except asyncio.TimeoutError:
+                        result = {
+                            "ok": False,
+                            "error": f"La tool {name} tardó demasiado.",
+                        }
                     if (
                         name == "get_directions_from_hostel"
                         and isinstance(result, dict)
@@ -525,13 +588,19 @@ async def generate_instagram_reply(
     thread_history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Return {action, message, reason, model} using DeepSeek + knowledge tools."""
-    base, model, headers = _require_deepseek()
     prior = [
         turn
         for turn in (thread_history or [])
         if (turn.get("content") or "").strip() and turn.get("role") in {"user", "assistant"}
     ]
     is_follow_up = bool(prior)
+    if _looks_like_reservation(inbound_text):
+        return _reservation_whatsapp_reply(
+            db,
+            inbound_text=inbound_text,
+            is_follow_up=is_follow_up,
+        )
+    base, model, headers = _require_deepseek()
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt_for_reply(is_follow_up=is_follow_up)},
     ]
@@ -567,14 +636,22 @@ async def generate_instagram_reply(
             "\n\nEsto es una continuación del hilo. No saludes otra vez y no repitas "
             "la información que ya diste arriba; responde solo a este mensaje nuevo."
         )
-    return await _run_reply_loop(
-        db=db,
-        messages=messages,
-        base=base,
-        model=model,
-        headers=headers,
-        is_follow_up=is_follow_up,
-    )
+    try:
+        return await asyncio.wait_for(
+            _run_reply_loop(
+                db=db,
+                messages=messages,
+                base=base,
+                model=model,
+                headers=headers,
+                is_follow_up=is_follow_up,
+            ),
+            timeout=REPLY_LOOP_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise DeepSeekError(
+            "DeepSeek tardó demasiado y se canceló para no dejar el inbox pegado"
+        ) from exc
 
 
 async def generate_test_chat(
@@ -584,7 +661,6 @@ async def generate_test_chat(
     history: list[dict[str, str]],
 ) -> dict[str, Any]:
     """Same reply pipeline as Instagram/Facebook, with prior turns for testing."""
-    base, model, headers = _require_deepseek()
     item_type = "dm" if channel == "instagram" else "comment"
     channel_label = "Instagram" if channel == "instagram" else "Facebook"
     turns = [turn for turn in history if (turn.get("content") or "").strip()]
@@ -592,6 +668,16 @@ async def generate_test_chat(
         raise DeepSeekError("El último mensaje debe ser del huésped")
     prior = turns[:-1]
     is_follow_up = bool(prior)
+    inbound_text = turns[-1]["content"]
+    if _looks_like_reservation(inbound_text):
+        result = _reservation_whatsapp_reply(
+            db,
+            inbound_text=inbound_text,
+            is_follow_up=is_follow_up,
+        )
+        result["channel"] = channel
+        return result
+    base, model, headers = _require_deepseek()
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -609,19 +695,27 @@ async def generate_test_chat(
             messages.append({"role": "user", "content": _guest_turn(item_type, text)})
         elif role == "assistant":
             messages.append(_assistant_turn(text))
-    messages.append({"role": "user", "content": _guest_turn(item_type, turns[-1]["content"])})
+    messages.append({"role": "user", "content": _guest_turn(item_type, inbound_text)})
     if is_follow_up:
         messages[-1]["content"] += (
             "\n\nEsto es una continuación del hilo. No saludes otra vez y no repitas "
             "la información que ya diste arriba; responde solo a este mensaje nuevo."
         )
-    result = await _run_reply_loop(
-        db=db,
-        messages=messages,
-        base=base,
-        model=model,
-        headers=headers,
-        is_follow_up=is_follow_up,
-    )
+    try:
+        result = await asyncio.wait_for(
+            _run_reply_loop(
+                db=db,
+                messages=messages,
+                base=base,
+                model=model,
+                headers=headers,
+                is_follow_up=is_follow_up,
+            ),
+            timeout=REPLY_LOOP_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise DeepSeekError(
+            "DeepSeek tardó demasiado y se canceló para no dejar el chat pegado"
+        ) from exc
     result["channel"] = channel
     return result
