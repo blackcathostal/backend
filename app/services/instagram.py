@@ -71,15 +71,20 @@ WINDOW_CLOSED_MESSAGE = (
 
 def _meta_error_message(err: dict[str, Any], fallback: str) -> str:
     raw = str(err.get("message") or fallback or "").strip()
-    code = err.get("code")
     sample = raw.lower()
+    # Do NOT treat bare Graph codes 10/100 as window-closed — those are also
+    # used for invalid attachments and would hide real map-send failures.
     if (
-        code in {10, 100}
-        or "fuera del período" in sample
+        "fuera del período" in sample
         or "outside of the allowed window" in sample
         or "outside the allowed window" in sample
-        or "human agent" in sample
+        or ("(#10)" in sample and "window" in sample)
+        or "human agent tagging is being deprecated" in sample
     ):
+        return WINDOW_CLOSED_MESSAGE
+    code = err.get("code")
+    sub = err.get("error_subcode")
+    if code == 10 and sub in {2018278, 2534022, 1545041}:
         return WINDOW_CLOSED_MESSAGE
     return raw or fallback
 
@@ -927,31 +932,55 @@ async def send_dm_image(recipient_id: str, image_url: str) -> dict[str, Any]:
     if not url.startswith("https://"):
         raise InstagramError("Falta la URL pública de la imagen del mapa")
 
-    attachment_id = await _upload_message_image(url)
-    payload = {
-        "recipient": {"id": recipient_id},
-        "messaging_type": "RESPONSE",
-        "message": {
-            "attachment": {
-                "type": "image",
-                "payload": {"attachment_id": attachment_id},
+    attempts: list[dict[str, Any]] = []
+    # 1) Public URL — Instagram Messaging supports image URL payloads reliably.
+    attempts.append(
+        {
+            "recipient": {"id": recipient_id},
+            "message": {
+                "attachment": {
+                    "type": "image",
+                    "payload": {"url": url, "is_reusable": True},
+                }
+            },
+        }
+    )
+    # 2) Multipart upload → attachment_id (when Meta cannot fetch our URL).
+    try:
+        attachment_id = await _upload_message_image(url)
+        attempts.append(
+            {
+                "recipient": {"id": recipient_id},
+                "message": {
+                    "attachment": {
+                        "type": "image",
+                        "payload": {"attachment_id": attachment_id},
+                    }
+                },
             }
-        },
-    }
+        )
+    except InstagramError as exc:
+        attempts.append({"_upload_failed": str(exc), "_upload_details": exc.details})
+
+    last_error: dict[str, Any] = {}
     async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            f"{_graph_base()}/{page_id}/messages",
-            params={"access_token": conn["page_access_token"]},
-            json=payload,
-        )
-    data = response.json() if response.content else {}
-    if response.status_code >= 400 or data.get("error"):
-        err = data.get("error") or {}
-        raise InstagramError(
-            _meta_error_message(err, "No se pudo enviar la imagen del mapa"),
-            details=data,
-        )
-    return data
+        for payload in attempts:
+            if "_upload_failed" in payload:
+                continue
+            response = await client.post(
+                f"{_graph_base()}/{page_id}/messages",
+                params={"access_token": conn["page_access_token"]},
+                json=payload,
+            )
+            data = response.json() if response.content else {}
+            if response.status_code < 400 and not data.get("error"):
+                return data
+            last_error = data
+    err = (last_error.get("error") or {}) if isinstance(last_error, dict) else {}
+    raise InstagramError(
+        _meta_error_message(err, "No se pudo enviar la imagen del mapa"),
+        details=last_error,
+    )
 
 
 async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
@@ -1203,7 +1232,13 @@ async def send_inbox_reply(
                     item["replies"] = replies
                     item.pop("map_send_error", None)
                 except InstagramError as map_exc:
-                    item["map_send_error"] = str(map_exc)
+                    # Keep the raw Meta detail — never mask map failures as 24h-window.
+                    detail = ""
+                    if isinstance(map_exc.details, dict):
+                        err = map_exc.details.get("error") or map_exc.details
+                        if isinstance(err, dict):
+                            detail = str(err.get("message") or "")
+                    item["map_send_error"] = detail or str(map_exc)
                     item["pending_map_image"] = image
     except InstagramError as exc:
         if item.get("type") == "message" and _is_window_closed_error(exc):
