@@ -62,11 +62,11 @@ Estilo:
   dato + un beneficio real (Barrio Brasil, desayuno, ubicación, ambiente boutique) + cierre suave
   a WhatsApp si encaja. Solo hechos de las tools; no inventes ofertas.
 - Evita plantillas (“Estimado huésped”, “Quedamos atentos”, listas largas). Máximo 1 emoji.
-- Contesta SIEMPRE en el mismo idioma de la pregunta del huésped.
-- Idioma (OBLIGATORIO): por defecto español. Nombres de lugares en inglés o mixtos
-  (Costanera Center, Sky Costanera, Mall Plaza, Uber, etc.) NO cambian el idioma:
-  si el resto del mensaje es español o solo es el nombre del lugar, responde en español.
-  Nunca contestes en francés, alemán u otro idioma salvo que el huésped escriba claramente en ese idioma.
+- Idioma (OBLIGATORIO): detecta el idioma por la charla completa (saludos, palabras, hilo).
+  Responde SIEMPRE en ese idioma: español, inglés, portugués, francés, alemán u otro.
+  Si el último mensaje es corto (“sí”, “ok”, “por favor”, “dale”), mantén el idioma del hilo.
+  Nombres de lugares (Costanera Center, Uber, etc.) NO cambian el idioma.
+  Nunca mezcles idiomas en la misma respuesta.
 - Respuestas concisas para redes (máx. ~520 caracteres). Rutas hasta 800. Saludos: máx. ~120.
 
 Datos (OBLIGATORIO):
@@ -74,7 +74,11 @@ Datos (OBLIGATORIO):
 - Check-in, check-out, horario de desayuno, estacionamiento, WhatsApp, dirección → llama get_hostel_info.
 - Otras dudas del hostal → llama search_common_answers y responde con el campo answer, en el idioma del huésped.
 - Si la respuesta no está completa en las preguntas frecuentes ni en la info del hostal, llama search_web. Si necesitas el detalle de un resultado, llama read_web_page con esa URL. No uses la web para inventar precios de habitación.
-- Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel. Prioriza metro, micro/bus o auto; a pie solo si no hay metro/bus. Usa replies casi textual, una sola vez, sin repetir. Cierra con “Te lo indico en el siguiente mapa.” sin pegar ninguna URL (la imagen del mapa se envía aparte). No digas Google Maps. No reescribas la ruta ni mandes a WhatsApp.
+- Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel.
+  Prioriza metro, micro/bus o auto; a pie solo si no hay metro/bus. Usa los hechos de la tool
+  (replies.es / replies.en / replies.pt o summary) y redáctalos en el idioma del huésped,
+  una sola vez. Cierra pidiendo el mapa siguiente sin pegar URLs. No digas Google Maps.
+  No reescribas inventando calles ni mandes a WhatsApp.
 - Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
 - Los precios son referenciales en CLP; indica que pueden variar por temporada.
 - Reserva / reservar / “reservame” / “me reservaste” / “quiero reservar” / “hazme una reserva”
@@ -252,8 +256,8 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Si hay consulta real (no un simple hola): vende con calidez, destaca un beneficio "
         "real (Barrio Brasil, desayuno, ubicación, ambiente boutique) e invita suave a "
         "WhatsApp. En un saludo solo, sé humano y corto. Sin inventar promociones. "
-        "Lugares con nombre en inglés (Costanera Center, etc.) = español si el huésped "
-        "no escribió claramente en otro idioma. Nunca contestes en francés sin que lo pidan. "
+        "Idioma: saludo + palabras de toda la charla; responde solo en ese idioma "
+        "(es/en/pt/fr/de/u otro). «sí/por favor» hereda el idioma del hilo. No mezcles. "
         "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
         "Contesta en el idioma del huésped usando solo datos que devuelvan las tools. "
         "No repitas instrucciones internas."
@@ -342,35 +346,151 @@ def _guest_raw_text(content: str) -> str:
     return guest.strip()
 
 
-def _detect_guest_language(sample: str) -> str:
-    text = (sample or "").lower().strip()
-    if not text:
-        return "es"
-    # Short Spanish yes / courtesy — never treat "por favor" as Portuguese.
+_SHORT_AFFIRMATION_RE = re.compile(
+    r"(?is)^\s*("
+    r"sí|si|dale|ok|okay|claro|por\s+favor|si\s+por\s+favor|sí\s+por\s+favor|"
+    r"yes|please|yes\s+please|yep|yeah|"
+    r"sim|isso|pode|"
+    r"oui|d'accord|"
+    r"ja|genau"
+    r")\s*[!?.…]*\s*$"
+)
+
+_LANG_SIGNAL_PATTERNS: list[tuple[str, re.Pattern[str], int]] = [
+    (
+        "en",
+        re.compile(
+            r"\b(how|where|what|when|which|please|thanks|thank you|hello|hi|hey|"
+            r"room|rooms|price|prices|available|booking|book|airport|directions|"
+            r"from the hotel|from the hostel|can you|i want|i need|good morning|"
+            r"good afternoon|good evening)\b",
+            re.I,
+        ),
+        2,
+    ),
+    (
+        "pt",
+        re.compile(
+            r"\b(onde|chegar|caminho|você|voce|obrigad[oa]|tudo bem|quarto|quartos|"
+            r"preço|preco|disponível|disponivel|reserva|aeroporto|bom dia|boa tarde|"
+            r"boa noite|olá|oi|gostaria|vocês|voces)\b",
+            re.I,
+        ),
+        2,
+    ),
+    (
+        "fr",
+        re.compile(
+            r"\b(bonjour|bonsoir|salut|merci|où|comment|chambre|prix|aéroport|"
+            r"aeroport|je voudrais|disponible)\b",
+            re.I,
+        ),
+        2,
+    ),
+    (
+        "de",
+        re.compile(
+            r"\b(hallo|guten tag|guten morgen|guten abend|danke|wo|wie|zimmer|"
+            r"preis|flughafen|bitte|verfügbar|verfuegbar)\b",
+            re.I,
+        ),
+        2,
+    ),
+    (
+        "es",
+        re.compile(
+            r"\b(hola|buenas|buenos|dónde|donde|están|estan|ubicad|cómo|como|llegar|"
+            r"aeropuerto|habitaci[oó]n|precio|precios|disponible|reserva|reservar|"
+            r"gracias|por favor|quiero|necesito|buenos d[ií]as|buenas tardes|"
+            r"buenas noches|ustedes)\b",
+            re.I,
+        ),
+        2,
+    ),
+]
+
+
+def _score_language(sample: str) -> dict[str, int]:
+    text = (sample or "").strip()
+    scores = {"es": 0, "en": 0, "pt": 0, "fr": 0, "de": 0}
+    if not text or _SHORT_AFFIRMATION_RE.match(text):
+        return scores
+    lower = text.lower()
     if re.fullmatch(
-        r"(sí|si|dale|ok|okay|claro|por\s+favor|si\s+por\s+favor|sí\s+por\s+favor|"
-        r"yes|please|yes\s+please)[!?.…]*",
+        r"(?is)\s*(hello|hi|hey|good morning|good afternoon|good evening)\s*[!?.…]*\s*",
         text,
     ):
-        return "es"
-    if re.search(
-        r"\b(how|where|walk|directions|from the hotel|from the hostel|please|can you)\b",
+        scores["en"] += 3
+        return scores
+    if (
+        re.fullmatch(r"(?is)\s*(oi|olá|ola|bom dia|boa tarde|boa noite)\s*[!?.…]*\s*", text)
+        and "hola" not in lower
+    ):
+        scores["pt"] += 3
+        return scores
+    if re.fullmatch(r"(?is)\s*(bonjour|bonsoir|salut)\s*[!?.…]*\s*", text):
+        scores["fr"] += 3
+        return scores
+    if re.fullmatch(r"(?is)\s*(hallo|guten tag|guten morgen|guten abend)\s*[!?.…]*\s*", text):
+        scores["de"] += 3
+        return scores
+    if re.fullmatch(
+        r"(?is)\s*(hola+|holi+|buenas|buenos d[ií]as|buenas tardes|buenas noches)\s*[!?.…]*\s*",
         text,
     ):
-        return "en"
-    # Clear Portuguese only (not words shared with Spanish like "por favor").
-    if re.search(r"\b(onde|chegar|caminho|você|voce|obrigad[oa]|tudo bem|do hostel)\b", text):
-        return "pt"
-    if re.search(
-        r"\b(dónde|donde|están|estan|ubicad|cómo|como|llegar|aeropuerto|metro|gracias)\b",
-        text,
-    ):
-        return "es"
-    return "es"
+        scores["es"] += 3
+        return scores
+    for lang, pattern, weight in _LANG_SIGNAL_PATTERNS:
+        hits = pattern.findall(lower)
+        if hits:
+            scores[lang] += weight * len(hits)
+    if re.search(r"\b(não|nao|você|voce|obrigad|também|tambem)\b", lower):
+        scores["pt"] += 2
+    if re.search(r"[áéíóúñ¿¡]", lower):
+        scores["es"] += 1
+    return scores
+
+
+def _detect_guest_language(sample: str) -> str | None:
+    """Best language for one bubble, or None if too short/ambiguous."""
+    scores = _score_language(sample)
+    best_lang, best_score = max(scores.items(), key=lambda item: item[1])
+    if best_score <= 0:
+        return None
+    return best_lang
+
+
+def _conversation_language(guest_turns: list[str], *, default: str = "es") -> str:
+    """Detect language from the whole guest chat (greetings + words + thread)."""
+    turns = [str(t or "").strip() for t in guest_turns if str(t or "").strip()]
+    if not turns:
+        return default
+    totals = {"es": 0, "en": 0, "pt": 0, "fr": 0, "de": 0}
+    last_clear: str | None = None
+    for index, turn in enumerate(turns):
+        if _SHORT_AFFIRMATION_RE.match(turn):
+            continue
+        scores = _score_language(turn)
+        weight = 1 + index
+        for lang, score in scores.items():
+            totals[lang] += score * weight
+        detected = _detect_guest_language(turn)
+        if detected:
+            last_clear = detected
+    latest = turns[-1]
+    latest_lang = _detect_guest_language(latest)
+    if latest_lang:
+        return latest_lang
+    if _SHORT_AFFIRMATION_RE.match(latest) and last_clear:
+        return last_clear
+    best_lang, best_score = max(totals.items(), key=lambda item: item[1])
+    if best_score > 0:
+        return best_lang
+    return last_clear or default
 
 
 def _route_language(messages: list[dict[str, Any]]) -> str:
-    """Language for map/route copy: follow the thread, default Spanish."""
+    """Language for map/route copy: follow the whole guest thread."""
     guest_turns: list[str] = []
     for item in messages:
         if item.get("role") != "user":
@@ -378,20 +498,7 @@ def _route_language(messages: list[dict[str, Any]]) -> str:
         raw = _guest_raw_text(str(item.get("content") or ""))
         if raw:
             guest_turns.append(raw)
-    if not guest_turns:
-        return "es"
-    latest = _detect_guest_language(guest_turns[-1])
-    # Affirmations like "Si por favor" inherit the previous guest language.
-    if re.fullmatch(
-        r"(?is)(sí|si|dale|ok|okay|claro|por\s+favor|si\s+por\s+favor|sí\s+por\s+favor|"
-        r"yes|please|yes\s+please|sim|isso)[!?.…]*",
-        guest_turns[-1].strip(),
-    ):
-        for prior in reversed(guest_turns[:-1]):
-            lang = _detect_guest_language(prior)
-            if lang:
-                return lang
-    return latest
+    return _conversation_language(guest_turns, default="es")
 
 
 def _prepared_route_reply(
@@ -399,13 +506,19 @@ def _prepared_route_reply(
     messages: list[dict[str, Any]],
     *,
     is_follow_up: bool = False,
+    model_message: str = "",
 ) -> str:
     replies = route.get("replies") if isinstance(route.get("replies"), dict) else {}
     language = _route_language(messages)
-    text = str(replies.get(language) or replies.get("es") or "").strip()
+    # Canned es/en/pt only. Other languages keep DeepSeek's wording.
+    if language in {"es", "en", "pt"}:
+        text = str(replies.get(language) or "").strip()
+    else:
+        text = (model_message or "").strip()
+    if not text:
+        text = str(replies.get("es") or model_message or "").strip()
     if not text:
         return ""
-    # Strip leftover Google branding / URLs if an old template slipped through.
     text = re.sub(
         r"(?im)^(?:ver en google maps|see on google maps|ver no google maps)\s*$",
         "",
@@ -419,6 +532,8 @@ def _prepared_route_reply(
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if is_follow_up:
         return strip_opening_greeting(text)
+    if language not in {"es", "en", "pt"}:
+        return text
     if re.search(
         r"^\s*(buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|good\s+morning|"
         r"good\s+afternoon|good\s+evening|bom\s+dia|boa\s+tarde|boa\s+noite|hola|hi[!]|ol[aá])\b",
@@ -468,11 +583,11 @@ def _guest_turn(
         f"Usuario: @{author_username or 'huesped'}",
         f"Mensaje del huésped:\n{(text or '').strip() or '(vacío)'}",
         "",
-        "Detecta el idioma del mensaje y responde en ese mismo idioma. "
-        "Si solo nombran un lugar de Santiago (ej. Costanera Center) o escriben en español "
-        "con un nombre en inglés, responde en español y usa get_directions_from_hostel. "
-        "Si dicen «sí», «si por favor» o «dale» tras una pregunta tuya en español, sigue en español. "
-        "Nunca mezcles portugués/francés. Nunca respondas en otro idioma no pedido. "
+        "Detecta el idioma por TODA la charla (saludos y palabras anteriores + este mensaje) "
+        "y responde solo en ese idioma (español, inglés, portugués, francés, alemán u otro). "
+        "Si el mensaje es corto («sí», «ok», «por favor»), hereda el idioma del hilo. "
+        "Nombres de lugares en inglés no cambian el idioma. Nunca mezcles idiomas. "
+        "Si preguntan ubicación o cómo llegar, usa get_directions_from_hostel. "
         "Busca en preguntas frecuentes e info del hostal; precios/tipos de habitación "
         "solo en preguntas frecuentes. "
         "Si solo saludó (hola/hi), responde humano y breve; no vendas ni listes beneficios. "
@@ -539,17 +654,21 @@ def _human_greeting_reply(
             "map_image_url": "",
             "maps_url": "",
         }
-    sample = (inbound_text or "").strip().lower()
-    # Use word boundaries — "ola" must NOT match inside Spanish "hola".
-    if re.search(
-        r"\b(hello|hi|hey|good\s+morning|good\s+afternoon|good\s+evening)\b",
-        sample,
-    ):
+    prior_texts = [
+        str(turn.get("content") or "")
+        for turn in (prior or [])
+        if turn.get("role") == "user"
+    ]
+    lang = _conversation_language([*prior_texts, inbound_text], default="es")
+    if lang == "en":
         message = "Hey! How can I help you with your stay at Black Cat?"
-    elif re.search(r"\b(bom\s+dia|boa\s+tarde|boa\s+noite|ol[áa])\b", sample) and "hola" not in sample:
+    elif lang == "pt":
         message = "Oi! Em que posso te ajudar com a estadia no Black Cat?"
+    elif lang == "fr":
+        message = "Bonjour ! Comment puis-je vous aider pour votre séjour au Black Cat ?"
+    elif lang == "de":
+        message = "Hallo! Wie kann ich Ihnen bei Ihrem Aufenthalt im Black Cat helfen?"
     else:
-        # Default Spanish for hola / buenas / anything unclear.
         message = "¡Hola! ¿En qué te puedo ayudar?"
     return {
         "action": "reply",
@@ -566,17 +685,42 @@ def _reservation_whatsapp_reply(
     *,
     inbound_text: str,
     is_follow_up: bool,
+    prior: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Fast path: never hang on DeepSeek when the guest asks to book."""
     info = hostel_info_dict(db)
     whatsapp = str(info.get("whatsapp_url") or "").strip() or "https://wa.me/56949105984"
-    sample = (inbound_text or "").lower()
-    if any(token in sample for token in ("please", "book", "booking", "reserve", "room")):
+    prior_texts = [
+        str(turn.get("content") or "")
+        for turn in (prior or [])
+        if turn.get("role") == "user"
+    ]
+    lang = _conversation_language([*prior_texts, inbound_text], default="es")
+    if lang == "en":
         message = (
             "Perfect — we'd love to host you in Barrio Brasil, steps from the center, "
             "with continental breakfast included. "
             f"Message us on WhatsApp {whatsapp} with your dates and guest count "
             "and we'll lock your room."
+        )
+    elif lang == "pt":
+        message = (
+            "Claro! Vai adorar ficar no Barrio Brasil: localização central, "
+            "clima boutique e café da manhã continental incluído. "
+            f"Escreva no WhatsApp {whatsapp} com datas e quantas pessoas "
+            "e montamos a reserva."
+        )
+    elif lang == "fr":
+        message = (
+            "Avec plaisir ! Vous allez adorer le Barrio Brasil : quartier central, "
+            "ambiance boutique et petit-déjeuner continental inclus. "
+            f"Écrivez-nous sur WhatsApp {whatsapp} avec vos dates et le nombre de personnes."
+        )
+    elif lang == "de":
+        message = (
+            "Klar! Barrio Brasil ist zentral, boutique und inkl. Frühstück. "
+            f"Schreib uns auf WhatsApp {whatsapp} mit Daten und Personenanzahl — "
+            "wir reservieren dort."
         )
     else:
         message = (
@@ -684,6 +828,7 @@ async def _run_reply_loop(
                     route_reply,
                     messages,
                     is_follow_up=is_follow_up,
+                    model_message=reply_message,
                 )
                 if prepared:
                     reply_message = prepared
@@ -751,6 +896,7 @@ async def generate_instagram_reply(
             db,
             inbound_text=inbound_text,
             is_follow_up=is_follow_up,
+            prior=prior,
         )
     base, model, headers = _require_deepseek()
     messages: list[dict[str, Any]] = [
@@ -834,6 +980,7 @@ async def generate_test_chat(
             db,
             inbound_text=inbound_text,
             is_follow_up=is_follow_up,
+            prior=prior,
         )
         result["channel"] = channel
         return result
