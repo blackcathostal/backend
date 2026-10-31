@@ -455,14 +455,50 @@ def _looks_like_reservation(text: str) -> bool:
 
 
 def _looks_like_greeting_only(text: str) -> bool:
+    """True for one or several greeting bubbles sent in a burst (hola + buenas)."""
     sample = (text or "").strip()
-    if not sample or len(sample) > 40:
+    if not sample or len(sample) > 120:
         return False
-    return bool(_GREETING_ONLY_RE.match(sample))
+    lines = [line.strip() for line in sample.splitlines() if line.strip()]
+    if not lines:
+        return False
+    return all(bool(_GREETING_ONLY_RE.match(line)) for line in lines)
 
 
-def _human_greeting_reply(*, inbound_text: str, is_follow_up: bool) -> dict[str, Any]:
+def _already_offered_help(prior: list[dict[str, Any]] | None) -> bool:
+    for turn in reversed(prior or []):
+        if turn.get("role") != "assistant":
+            continue
+        text = (turn.get("content") or "").strip().lower()
+        return any(
+            phrase in text
+            for phrase in (
+                "en qué te puedo ayudar",
+                "en que te puedo ayudar",
+                "how can i help",
+                "em que posso",
+            )
+        )
+    return False
+
+
+def _human_greeting_reply(
+    *,
+    inbound_text: str,
+    is_follow_up: bool,
+    prior: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Short human hello — never dump a sales brochure on a bare greeting."""
+    # People often send "Hola" then "Buenas" as separate bubbles: answer once only.
+    if is_follow_up and _already_offered_help(prior):
+        return {
+            "action": "skip",
+            "message": "",
+            "reason": "duplicate_greeting",
+            "model": "rule:greeting",
+            "map_image_url": "",
+            "maps_url": "",
+        }
     sample = (inbound_text or "").strip().lower()
     # Use word boundaries — "ola" must NOT match inside Spanish "hola".
     if re.search(
@@ -475,8 +511,6 @@ def _human_greeting_reply(*, inbound_text: str, is_follow_up: bool) -> dict[str,
     else:
         # Default Spanish for hola / buenas / anything unclear.
         message = "¡Hola! ¿En qué te puedo ayudar?"
-    if is_follow_up:
-        message = strip_opening_greeting(message) or "¿En qué te puedo ayudar?"
     return {
         "action": "reply",
         "message": message,
@@ -668,6 +702,7 @@ async def generate_instagram_reply(
         return _human_greeting_reply(
             inbound_text=inbound_text,
             is_follow_up=is_follow_up,
+            prior=prior,
         )
     if _looks_like_reservation(inbound_text):
         return _reservation_whatsapp_reply(
@@ -748,6 +783,7 @@ async def generate_test_chat(
         result = _human_greeting_reply(
             inbound_text=inbound_text,
             is_follow_up=is_follow_up,
+            prior=prior,
         )
         result["channel"] = channel
         return result

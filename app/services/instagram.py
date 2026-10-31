@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 import threading
 import time
@@ -27,6 +29,12 @@ INBOX_FILE = settings.uploads_dir / "cache" / "instagram_inbox.json"
 AUTO_REPLY_FILE = settings.uploads_dir / "cache" / "deepseek_auto_reply.json"
 _inbox_lock = threading.Lock()
 _inbox_cache: dict[str, Any] | None = None
+# Guests type in bursts ("hola" / "si" / "estoy interesado"). Wait after the last
+# bubble, then answer once with everything that arrived together.
+AUTO_REPLY_DEBOUNCE_SECONDS = 8.0
+_auto_reply_debounce_tasks: dict[str, asyncio.Task[Any]] = {}
+_auto_reply_debounce_lock = asyncio.Lock()
+logger = logging.getLogger(__name__)
 
 SCOPES = [
     "pages_show_list",
@@ -1345,57 +1353,181 @@ async def send_inbox_reply(
     return upsert_inbox_item(item)
 
 
+def _thread_debounce_key(item: dict[str, Any]) -> str:
+    return str(item.get("peer_id") or item.get("thread_id") or item.get("id") or "")
+
+
+def _parse_iso(stamp: str | None) -> datetime | None:
+    raw = str(stamp or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _pending_message_burst(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Inbound pending bubbles in this DM that belong to the current typing burst."""
+    if item.get("type") != "message":
+        return [item]
+    related = _related_dm_items(item)
+    last_out: datetime | None = None
+    for row in related:
+        if str(row.get("direction") or "in") == "out":
+            stamp = _parse_iso(row.get("created_at"))
+            if stamp and (last_out is None or stamp > last_out):
+                last_out = stamp
+        for reply in row.get("replies") or []:
+            stamp = _parse_iso(reply.get("created_at"))
+            if stamp and (last_out is None or stamp > last_out):
+                last_out = stamp
+
+    burst: list[dict[str, Any]] = []
+    for row in related:
+        if str(row.get("direction") or "in") != "in":
+            continue
+        if row.get("status") not in {"pending", "batched"}:
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text or text == "[archivo]":
+            continue
+        stamp = _parse_iso(row.get("created_at"))
+        if last_out and stamp and stamp <= last_out:
+            continue
+        burst.append(row)
+    if not burst:
+        return [item] if item.get("status") == "pending" else []
+    burst.sort(key=lambda row: str(row.get("created_at") or ""))
+    # Keep messages that arrived close together (same burst), drop older pending leftovers.
+    window_sec = AUTO_REPLY_DEBOUNCE_SECONDS * 4
+    newest = _parse_iso(burst[-1].get("created_at"))
+    if newest:
+        tight: list[dict[str, Any]] = []
+        for row in reversed(burst):
+            stamp = _parse_iso(row.get("created_at"))
+            if stamp and (newest - stamp).total_seconds() > window_sec:
+                break
+            tight.append(row)
+        burst = list(reversed(tight))
+    return burst or [item]
+
+
+def _combined_burst_text(burst: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for row in burst:
+        text = str(row.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts).strip()
+
+
+async def schedule_auto_reply(item_id: str) -> None:
+    """Debounce auto-reply so multi-bubble typing gets one answer."""
+    item = get_inbox_item(item_id)
+    if not item or item.get("status") != "pending":
+        return
+    key = _thread_debounce_key(item) or item_id
+    async with _auto_reply_debounce_lock:
+        previous = _auto_reply_debounce_tasks.get(key)
+        if previous and not previous.done():
+            previous.cancel()
+        _auto_reply_debounce_tasks[key] = asyncio.create_task(
+            _run_debounced_auto_reply(key, item_id),
+            name=f"ig-auto-reply-{key}",
+        )
+
+
+async def _run_debounced_auto_reply(key: str, item_id: str) -> None:
+    try:
+        await asyncio.sleep(AUTO_REPLY_DEBOUNCE_SECONDS)
+    except asyncio.CancelledError:
+        return
+    try:
+        await run_auto_reply(item_id)
+    except Exception:  # noqa: BLE001 — webhook path already logged via item status
+        logger.exception("Debounced Instagram auto-reply failed for %s", item_id)
+    finally:
+        async with _auto_reply_debounce_lock:
+            current = _auto_reply_debounce_tasks.get(key)
+            if current is asyncio.current_task():
+                _auto_reply_debounce_tasks.pop(key, None)
+
+
 async def run_auto_reply(item_id: str) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
 
-    if item.get("type") == "message":
-        created = item.get("created_at")
-        # Soft 24h check if timestamp parseable as unix-ish ISO; skip if unknown
-        try:
-            if created and "T" in str(created):
-                # leave as soft; Meta enforces window
-                pass
-        except Exception:
-            pass
+    burst = _pending_message_burst(item)
+    if not burst:
+        item["status"] = "skipped"
+        item["escalation_reason"] = "no_pending_burst"
+        item["updated_at"] = _now_iso()
+        return upsert_inbox_item(item)
+
+    latest = burst[-1]
+    inbound = _combined_burst_text(burst) or str(latest.get("text") or "")
+    burst_texts = {str(row.get("text") or "").strip() for row in burst if str(row.get("text") or "").strip()}
 
     try:
         db = SessionLocal()
         try:
-            inbound = item.get("text") or ""
+            history = thread_history_for_reply(latest, inbound_text=inbound)
+            # Drop the burst bubbles from history; they are the current inbound text.
+            trimmed: list[dict[str, str]] = []
+            for turn in history:
+                if (
+                    turn.get("role") == "user"
+                    and str(turn.get("content") or "").strip() in burst_texts
+                ):
+                    continue
+                trimmed.append(turn)
             decision = await generate_instagram_reply(
                 db=db,
                 inbound_text=inbound,
-                item_type=item.get("type") or "message",
-                author_username=item.get("author_username"),
+                item_type=latest.get("type") or item.get("type") or "message",
+                author_username=latest.get("author_username") or item.get("author_username"),
                 person_history=author_channel_history(
-                    author_username=item.get("author_username"),
-                    author_id=item.get("author_id"),
-                    exclude_id=item.get("id"),
+                    author_username=latest.get("author_username") or item.get("author_username"),
+                    author_id=latest.get("author_id") or item.get("author_id"),
+                    exclude_id=latest.get("id"),
                 ),
-                thread_history=thread_history_for_reply(item, inbound_text=inbound),
+                thread_history=trimmed,
             )
         finally:
             db.close()
     except (DeepSeekConfigError, DeepSeekError) as exc:
-        item["status"] = "failed"
-        item["escalation_reason"] = str(exc)
-        item["updated_at"] = _now_iso()
-        upsert_inbox_item(item)
+        for row in burst:
+            row["status"] = "failed"
+            row["escalation_reason"] = str(exc)
+            row["updated_at"] = _now_iso()
+            upsert_inbox_item(row)
         raise
 
+    # Mark earlier bubbles in the same burst so they do not fire another reply.
+    for row in burst[:-1]:
+        row["status"] = "batched"
+        row["escalation_reason"] = "merged_burst"
+        row["updated_at"] = _now_iso()
+        upsert_inbox_item(row)
+
+    if decision.get("action") == "skip":
+        latest["status"] = "skipped"
+        latest["escalation_reason"] = decision.get("reason") or "skip"
+        latest["updated_at"] = _now_iso()
+        return upsert_inbox_item(latest)
+
     if decision["action"] == "escalate":
-        item["status"] = "needs_human"
-        item["escalation_reason"] = decision.get("reason") or "escalate"
+        latest["status"] = "needs_human"
+        latest["escalation_reason"] = decision.get("reason") or "escalate"
         if decision.get("message"):
-            # optional acknowledgment not auto-sent on escalate
-            item["deepseek_draft"] = decision["message"]
-        item["updated_at"] = _now_iso()
-        return upsert_inbox_item(item)
+            latest["deepseek_draft"] = decision["message"]
+        latest["updated_at"] = _now_iso()
+        return upsert_inbox_item(latest)
 
     return await send_inbox_reply(
-        item_id,
+        str(latest.get("id") or item_id),
         decision["message"],
         source="deepseek",
         map_image_url=str(decision.get("map_image_url") or ""),
@@ -1695,12 +1827,8 @@ async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
         item["author_username"] = username
         item = upsert_inbox_item(item)
     if auto_reply_enabled() and item.get("status") == "pending":
-        try:
-            item = await run_auto_reply(item["id"])
-        except Exception as exc:  # noqa: BLE001 — keep webhook 200
-            item["status"] = "failed"
-            item["escalation_reason"] = str(exc)
-            upsert_inbox_item(item)
+        # Do not reply on every bubble; wait for the guest to finish typing.
+        await schedule_auto_reply(item["id"])
     return item
 
 
@@ -1747,7 +1875,8 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
             )
             if auto_reply_enabled() and item.get("status") == "pending":
                 try:
-                    item = await run_auto_reply(item["id"])
+                    # Comments are usually one shot; still debounce lightly via scheduler.
+                    await schedule_auto_reply(item["id"])
                 except Exception as exc:  # noqa: BLE001
                     item["status"] = "failed"
                     item["escalation_reason"] = str(exc)
