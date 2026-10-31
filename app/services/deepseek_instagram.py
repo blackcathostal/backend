@@ -333,28 +333,65 @@ def _require_deepseek() -> tuple[str, str, dict[str, str]]:
     return base, model, headers
 
 
-def _route_language(messages: list[dict[str, Any]]) -> str:
-    guest = ""
-    for item in reversed(messages):
-        if item.get("role") == "user":
-            guest = str(item.get("content") or "")
-            break
-    # Prefer the raw guest line inside our wrapped turn, not the instruction tail.
-    raw = guest
+def _guest_raw_text(content: str) -> str:
+    guest = str(content or "")
     marker = "Mensaje del huésped:\n"
     if marker in guest:
-        raw = guest.split(marker, 1)[1]
-        raw = raw.split("\n\n", 1)[0]
-    sample = raw.lower().strip()
-    # English place names alone (Costanera Center) must stay Spanish.
+        guest = guest.split(marker, 1)[1]
+        guest = guest.split("\n\n", 1)[0]
+    return guest.strip()
+
+
+def _detect_guest_language(sample: str) -> str:
+    text = (sample or "").lower().strip()
+    if not text:
+        return "es"
+    # Short Spanish yes / courtesy — never treat "por favor" as Portuguese.
+    if re.fullmatch(
+        r"(sí|si|dale|ok|okay|claro|por\s+favor|si\s+por\s+favor|sí\s+por\s+favor|"
+        r"yes|please|yes\s+please)[!?.…]*",
+        text,
+    ):
+        return "es"
     if re.search(
         r"\b(how|where|walk|directions|from the hotel|from the hostel|please|can you)\b",
-        sample,
+        text,
     ):
         return "en"
-    if re.search(r"\b(onde|chegar|caminho|você|voce|do hostel|por favor)\b", sample):
+    # Clear Portuguese only (not words shared with Spanish like "por favor").
+    if re.search(r"\b(onde|chegar|caminho|você|voce|obrigad[oa]|tudo bem|do hostel)\b", text):
         return "pt"
+    if re.search(
+        r"\b(dónde|donde|están|estan|ubicad|cómo|como|llegar|aeropuerto|metro|gracias)\b",
+        text,
+    ):
+        return "es"
     return "es"
+
+
+def _route_language(messages: list[dict[str, Any]]) -> str:
+    """Language for map/route copy: follow the thread, default Spanish."""
+    guest_turns: list[str] = []
+    for item in messages:
+        if item.get("role") != "user":
+            continue
+        raw = _guest_raw_text(str(item.get("content") or ""))
+        if raw:
+            guest_turns.append(raw)
+    if not guest_turns:
+        return "es"
+    latest = _detect_guest_language(guest_turns[-1])
+    # Affirmations like "Si por favor" inherit the previous guest language.
+    if re.fullmatch(
+        r"(?is)(sí|si|dale|ok|okay|claro|por\s+favor|si\s+por\s+favor|sí\s+por\s+favor|"
+        r"yes|please|yes\s+please|sim|isso)[!?.…]*",
+        guest_turns[-1].strip(),
+    ):
+        for prior in reversed(guest_turns[:-1]):
+            lang = _detect_guest_language(prior)
+            if lang:
+                return lang
+    return latest
 
 
 def _prepared_route_reply(
@@ -434,7 +471,8 @@ def _guest_turn(
         "Detecta el idioma del mensaje y responde en ese mismo idioma. "
         "Si solo nombran un lugar de Santiago (ej. Costanera Center) o escriben en español "
         "con un nombre en inglés, responde en español y usa get_directions_from_hostel. "
-        "Nunca respondas en francés u otro idioma no pedido. "
+        "Si dicen «sí», «si por favor» o «dale» tras una pregunta tuya en español, sigue en español. "
+        "Nunca mezcles portugués/francés. Nunca respondas en otro idioma no pedido. "
         "Busca en preguntas frecuentes e info del hostal; precios/tipos de habitación "
         "solo en preguntas frecuentes. "
         "Si solo saludó (hola/hi), responde humano y breve; no vendas ni listes beneficios. "
