@@ -487,10 +487,12 @@ def _human_greeting_reply(
     inbound_text: str,
     is_follow_up: bool,
     prior: list[dict[str, Any]] | None = None,
+    skip_duplicate_greeting: bool = True,
 ) -> dict[str, Any]:
     """Short human hello — never dump a sales brochure on a bare greeting."""
     # People often send "Hola" then "Buenas" as separate bubbles: answer once only.
-    if is_follow_up and _already_offered_help(prior):
+    # Only skip when the caller says the previous help offer was very recent.
+    if skip_duplicate_greeting and is_follow_up and _already_offered_help(prior):
         return {
             "action": "skip",
             "message": "",
@@ -690,6 +692,7 @@ async def generate_instagram_reply(
     author_username: str | None = None,
     person_history: dict[str, Any] | None = None,
     thread_history: list[dict[str, str]] | None = None,
+    skip_duplicate_greeting: bool = False,
 ) -> dict[str, Any]:
     """Return {action, message, reason, model} using DeepSeek + knowledge tools."""
     prior = [
@@ -703,6 +706,7 @@ async def generate_instagram_reply(
             inbound_text=inbound_text,
             is_follow_up=is_follow_up,
             prior=prior,
+            skip_duplicate_greeting=skip_duplicate_greeting,
         )
     if _looks_like_reservation(inbound_text):
         return _reservation_whatsapp_reply(

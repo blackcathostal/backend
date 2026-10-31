@@ -31,10 +31,21 @@ _inbox_lock = threading.Lock()
 _inbox_cache: dict[str, Any] | None = None
 # Guests type in bursts ("hola" / "si" / "estoy interesado"). Wait after the last
 # bubble, then answer once with everything that arrived together.
-AUTO_REPLY_DEBOUNCE_SECONDS = 8.0
+AUTO_REPLY_DEBOUNCE_SECONDS = 5.0
+# Even if they keep sending bubbles, force one reply before this cap.
+AUTO_REPLY_MAX_BURST_SECONDS = 18.0
+# Don't ignore a new "hola" forever after an old greeting reply.
+GREETING_SKIP_WINDOW_SECONDS = 120.0
 _auto_reply_debounce_tasks: dict[str, asyncio.Task[Any]] = {}
+_auto_reply_debounce_deadline: dict[str, float] = {}
 _auto_reply_debounce_lock = asyncio.Lock()
 logger = logging.getLogger(__name__)
+_HELP_OFFER_MARKERS = (
+    "en qué te puedo ayudar",
+    "en que te puedo ayudar",
+    "how can i help",
+    "em que posso",
+)
 
 SCOPES = [
     "pages_show_list",
@@ -1422,25 +1433,52 @@ def _combined_burst_text(burst: list[dict[str, Any]]) -> str:
     return "\n".join(parts).strip()
 
 
+def _seconds_since_last_help_reply(item: dict[str, Any]) -> float | None:
+    """How many seconds since we last sent the short greeting/help offer."""
+    newest: datetime | None = None
+    for row in _related_dm_items(item):
+        for reply in row.get("replies") or []:
+            text = str(reply.get("text") or "").strip().lower()
+            if not any(marker in text for marker in _HELP_OFFER_MARKERS):
+                continue
+            stamp = _parse_iso(reply.get("created_at"))
+            if not stamp:
+                continue
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if newest is None or stamp > newest:
+                newest = stamp
+    if newest is None:
+        return None
+    now = datetime.now(timezone.utc)
+    return max(0.0, (now - newest).total_seconds())
+
+
 async def schedule_auto_reply(item_id: str) -> None:
     """Debounce auto-reply so multi-bubble typing gets one answer."""
     item = get_inbox_item(item_id)
     if not item or item.get("status") != "pending":
         return
     key = _thread_debounce_key(item) or item_id
+    now = time.monotonic()
     async with _auto_reply_debounce_lock:
+        deadline = _auto_reply_debounce_deadline.get(key)
+        if deadline is None:
+            deadline = now + AUTO_REPLY_MAX_BURST_SECONDS
+            _auto_reply_debounce_deadline[key] = deadline
+        delay = min(AUTO_REPLY_DEBOUNCE_SECONDS, max(0.3, deadline - now))
         previous = _auto_reply_debounce_tasks.get(key)
         if previous and not previous.done():
             previous.cancel()
         _auto_reply_debounce_tasks[key] = asyncio.create_task(
-            _run_debounced_auto_reply(key, item_id),
+            _run_debounced_auto_reply(key, item_id, delay),
             name=f"ig-auto-reply-{key}",
         )
 
 
-async def _run_debounced_auto_reply(key: str, item_id: str) -> None:
+async def _run_debounced_auto_reply(key: str, item_id: str, delay: float) -> None:
     try:
-        await asyncio.sleep(AUTO_REPLY_DEBOUNCE_SECONDS)
+        await asyncio.sleep(delay)
     except asyncio.CancelledError:
         return
     try:
@@ -1452,6 +1490,7 @@ async def _run_debounced_auto_reply(key: str, item_id: str) -> None:
             current = _auto_reply_debounce_tasks.get(key)
             if current is asyncio.current_task():
                 _auto_reply_debounce_tasks.pop(key, None)
+                _auto_reply_debounce_deadline.pop(key, None)
 
 
 async def run_auto_reply(item_id: str) -> dict[str, Any]:
@@ -1483,6 +1522,7 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
                 ):
                     continue
                 trimmed.append(turn)
+            recent_help = _seconds_since_last_help_reply(latest)
             decision = await generate_instagram_reply(
                 db=db,
                 inbound_text=inbound,
@@ -1494,6 +1534,9 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
                     exclude_id=latest.get("id"),
                 ),
                 thread_history=trimmed,
+                skip_duplicate_greeting=(
+                    recent_help is not None and recent_help < GREETING_SKIP_WINDOW_SECONDS
+                ),
             )
         finally:
             db.close()
