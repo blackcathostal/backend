@@ -1943,6 +1943,193 @@ def silence_pending_own_comments() -> int:
     return fixed
 
 
+def _comment_actor_is_own(row: dict[str, Any]) -> bool:
+    from_user = row.get("from") if isinstance(row.get("from"), dict) else {}
+    return _is_own_instagram_actor(
+        author_id=str(from_user.get("id") or row.get("user_id") or ""),
+        author_username=str(
+            row.get("username") or from_user.get("username") or ""
+        ),
+    )
+
+
+async def _list_comment_replies(comment_id: str, token: str) -> list[dict[str, Any]]:
+    """Flatten nested replies under a comment (self-reply loops nest deep)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    queue = [str(comment_id)]
+    while queue:
+        parent = queue.pop(0)
+        try:
+            data = await _graph_get(
+                f"/{parent}/replies",
+                token,
+                {
+                    "fields": "id,text,username,timestamp,from",
+                    "limit": 50,
+                },
+            )
+        except InstagramError:
+            continue
+        for row in data.get("data") or []:
+            rid = str(row.get("id") or "").strip()
+            if not rid or rid in seen:
+                continue
+            seen.add(rid)
+            out.append(row)
+            queue.append(rid)
+    out.sort(key=lambda item: str(item.get("timestamp") or ""))
+    return out
+
+
+def _prune_inbox_after_spam_cleanup(deleted_ids: set[str], kept_ids: set[str]) -> int:
+    """Drop deleted Meta comments from local inbox; keep one hostel reply per thread."""
+    if not deleted_ids and not kept_ids:
+        return 0
+    changed = 0
+    data = _load_inbox_raw()
+    items = list(data.get("items") or [])
+    kept_items: list[dict[str, Any]] = []
+    for item in items:
+        if item.get("type") != "comment":
+            kept_items.append(item)
+            continue
+        meta_id = str(item.get("meta_comment_id") or "").strip()
+        if meta_id and meta_id in deleted_ids:
+            changed += 1
+            continue
+        replies = list(item.get("replies") or [])
+        if replies:
+            trimmed: list[dict[str, Any]] = []
+            for reply in replies:
+                rid = str(
+                    reply.get("meta_message_id")
+                    or reply.get("meta_comment_id")
+                    or ""
+                ).strip()
+                if rid and rid in deleted_ids:
+                    changed += 1
+                    continue
+                trimmed.append(reply)
+            # After a loop, keep a single hostel reply in the admin thread.
+            if len(trimmed) > 1:
+                trimmed = trimmed[:1]
+                changed += 1
+            if trimmed != replies:
+                item = {**item, "replies": trimmed, "updated_at": _now_iso()}
+        if _is_own_instagram_actor(
+            author_id=str(item.get("author_id") or ""),
+            author_username=str(item.get("author_username") or ""),
+        ):
+            if item.get("status") == "pending":
+                item = {
+                    **item,
+                    "status": "skipped",
+                    "escalation_reason": "own_comment",
+                    "updated_at": _now_iso(),
+                }
+                changed += 1
+        kept_items.append(item)
+    if changed:
+        data["items"] = kept_items
+        _save_inbox_raw(data)
+    return changed
+
+
+async def _delete_comment_rows(
+    rows: list[dict[str, Any]],
+    *,
+    deleted_ids: set[str],
+) -> None:
+    for row in reversed(rows):
+        rid = str(row.get("id") or "").strip()
+        if not rid or rid in deleted_ids:
+            continue
+        try:
+            await _delete_on_instagram(rid)
+            deleted_ids.add(rid)
+        except InstagramError as exc:
+            logger.warning("Could not delete Instagram spam comment %s: %s", rid, exc)
+
+
+async def prune_own_comment_spam(
+    *,
+    keep: int = 1,
+    limit_media: int = 12,
+) -> dict[str, Any]:
+    """Delete hostel self-replies from the Instagram loop; keep ``keep`` per guest comment."""
+    keep = max(0, int(keep))
+    silenced = silence_pending_own_comments()
+    conn = _require_connection()
+    token = conn["page_access_token"]
+    ig_user_id = conn["ig_user_id"]
+    media = await _graph_get(
+        f"/{ig_user_id}/media",
+        token,
+        {"fields": "id,timestamp", "limit": limit_media},
+    )
+    deleted_ids: set[str] = set()
+    kept_ids: set[str] = set()
+    scanned_threads = 0
+    for m in media.get("data") or []:
+        media_id = str(m.get("id") or "").strip()
+        if not media_id:
+            continue
+        try:
+            comments = await _graph_get(
+                f"/{media_id}/comments",
+                token,
+                {
+                    "fields": "id,text,username,timestamp,from",
+                    "limit": 50,
+                },
+            )
+        except InstagramError:
+            continue
+        top_rows = list(comments.get("data") or [])
+        for comment in top_rows:
+            comment_id = str(comment.get("id") or "").strip()
+            if not comment_id:
+                continue
+            scanned_threads += 1
+            replies = await _list_comment_replies(comment_id, token)
+            own_replies = [row for row in replies if _comment_actor_is_own(row)]
+            if _comment_actor_is_own(comment):
+                # Hostel talking to itself: keep the top comment, wipe nested spam.
+                keep_n = 0
+            else:
+                keep_n = keep
+            for row in own_replies[:keep_n]:
+                rid = str(row.get("id") or "").strip()
+                if rid:
+                    kept_ids.add(rid)
+            await _delete_comment_rows(own_replies[keep_n:], deleted_ids=deleted_ids)
+
+        # Multiple own top-level comments on one post → leave only ``keep``.
+        own_tops = [
+            c
+            for c in top_rows
+            if _comment_actor_is_own(c) and str(c.get("id") or "") not in deleted_ids
+        ]
+        own_tops.sort(key=lambda item: str(item.get("timestamp") or ""))
+        for row in own_tops[:keep]:
+            rid = str(row.get("id") or "").strip()
+            if rid:
+                kept_ids.add(rid)
+        await _delete_comment_rows(own_tops[keep:], deleted_ids=deleted_ids)
+
+    inbox_fixed = _prune_inbox_after_spam_cleanup(deleted_ids, kept_ids)
+    return {
+        "ok": True,
+        "silenced_pending": silenced,
+        "threads_scanned": scanned_threads,
+        "deleted": len(deleted_ids),
+        "kept": len(kept_ids),
+        "inbox_fixed": inbox_fixed,
+        "deleted_ids": sorted(deleted_ids),
+    }
+
+
 async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse Meta webhook and auto-reply when enabled."""
     # Break any leftover self-reply queue queued before the own-comment filter.

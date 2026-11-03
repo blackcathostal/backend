@@ -287,6 +287,11 @@ async def auto_reply_inbox_item(
 @router.post("/sync-comments")
 async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     warning = None
+    prune: dict[str, Any] = {}
+    try:
+        prune = await ig.prune_own_comment_spam(keep=1)
+    except (ig.InstagramConfigError, ig.InstagramError) as exc:
+        warning = str(exc)
     try:
         comments = await ig.sync_recent_comments()
     except ig.InstagramConfigError as exc:
@@ -295,7 +300,7 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     subscription = await ig.subscribe_instagram_webhooks()
     if not subscription.get("ok"):
-        warning = subscription.get("error")
+        warning = subscription.get("error") or warning
     try:
         messages = await ig.sync_recent_messages()
     except ig.InstagramError as exc:
@@ -305,8 +310,20 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
         "synced": len(comments) + len(messages),
         "comments": len(comments),
         "messages": len(messages),
+        "prune": prune,
         "warning": warning,
     }
+
+
+@router.post("/cleanup-comment-spam")
+async def cleanup_comment_spam(_: Users = Depends(get_current_user)) -> dict[str, Any]:
+    """Delete hostel self-reply spam on Instagram; leave one reply per guest comment."""
+    try:
+        return await ig.prune_own_comment_spam(keep=1)
+    except ig.InstagramConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/room-rates")
