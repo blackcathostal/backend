@@ -293,6 +293,7 @@ def _page_row(item: dict[str, Any], *, message_count: int = 1, peer_username: st
         "id": item.get("id"),
         "type": item.get("type"),
         "thread_id": item.get("thread_id"),
+        "media_id": item.get("media_id"),
         "author_username": item.get("author_username"),
         "author_id": item.get("author_id"),
         "peer_id": item.get("peer_id"),
@@ -301,8 +302,48 @@ def _page_row(item: dict[str, Any], *, message_count: int = 1, peer_username: st
         "text": text,
         "created_at": item.get("created_at"),
         "status": item.get("status"),
+        "escalation_reason": item.get("escalation_reason"),
         "message_count": message_count,
     }
+
+
+def _comment_group_key(item: dict[str, Any]) -> str:
+    media = str(item.get("media_id") or item.get("thread_id") or "")
+    author = str(item.get("author_id") or "").strip()
+    if not author:
+        author = str(item.get("author_username") or "").strip().lower().lstrip("@")
+    return f"{media}|{author}"
+
+
+def _group_comment_items(comments: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """One bucket per guest on the same Instagram post (comment chain)."""
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for item in comments:
+        buckets.setdefault(_comment_group_key(item), []).append(item)
+    return list(buckets.values())
+
+
+def _pick_group_latest(
+    group: list[dict[str, Any]],
+    *,
+    status: str | None,
+) -> dict[str, Any] | None:
+    if not group:
+        return None
+    if status == "pending":
+        pending = [row for row in group if row.get("status") == "pending"]
+        if not pending:
+            return None
+        return max(pending, key=lambda row: str(row.get("created_at") or ""))
+    latest = max(group, key=lambda row: str(row.get("created_at") or ""))
+    if status and latest.get("status") != status:
+        # Keep the conversation visible when filtering by a status that appears
+        # anywhere in the chain (e.g. skipped nested replies).
+        if not any(row.get("status") == status for row in group):
+            return None
+        matching = [row for row in group if row.get("status") == status]
+        return max(matching, key=lambda row: str(row.get("created_at") or ""))
+    return latest
 
 
 def list_inbox_page(
@@ -310,9 +351,9 @@ def list_inbox_page(
     item_type: str | None = None,
     status: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Slim rows for the admin table: one row per DM thread, comments unchanged."""
-    # Group ALL DMs first, then apply status filter on the conversation.
-    # Filtering before grouping made each pending bubble look like a new chat.
+    """Slim rows: one per DM peer, one per guest comment chain on a post."""
+    # Group ALL items first, then apply status filter on the conversation.
+    # Filtering before grouping made each bubble look like a new chat.
     items = list_inbox(item_type=item_type)
     comments = [item for item in items if item.get("type") != "message"]
     messages = [item for item in items if item.get("type") == "message"]
@@ -320,33 +361,25 @@ def list_inbox_page(
     ig_username = str((load_connection() or {}).get("ig_username") or "").strip().lower()
     rows: list[dict[str, Any]] = []
     for group in _group_dm_items(messages):
-        if status:
-            if status == "pending":
-                pending = [row for row in group if row.get("status") == "pending"]
-                if not pending:
-                    continue
-                latest = max(pending, key=lambda row: str(row.get("created_at") or ""))
-            else:
-                latest = max(group, key=lambda row: str(row.get("created_at") or ""))
-                if latest.get("status") != status:
-                    continue
-        else:
-            latest = max(group, key=lambda row: str(row.get("created_at") or ""))
+        latest = _pick_group_latest(group, status=status)
+        if not latest:
+            continue
         guest = _guest_id(latest, own_ids) or _guest_id(group[0], own_ids)
         row = _page_row(
             latest,
             message_count=len(group),
             peer_username=_client_username(group, own_ids, ig_username) or None,
         )
-        if guest and not row.get("peer_id"):
-            row["peer_id"] = guest
-        elif guest:
+        if guest:
             row["peer_id"] = guest
         rows.append(row)
-    for item in comments:
-        if status and item.get("status") != status:
+    for group in _group_comment_items(comments):
+        latest = _pick_group_latest(group, status=status)
+        if not latest:
             continue
-        rows.append(_page_row(item))
+        row = _page_row(latest, message_count=len(group))
+        row["author_username"] = latest.get("author_username")
+        rows.append(row)
     rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
     return rows
 
@@ -1736,32 +1769,49 @@ def _related_dm_items(item: dict[str, Any]) -> list[dict[str, Any]]:
     return [item]
 
 
+def _related_comment_items(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """All comments from the same guest on the same post (one public chain)."""
+    if item.get("type") != "comment":
+        return [item]
+    key = _comment_group_key(item)
+    related = [
+        row
+        for row in list_inbox(item_type="comment")
+        if _comment_group_key(row) == key
+    ]
+    related.sort(key=lambda row: str(row.get("created_at") or ""))
+    return related or [item]
+
+
 def conversation_turns(item: dict[str, Any]) -> list[dict[str, Any]]:
     """Chronological bubbles for the admin chat."""
     if item.get("type") != "message":
-        turns = [
-            {
-                "role": "in",
-                "text": item.get("text") or "",
-                "created_at": item.get("created_at"),
-                "author": item.get("author_username") or item.get("author_id") or "",
-                "item_id": item.get("id"),
-                "reply_index": None,
-            }
-        ]
-        for index, reply in enumerate(item.get("replies") or []):
+        turns: list[dict[str, Any]] = []
+        for row in _related_comment_items(item):
             turns.append(
                 {
-                    "role": "out",
-                    "text": reply.get("text") or "",
-                    "created_at": reply.get("created_at"),
-                    "source": reply.get("source") or "human",
-                    "item_id": item.get("id"),
-                    "reply_index": index,
-                    "is_map": bool(reply.get("is_map")),
-                    "image_url": reply.get("image_url") or "",
+                    "role": "in",
+                    "text": row.get("text") or "",
+                    "created_at": row.get("created_at"),
+                    "author": row.get("author_username") or row.get("author_id") or "",
+                    "item_id": row.get("id"),
+                    "reply_index": None,
+                    "status": row.get("status"),
                 }
             )
+            for index, reply in enumerate(row.get("replies") or []):
+                turns.append(
+                    {
+                        "role": "out",
+                        "text": reply.get("text") or "",
+                        "created_at": reply.get("created_at"),
+                        "source": reply.get("source") or "human",
+                        "item_id": row.get("id"),
+                        "reply_index": index,
+                        "is_map": bool(reply.get("is_map")),
+                        "image_url": reply.get("image_url") or "",
+                    }
+                )
         return turns
 
     related = _related_dm_items(item)
@@ -2041,7 +2091,9 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
                 media_id=media.get("id") or value.get("media_id"),
             )
             if parent_id:
-                # Store for the admin inbox, but never auto-answer comment chains.
+                # Store for the admin inbox, but never auto-answer nested replies
+                # (that was the self-reply loop). They still belong to the same chain.
+                item["parent_comment_id"] = parent_id
                 if item.get("status") == "pending":
                     item["status"] = "skipped"
                     item["escalation_reason"] = "nested_comment"
