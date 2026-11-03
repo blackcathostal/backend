@@ -1088,6 +1088,14 @@ async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
             if find_by_external_id(external_id):
                 continue
             from_user = c.get("from") or {}
+            author_username = c.get("username") or from_user.get("username")
+            author_id = from_user.get("id")
+            # Never treat our own public replies as inbound guest comments.
+            if _is_own_instagram_actor(
+                author_id=str(author_id or ""),
+                author_username=str(author_username or ""),
+            ):
+                continue
             item = upsert_inbox_item(
                 {
                     "id": str(uuid.uuid4()),
@@ -1096,8 +1104,8 @@ async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
                     "external_id": external_id,
                     "meta_comment_id": c.get("id"),
                     "media_id": media_id,
-                    "author_username": c.get("username") or from_user.get("username"),
-                    "author_id": from_user.get("id"),
+                    "author_username": author_username,
+                    "author_id": author_id,
                     "text": c.get("text") or "",
                     "created_at": c.get("timestamp") or _now_iso(),
                     "status": "pending",
@@ -1365,6 +1373,9 @@ async def send_inbox_reply(
 
 
 def _thread_debounce_key(item: dict[str, Any]) -> str:
+    # Comments: one timer per comment (never merge with other commenters on the post).
+    if item.get("type") == "comment":
+        return f"comment:{item.get('id') or item.get('external_id') or item.get('meta_comment_id') or ''}"
     return str(item.get("peer_id") or item.get("thread_id") or item.get("id") or "")
 
 
@@ -1459,6 +1470,15 @@ async def schedule_auto_reply(item_id: str) -> None:
     item = get_inbox_item(item_id)
     if not item or item.get("status") != "pending":
         return
+    if item.get("type") == "comment" and _is_own_instagram_actor(
+        author_id=str(item.get("author_id") or ""),
+        author_username=str(item.get("author_username") or ""),
+    ):
+        item["status"] = "skipped"
+        item["escalation_reason"] = "own_comment"
+        item["updated_at"] = _now_iso()
+        upsert_inbox_item(item)
+        return
     key = _thread_debounce_key(item) or item_id
     now = time.monotonic()
     async with _auto_reply_debounce_lock:
@@ -1497,6 +1517,15 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
+
+    if item.get("type") == "comment" and _is_own_instagram_actor(
+        author_id=str(item.get("author_id") or ""),
+        author_username=str(item.get("author_username") or ""),
+    ):
+        item["status"] = "skipped"
+        item["escalation_reason"] = "own_comment"
+        item["updated_at"] = _now_iso()
+        return upsert_inbox_item(item)
 
     burst = _pending_message_burst(item)
     if not burst:
@@ -1781,6 +1810,26 @@ def _own_instagram_ids() -> set[str]:
     return {str(item) for item in (conn.get("ig_user_id"), conn.get("page_id")) if item}
 
 
+def _own_instagram_username() -> str:
+    conn = load_connection() or {}
+    return str(conn.get("ig_username") or "").strip().lstrip("@").lower()
+
+
+def _is_own_instagram_actor(
+    *,
+    author_id: str | None = None,
+    author_username: str | None = None,
+) -> bool:
+    """True when the author is the hostel Instagram / Page (never auto-reply)."""
+    own_ids = _own_instagram_ids()
+    aid = str(author_id or "").strip()
+    if aid and aid in own_ids:
+        return True
+    own_user = _own_instagram_username()
+    username = str(author_username or "").strip().lstrip("@").lower()
+    return bool(own_user and username and username == own_user)
+
+
 def _dm_event_text(event: dict[str, Any]) -> tuple[str, str, str]:
     """Return (sender_id, mid, text) for an Instagram DM webhook event."""
     sender = str((event.get("sender") or {}).get("id") or "")
@@ -1875,8 +1924,32 @@ async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
     return item
 
 
+def silence_pending_own_comments() -> int:
+    """Stop any already-queued self-replies (from the comment reply loop)."""
+    fixed = 0
+    for item in list_inbox():
+        if item.get("type") != "comment" or item.get("status") != "pending":
+            continue
+        if not _is_own_instagram_actor(
+            author_id=str(item.get("author_id") or ""),
+            author_username=str(item.get("author_username") or ""),
+        ):
+            continue
+        item["status"] = "skipped"
+        item["escalation_reason"] = "own_comment"
+        item["updated_at"] = _now_iso()
+        upsert_inbox_item(item)
+        fixed += 1
+    return fixed
+
+
 async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse Meta webhook and auto-reply when enabled."""
+    # Break any leftover self-reply queue queued before the own-comment filter.
+    try:
+        silence_pending_own_comments()
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not silence pending own Instagram comments")
     results: list[dict[str, Any]] = []
     dm_fields = {"messages", "message_echoes", "messaging_postbacks"}
     for entry in payload.get("entry") or []:
@@ -1905,20 +1978,41 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
             media = value.get("media") or {}
             if not comment_id and not str(text).strip():
                 continue
+            author_id = str(from_user.get("id") or value.get("user_id") or "")
+            author_username = str(
+                from_user.get("username") or value.get("username") or ""
+            )
+            # Critical: Instagram also webhooks OUR public replies. Without this
+            # filter the bot answers itself in a loop under the same post.
+            if _is_own_instagram_actor(
+                author_id=author_id,
+                author_username=author_username,
+            ):
+                continue
+            # Only auto-reply to top-level guest comments (not nested replies).
+            parent_id = str(value.get("parent_id") or "").strip()
             external = f"comment:{comment_id or uuid.uuid4()}"
             item = ingest_inbound(
                 item_type="comment",
                 external_id=external,
                 text=str(text),
-                author_id=from_user.get("id"),
-                author_username=from_user.get("username"),
+                author_id=author_id or None,
+                author_username=author_username or None,
                 thread_id=media.get("id") or value.get("media_id"),
                 meta_comment_id=comment_id,
                 media_id=media.get("id") or value.get("media_id"),
             )
+            if parent_id:
+                # Store for the admin inbox, but never auto-answer comment chains.
+                if item.get("status") == "pending":
+                    item["status"] = "skipped"
+                    item["escalation_reason"] = "nested_comment"
+                    item["updated_at"] = _now_iso()
+                    item = upsert_inbox_item(item)
+                results.append(item)
+                continue
             if auto_reply_enabled() and item.get("status") == "pending":
                 try:
-                    # Comments are usually one shot; still debounce lightly via scheduler.
                     await schedule_auto_reply(item["id"])
                 except Exception as exc:  # noqa: BLE001
                     item["status"] = "failed"
