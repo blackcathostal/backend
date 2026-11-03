@@ -2077,9 +2077,12 @@ async def prune_own_comment_spam(
     *,
     keep: int = 1,
     limit_media: int = 20,
+    max_delete: int = 60,
+    crawl_graph: bool = False,
 ) -> dict[str, Any]:
-    """Delete hostel self-reply spam; keep ``keep`` copy per repeated text / media."""
+    """Delete hostel self-reply spam in batches; keep ``keep`` copy per repeated text."""
     keep = max(0, int(keep))
+    max_delete = max(1, int(max_delete))
     silenced = silence_pending_own_comments()
     deleted_ids: set[str] = set()
     kept_ids: set[str] = set()
@@ -2116,77 +2119,78 @@ async def prune_own_comment_spam(
                         "inbox_id": row.get("id"),
                     }
                 )
-    await _delete_comment_rows(to_delete_rows, deleted_ids=deleted_ids)
+    remaining_after = max(0, len(to_delete_rows) - max_delete)
+    batch = to_delete_rows[:max_delete]
+    await _delete_comment_rows(batch, deleted_ids=deleted_ids)
 
-    # Secondary path: crawl recent media in case Graph has spam not mirrored in inbox.
     scanned_threads = 0
-    try:
-        conn = _require_connection()
-        token = conn["page_access_token"]
-        ig_user_id = conn["ig_user_id"]
-        media = await _graph_get(
-            f"/{ig_user_id}/media",
-            token,
-            {"fields": "id,timestamp", "limit": limit_media},
-        )
-        for m in media.get("data") or []:
-            media_id = str(m.get("id") or "").strip()
-            if not media_id:
-                continue
-            try:
-                comments = await _graph_get(
-                    f"/{media_id}/comments",
-                    token,
-                    {
-                        "fields": "id,text,username,timestamp,from",
-                        "limit": 100,
-                    },
-                )
-            except InstagramError:
-                continue
-            top_rows = list(comments.get("data") or [])
-            for comment in top_rows:
-                comment_id = str(comment.get("id") or "").strip()
-                if not comment_id:
+    if crawl_graph and remaining_after == 0:
+        # Only crawl Graph after inbox spam is cleared (avoids proxy timeouts).
+        try:
+            conn = _require_connection()
+            token = conn["page_access_token"]
+            ig_user_id = conn["ig_user_id"]
+            media = await _graph_get(
+                f"/{ig_user_id}/media",
+                token,
+                {"fields": "id,timestamp", "limit": limit_media},
+            )
+            for m in media.get("data") or []:
+                media_id = str(m.get("id") or "").strip()
+                if not media_id:
                     continue
-                scanned_threads += 1
-                replies = await _list_comment_replies(comment_id, token)
-                own_replies = [row for row in replies if _comment_actor_is_own(row)]
-                keep_n = 0 if _comment_actor_is_own(comment) else keep
-                for row in own_replies[:keep_n]:
-                    rid = str(row.get("id") or "").strip()
-                    if rid and rid not in deleted_ids:
-                        kept_ids.add(rid)
-                await _delete_comment_rows(
-                    [
+                try:
+                    comments = await _graph_get(
+                        f"/{media_id}/comments",
+                        token,
+                        {
+                            "fields": "id,text,username,timestamp,from",
+                            "limit": 100,
+                        },
+                    )
+                except InstagramError:
+                    continue
+                top_rows = list(comments.get("data") or [])
+                for comment in top_rows:
+                    comment_id = str(comment.get("id") or "").strip()
+                    if not comment_id:
+                        continue
+                    scanned_threads += 1
+                    replies = await _list_comment_replies(comment_id, token)
+                    own_replies = [row for row in replies if _comment_actor_is_own(row)]
+                    keep_n = 0 if _comment_actor_is_own(comment) else keep
+                    for row in own_replies[:keep_n]:
+                        rid = str(row.get("id") or "").strip()
+                        if rid and rid not in deleted_ids:
+                            kept_ids.add(rid)
+                    extras = [
                         row
                         for row in own_replies[keep_n:]
                         if str(row.get("id") or "") not in kept_ids
-                    ],
-                    deleted_ids=deleted_ids,
-                )
-            own_tops = [
-                c
-                for c in top_rows
-                if _comment_actor_is_own(c)
-                and str(c.get("id") or "") not in deleted_ids
-                and str(c.get("id") or "") not in kept_ids
-            ]
-            # Group own tops by text so we keep one of each repeated bot line.
-            top_groups: dict[str, list[dict[str, Any]]] = {}
-            for row in own_tops:
-                top_groups.setdefault(
-                    _spam_text_key(str(row.get("text") or "")), []
-                ).append(row)
-            for group in top_groups.values():
-                group.sort(key=lambda item: str(item.get("timestamp") or ""))
-                for row in group[:keep]:
-                    rid = str(row.get("id") or "").strip()
-                    if rid:
-                        kept_ids.add(rid)
-                await _delete_comment_rows(group[keep:], deleted_ids=deleted_ids)
-    except (InstagramConfigError, InstagramError) as exc:
-        logger.warning("Graph spam crawl skipped: %s", exc)
+                    ][: max(0, max_delete - len(deleted_ids))]
+                    await _delete_comment_rows(extras, deleted_ids=deleted_ids)
+                own_tops = [
+                    c
+                    for c in top_rows
+                    if _comment_actor_is_own(c)
+                    and str(c.get("id") or "") not in deleted_ids
+                    and str(c.get("id") or "") not in kept_ids
+                ]
+                top_groups: dict[str, list[dict[str, Any]]] = {}
+                for row in own_tops:
+                    top_groups.setdefault(
+                        _spam_text_key(str(row.get("text") or "")), []
+                    ).append(row)
+                for group in top_groups.values():
+                    group.sort(key=lambda item: str(item.get("timestamp") or ""))
+                    for row in group[:keep]:
+                        rid = str(row.get("id") or "").strip()
+                        if rid:
+                            kept_ids.add(rid)
+                    extras = group[keep:][: max(0, max_delete - len(deleted_ids))]
+                    await _delete_comment_rows(extras, deleted_ids=deleted_ids)
+        except (InstagramConfigError, InstagramError) as exc:
+            logger.warning("Graph spam crawl skipped: %s", exc)
 
     inbox_fixed = _prune_inbox_after_spam_cleanup(deleted_ids, kept_ids)
     return {
@@ -2194,6 +2198,9 @@ async def prune_own_comment_spam(
         "silenced_pending": silenced,
         "own_inbox_found": len(own_inbox),
         "spam_groups": len(groups),
+        "batch_size": len(batch),
+        "remaining": remaining_after,
+        "done": remaining_after == 0,
         "threads_scanned": scanned_threads,
         "deleted": len(deleted_ids),
         "kept": len(kept_ids),

@@ -316,10 +316,18 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
 
 
 @router.post("/cleanup-comment-spam")
-async def cleanup_comment_spam(_: Users = Depends(get_current_user)) -> dict[str, Any]:
-    """Delete hostel self-reply spam on Instagram; leave one reply per guest comment."""
+async def cleanup_comment_spam(
+    _: Users = Depends(get_current_user),
+    max_delete: int = Query(default=50, ge=1, le=150),
+    crawl_graph: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Delete hostel self-reply spam in batches; leave one copy per repeated text."""
     try:
-        return await ig.prune_own_comment_spam(keep=1)
+        return await ig.prune_own_comment_spam(
+            keep=1,
+            max_delete=max_delete,
+            crawl_graph=crawl_graph,
+        )
     except ig.InstagramConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ig.InstagramError as exc:

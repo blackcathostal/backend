@@ -180,9 +180,24 @@ async def lifespan(_: FastAPI):
         try:
             from app.services import instagram as ig
 
-            result = await ig.prune_own_comment_spam(keep=1)
-            if result.get("deleted") or result.get("silenced_pending"):
-                logger.info("Instagram comment spam cleanup: %s", result)
+            for _ in range(40):
+                result = await ig.prune_own_comment_spam(
+                    keep=1,
+                    max_delete=40,
+                    crawl_graph=False,
+                )
+                if result.get("deleted") or result.get("silenced_pending"):
+                    logger.info("Instagram comment spam cleanup: %s", result)
+                if result.get("done"):
+                    final = await ig.prune_own_comment_spam(
+                        keep=1,
+                        max_delete=40,
+                        crawl_graph=True,
+                    )
+                    if final.get("deleted"):
+                        logger.info("Instagram comment spam graph pass: %s", final)
+                    break
+                await asyncio.sleep(0.5)
         except Exception:  # noqa: BLE001
             logger.exception("Instagram comment spam cleanup failed at startup")
 
