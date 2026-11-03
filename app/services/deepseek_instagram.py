@@ -62,6 +62,10 @@ Estilo:
   dato + un beneficio real (Barrio Brasil, desayuno, ubicación, ambiente boutique) + cierre suave
   a WhatsApp si encaja. Solo hechos de las tools; no inventes ofertas.
 - Evita plantillas (“Estimado huésped”, “Quedamos atentos”, listas largas). Máximo 1 emoji.
+- No asumas de dónde viene ni a dónde va. Nunca digas “buen viaje desde el aeropuerto”,
+  “te esperamos del aeropuerto” ni menciones aeropuerto/terminal/bus/Uber de llegada
+  a menos que el huésped lo haya dicho explícitamente en esta conversación.
+  Un cierre neutro (“¡Que tengas buen día!” / “Cualquier cosa me escribes”) está bien.
 - Idioma (OBLIGATORIO): detecta el idioma por la charla completa (saludos, palabras, hilo).
   Responde SIEMPRE en ese idioma: español, inglés, portugués, francés, alemán u otro.
   Si el último mensaje es corto (“sí”, “ok”, “por favor”, “dale”), mantén el idioma del hilo.
@@ -256,6 +260,8 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Si hay consulta real (no un simple hola): vende con calidez, destaca un beneficio "
         "real (Barrio Brasil, desayuno, ubicación, ambiente boutique) e invita suave a "
         "WhatsApp. En un saludo solo, sé humano y corto. Sin inventar promociones. "
+        "No asumas llegada desde el aeropuerto ni transporte: solo menciónalo si el huésped "
+        "lo dijo. Cierra neutro («¡Que tengas buen día!») si no habló de eso. "
         "Idioma: saludo + palabras de toda la charla; responde solo en ese idioma "
         "(es/en/pt/fr/de/u otro). «sí/por favor» hereda el idioma del hilo. No mezcles. "
         "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
@@ -594,6 +600,7 @@ def _guest_turn(
         "Si el mensaje es sobre reservar, llama get_hostel_info "
         "y manda al huésped al WhatsApp (whatsapp_url) para completar la reserva. "
         "Si hay una consulta real, responde como vendedor: dato + beneficio + cierre suave. "
+        "No digas aeropuerto ni ‘buen viaje desde el aeropuerto’ si el huésped no lo mencionó. "
         "Usa la web solo si falta el dato. "
         "Luego entrega el JSON final.",
     ]
