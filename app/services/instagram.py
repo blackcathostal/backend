@@ -2077,7 +2077,9 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
                 author_username=author_username,
             ):
                 continue
-            # Only auto-reply to top-level guest comments (not nested replies).
+            # Guest comments (top-level OR nested replies to our answer) can get
+            # auto-reply. Own comments are already filtered above — that is what
+            # stops the self-reply loop, not skipping every nested guest message.
             parent_id = str(value.get("parent_id") or "").strip()
             external = f"comment:{comment_id or uuid.uuid4()}"
             item = ingest_inbound(
@@ -2091,16 +2093,8 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
                 media_id=media.get("id") or value.get("media_id"),
             )
             if parent_id:
-                # Store for the admin inbox, but never auto-answer nested replies
-                # (that was the self-reply loop). They still belong to the same chain.
                 item["parent_comment_id"] = parent_id
-                if item.get("status") == "pending":
-                    item["status"] = "skipped"
-                    item["escalation_reason"] = "nested_comment"
-                    item["updated_at"] = _now_iso()
-                    item = upsert_inbox_item(item)
-                results.append(item)
-                continue
+                item = upsert_inbox_item(item)
             if auto_reply_enabled() and item.get("status") == "pending":
                 try:
                     await schedule_auto_reply(item["id"])
