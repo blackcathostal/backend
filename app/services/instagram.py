@@ -311,22 +311,42 @@ def list_inbox_page(
     status: str | None = None,
 ) -> list[dict[str, Any]]:
     """Slim rows for the admin table: one row per DM thread, comments unchanged."""
-    items = list_inbox(item_type=item_type, status=status)
+    # Group ALL DMs first, then apply status filter on the conversation.
+    # Filtering before grouping made each pending bubble look like a new chat.
+    items = list_inbox(item_type=item_type)
     comments = [item for item in items if item.get("type") != "message"]
     messages = [item for item in items if item.get("type") == "message"]
     own_ids = _own_instagram_ids()
     ig_username = str((load_connection() or {}).get("ig_username") or "").strip().lower()
     rows: list[dict[str, Any]] = []
     for group in _group_dm_items(messages):
-        latest = max(group, key=lambda row: str(row.get("created_at") or ""))
-        rows.append(
-            _page_row(
-                latest,
-                message_count=len(group),
-                peer_username=_client_username(group, own_ids, ig_username) or None,
-            )
+        if status:
+            if status == "pending":
+                pending = [row for row in group if row.get("status") == "pending"]
+                if not pending:
+                    continue
+                latest = max(pending, key=lambda row: str(row.get("created_at") or ""))
+            else:
+                latest = max(group, key=lambda row: str(row.get("created_at") or ""))
+                if latest.get("status") != status:
+                    continue
+        else:
+            latest = max(group, key=lambda row: str(row.get("created_at") or ""))
+        guest = _guest_id(latest, own_ids) or _guest_id(group[0], own_ids)
+        row = _page_row(
+            latest,
+            message_count=len(group),
+            peer_username=_client_username(group, own_ids, ig_username) or None,
         )
-    rows.extend(_page_row(item) for item in comments)
+        if guest and not row.get("peer_id"):
+            row["peer_id"] = guest
+        elif guest:
+            row["peer_id"] = guest
+        rows.append(row)
+    for item in comments:
+        if status and item.get("status") != status:
+            continue
+        rows.append(_page_row(item))
     rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
     return rows
 
@@ -336,6 +356,21 @@ def get_inbox_item(item_id: str) -> dict[str, Any] | None:
         if item.get("id") == item_id:
             return item
     return None
+
+
+def get_dm_thread_by_peer(peer_id: str) -> dict[str, Any] | None:
+    """Return the newest inbox bubble for a guest so the admin opens one stable chat."""
+    guest = str(peer_id or "").strip()
+    if not guest:
+        return None
+    own_ids = _own_instagram_ids()
+    matches: list[dict[str, Any]] = []
+    for item in list_inbox(item_type="message"):
+        if _guest_id(item, own_ids) == guest:
+            matches.append(item)
+    if not matches:
+        return None
+    return max(matches, key=lambda row: str(row.get("created_at") or ""))
 
 
 def upsert_inbox_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -1224,11 +1259,14 @@ async def sync_recent_messages(limit_conversations: int = 50) -> list[dict[str, 
                     upsert_inbox_item(existing)
                 continue
             text = str(msg.get("message") or "").strip() or "[archivo]"
+            # Prefer the guest IGSID as thread_id so webhook + sync share one chain.
+            canonical_thread = guest_id or thread_id or sender_id
             item = upsert_inbox_item(
                 {
                     "id": str(uuid.uuid4()),
                     "type": "message",
-                    "thread_id": thread_id or guest_id or sender_id,
+                    "thread_id": canonical_thread,
+                    "meta_conversation_id": thread_id or None,
                     "external_id": external_id,
                     "meta_comment_id": None,
                     "media_id": None,

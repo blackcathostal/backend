@@ -174,6 +174,18 @@ def get_inbox(
     return {"items": items, "count": len(items)}
 
 
+@router.get("/inbox/thread/{peer_id}")
+def get_inbox_thread(peer_id: str, _: Users = Depends(get_current_user)) -> dict[str, Any]:
+    """Open one DM conversation by guest id (stable chat, not one row per bubble)."""
+    item = ig.get_dm_thread_by_peer(peer_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    payload = dict(item)
+    payload["conversation"] = ig.conversation_turns(item)
+    payload["peer_id"] = peer_id
+    return payload
+
+
 @router.get("/inbox/{item_id}")
 def get_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[str, Any]:
     item = ig.get_inbox_item(item_id)
