@@ -1,5 +1,3 @@
-import asyncio
-import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -176,38 +174,7 @@ async def lifespan(_: FastAPI):
     except OperationalError:
         logger.warning("Database unavailable at startup; API will run without MySQL.")
 
-    async def _prune_instagram_comment_spam() -> None:
-        try:
-            from app.services import instagram as ig
-
-            for _ in range(40):
-                result = await ig.prune_own_comment_spam(
-                    keep=1,
-                    max_delete=40,
-                    crawl_graph=False,
-                )
-                if result.get("deleted") or result.get("silenced_pending"):
-                    logger.info("Instagram comment spam cleanup: %s", result)
-                if result.get("done"):
-                    final = await ig.prune_own_comment_spam(
-                        keep=1,
-                        max_delete=40,
-                        crawl_graph=True,
-                    )
-                    if final.get("deleted"):
-                        logger.info("Instagram comment spam graph pass: %s", final)
-                    break
-                await asyncio.sleep(0.5)
-        except Exception:  # noqa: BLE001
-            logger.exception("Instagram comment spam cleanup failed at startup")
-
-    prune_task = asyncio.create_task(_prune_instagram_comment_spam())
-    try:
-        yield
-    finally:
-        prune_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await prune_task
+    yield
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
