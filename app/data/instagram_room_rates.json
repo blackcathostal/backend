@@ -1,8 +1,9 @@
 {
+  "rates_version": 3,
   "currency": "CLP",
-  "note": "Tarifas referenciales desde. Pueden variar por temporada y ocupación. Confirmación de fechas y pago con reservas.",
+  "note": "Tarifas referenciales desde. Pueden variar por temporada y ocupación. Confirmación solo por WhatsApp con recepción.",
   "includes": [
-    "Baño privado",
+    "Baño privado (en privadas)",
     "Wi-Fi",
     "Calefacción",
     "Desayuno continental"
@@ -13,39 +14,32 @@
   },
   "rooms": [
     {
-      "slug": "family",
-      "name_es": "Familiar / Compartida",
-      "name_en": "Family / Shared",
-      "capacity": "Grupo / literas",
-      "price_from_clp": 19990
-    },
-    {
-      "slug": "king-queen",
-      "name_es": "Matrimonial / Queen",
-      "name_en": "Double / Queen",
+      "slug": "matrimonial-suite",
+      "name_es": "Matrimonial o Suite",
+      "name_en": "Double / Suite",
       "capacity": "2 personas",
       "price_from_clp": 54990
     },
     {
       "slug": "twin",
-      "name_es": "Twin o Triple",
-      "name_en": "Twin Room",
-      "capacity": "2–3 personas",
-      "price_from_clp": 72990
-    },
-    {
-      "slug": "superior-king",
-      "name_es": "King Superior",
-      "name_en": "Superior King",
+      "name_es": "Twin",
+      "name_en": "Twin",
       "capacity": "2 personas",
       "price_from_clp": 54990
     },
     {
-      "slug": "mobility",
-      "name_es": "Movilidad reducida",
-      "name_en": "Accessible Room",
-      "capacity": "2 personas",
-      "price_from_clp": 54990
+      "slug": "triple",
+      "name_es": "Triple",
+      "name_en": "Triple",
+      "capacity": "3 personas",
+      "price_from_clp": 69990
+    },
+    {
+      "slug": "shared",
+      "name_es": "Compartida (por cama)",
+      "name_en": "Shared (per bed)",
+      "capacity": "1 cama / persona",
+      "price_from_clp": 19990
     }
   ]
 }

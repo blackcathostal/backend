@@ -88,7 +88,12 @@ Datos (OBLIGATORIO):
 - Reserva / reservar / “reservame” / “me reservaste” / “quiero reservar” / “hazme una reserva”
   o cualquier pedido de reserva (con o sin fechas) → action=reply. Llama get_hostel_info,
   incluye el whatsapp_url real en el message y pide que escriban por WhatsApp con fechas
-  y cantidad de personas. No confirmes ni hagas la reserva por Instagram/Facebook.
+  y cantidad de personas. SIEMPRE deriva la reserva a WhatsApp.
+- NUNCA inventes el estado de una reserva ni de WhatsApp. No digas “está en gestión”,
+  “ya la estamos procesando”, “ya la vimos”, “quedó confirmada” ni nada similar:
+  este bot NO ve WhatsApp ni recepción. Solo invita a escribir por WhatsApp.
+- Precios: usa SOLO las preguntas frecuentes / tarifas oficiales (Matrimonial o Suite $54.990,
+  Twin $54.990, Triple $69.990, compartida por cama $19.990). No uses $15.000 ni tarifas viejas.
 - Pago, factura, cancelación conflictiva o reclamo → action=escalate.
 - Elogios: agradece y ofrece WhatsApp/correo de la info del hostal.
 - Spam o mensaje vacío → escalate.
@@ -257,6 +262,10 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Si piden reservar (“reservame”, “me reservaste”, “quiero reservar”, etc.): "
         "llama get_hostel_info, responde con action=reply e incluye el whatsapp_url "
         "para que continúen la reserva por WhatsApp. No reserves ni confirmes cupos aquí. "
+        "NUNCA digas que la reserva está en gestión, confirmada o vista en WhatsApp: "
+        "no tienes acceso a WhatsApp ni a recepción. Solo deriva a WhatsApp. "
+        "Tarifas oficiales: Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, "
+        "compartida por cama $19.990 (no uses $15.000). "
         "Si hay consulta real (no un simple hola): vende con calidez, destaca un beneficio "
         "real (Barrio Brasil, desayuno, ubicación, ambiente boutique) e invita suave a "
         "WhatsApp. En un saludo solo, sé humano y corto. Sin inventar promociones. "
@@ -598,9 +607,10 @@ def _guest_turn(
         "solo en preguntas frecuentes. "
         "Si solo saludó (hola/hi), responde humano y breve; no vendas ni listes beneficios. "
         "Si el mensaje es sobre reservar, llama get_hostel_info "
-        "y manda al huésped al WhatsApp (whatsapp_url) para completar la reserva. "
+        "y manda al huésped al WhatsApp (whatsapp_url). Nunca inventes estado de reserva/WhatsApp. "
         "Si hay una consulta real, responde como vendedor: dato + beneficio + cierre suave. "
         "No digas aeropuerto ni ‘buen viaje desde el aeropuerto’ si el huésped no lo mencionó. "
+        "Precios solo de FAQ: Matrimonial/Suite 54990, Twin 54990, Triple 69990, cama 19990. "
         "Usa la web solo si falta el dato. "
         "Luego entrega el JSON final.",
     ]
@@ -705,36 +715,33 @@ def _reservation_whatsapp_reply(
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
     if lang == "en":
         message = (
-            "Perfect — we'd love to host you in Barrio Brasil, steps from the center, "
-            "with continental breakfast included. "
-            f"Message us on WhatsApp {whatsapp} with your dates and guest count "
-            "and we'll lock your room."
+            "Perfect — we'd love to host you in Barrio Brasil, with continental breakfast included. "
+            f"Please write us on WhatsApp {whatsapp} with your dates and guest count; "
+            "reception confirms availability there. We can't see WhatsApp from this chat."
         )
     elif lang == "pt":
         message = (
-            "Claro! Vai adorar ficar no Barrio Brasil: localização central, "
-            "clima boutique e café da manhã continental incluído. "
-            f"Escreva no WhatsApp {whatsapp} com datas e quantas pessoas "
-            "e montamos a reserva."
+            "Claro! Vai adorar o Barrio Brasil, com café da manhã continental incluído. "
+            f"Escreva no WhatsApp {whatsapp} com datas e quantas pessoas; "
+            "a recepção confirma por lá. Por este chat não vemos o WhatsApp."
         )
     elif lang == "fr":
         message = (
-            "Avec plaisir ! Vous allez adorer le Barrio Brasil : quartier central, "
-            "ambiance boutique et petit-déjeuner continental inclus. "
-            f"Écrivez-nous sur WhatsApp {whatsapp} avec vos dates et le nombre de personnes."
+            "Avec plaisir ! Barrio Brasil, petit-déjeuner continental inclus. "
+            f"Écrivez-nous sur WhatsApp {whatsapp} avec vos dates et le nombre de personnes; "
+            "la réception confirme là-bas. Nous ne voyons pas WhatsApp depuis ce chat."
         )
     elif lang == "de":
         message = (
-            "Klar! Barrio Brasil ist zentral, boutique und inkl. Frühstück. "
-            f"Schreib uns auf WhatsApp {whatsapp} mit Daten und Personenanzahl — "
-            "wir reservieren dort."
+            "Klar! Barrio Brasil, inkl. Frühstück. "
+            f"Schreib uns auf WhatsApp {whatsapp} mit Daten und Personenanzahl; "
+            "die Rezeption bestätigt dort. Von diesem Chat aus sehen wir WhatsApp nicht."
         )
     else:
         message = (
-            "¡Claro! Te va a encantar quedarte en Barrio Brasil: ubicación céntrica, "
-            "ambiente boutique y desayuno continental incluido. "
-            f"Escríbenos por WhatsApp {whatsapp} con fechas y cantidad de personas "
-            "y te armamos la reserva."
+            "¡Claro! Te va a encantar Barrio Brasil, con desayuno continental incluido. "
+            f"Escríbenos por WhatsApp {whatsapp} con fechas y cantidad de personas; "
+            "allí recepción te confirma disponibilidad. Por este chat no vemos WhatsApp."
         )
     message = apply_time_greeting(message, is_follow_up=is_follow_up)
     return {

@@ -56,41 +56,41 @@ DEFAULT_SERVICES = [
 
 DEFAULT_ROOMS = [
     {
-        "name": "Habitación Individual",
-        "type": "Individual",
-        "capacity": 1,
-        "price": 35000,
-        "features": "Cama individual, baño privado, Wi-Fi, calefacción, desayuno continental incluido.",
-    },
-    {
         "name": "Habitación Matrimonial",
         "type": "Matrimonial",
         "capacity": 2,
-        "price": 54000,
-        "features": "Cama matrimonial/queen, baño privado, Wi-Fi, desayuno continental incluido. Tarifa directa WhatsApp $54.000 CLP.",
+        "price": 54990,
+        "features": "Cama matrimonial/queen, baño privado, Wi-Fi, desayuno continental incluido. Tarifa desde $54.990 CLP.",
+    },
+    {
+        "name": "Habitación Twin",
+        "type": "Twin",
+        "capacity": 2,
+        "price": 54990,
+        "features": "Dos camas, baño privado, Wi-Fi, desayuno continental incluido. Tarifa desde $54.990 CLP.",
     },
     {
         "name": "Habitación Triple",
         "type": "Triple",
         "capacity": 3,
-        "price": 62000,
-        "features": "Disposición twin/triple, baño privado, Wi-Fi, calefacción, desayuno continental incluido.",
+        "price": 69990,
+        "features": "Triple, baño privado, Wi-Fi, desayuno continental incluido. Tarifa desde $69.990 CLP.",
     },
     {
         "name": "Suite Boutique",
         "type": "Suite",
         "capacity": 2,
-        "price": 79000,
-        "features": "Cama king superior, mayor confort, baño privado, Wi-Fi, calefacción, desayuno continental incluido.",
+        "price": 54990,
+        "features": "Suite, baño privado, Wi-Fi, desayuno continental incluido. Tarifa desde $54.990 CLP.",
     },
     {
         "name": "Dormitorio Compartido",
         "type": "Dormitorio",
         "capacity": 6,
-        "price": 15000,
+        "price": 19990,
         "features": (
-            "Cama individual en dormitorio compartido. Capacidad 6 personas. "
-            "Precio por persona/cama ($15.000 CLP), no por habitación completa. "
+            "Cama individual en dormitorio compartido. "
+            "Precio por persona/cama ($19.990 CLP), no por habitación completa. "
             "Wi-Fi y desayuno continental incluidos."
         ),
     },
@@ -120,12 +120,17 @@ DEFAULT_COMMON_ANSWERS = [
     },
     {
         "topic": "tarifas",
-        "keywords": "tarifa,precio,whatsapp,matrimonial,dormitorio,king,queen,iva",
-        "question": "¿Cuáles son las tarifas para reservas directas por WhatsApp?",
+        "keywords": "tarifa,precio,whatsapp,matrimonial,suite,twin,triple,dormitorio,compartida,cama,iva",
+        "question": "¿Cuáles son las tarifas referenciales de las habitaciones?",
         "answer_guide": (
-            "Matrimonial Cama King/Queen: $54.000 CLP/noche (Desayuno incluido). "
-            "Dormitorio Compartido (4 o 6 camas): $15.000 CLP por cama. "
-            "Todos los precios incluyen IVA."
+            "Tarifas referenciales (pueden variar por temporada): "
+            "Matrimonial o Suite: $54.990 CLP/noche. "
+            "Twin: $54.990 CLP/noche. "
+            "Triple: $69.990 CLP/noche. "
+            "Compartidas (valor por cama): $19.990 CLP. "
+            "Desayuno continental incluido en las tarifas. "
+            "Para reservar o confirmar fechas y disponibilidad, escribir por WhatsApp; "
+            "este canal no ve el estado de WhatsApp ni de recepción."
         ),
         "sort_order": 3,
     },
@@ -242,12 +247,13 @@ DEFAULT_COMMON_ANSWERS = [
     },
     {
         "topic": "dormitory",
-        "keywords": "dormitorio,compartido,cama,hombres,mujeres,sexo,4,6",
+        "keywords": "dormitorio,compartido,compartida,cama,hombres,mujeres,sexo,4,6",
         "question": "¿Cómo funciona el dormitorio compartido?",
         "answer_guide": (
-            "Es un solo tipo de habitación: dormitorio compartido de 4 o 6 camas. "
-            "Se cobra $15.000 CLP por cama (por persona), no por la habitación completa. "
-            "Las plazas se asignan en dormitorios solo hombres o solo mujeres. Los precios incluyen IVA."
+            "Dormitorio compartido: se cobra $19.990 CLP por cama (por persona), "
+            "no por la habitación completa. "
+            "Las plazas se asignan en dormitorios solo hombres o solo mujeres según disponibilidad. "
+            "Para reservar una cama, escribir por WhatsApp con fechas."
         ),
         "sort_order": 15,
     },
@@ -340,27 +346,42 @@ def seed_database(db: Session) -> None:
         for item in DEFAULT_ROOMS:
             db.add(Rooms(**item))
     else:
-        # Backfill empty features on existing rooms once.
+        by_type = {item["type"]: item for item in DEFAULT_ROOMS}
         for room in db.query(Rooms).all():
-            if not (getattr(room, "features", None) or "").strip():
-                match = next(
-                    (r for r in DEFAULT_ROOMS if r["type"] == room.type),
-                    None,
-                )
-                if match:
-                    room.features = match["features"]
+            match = by_type.get(room.type)
+            if not match:
+                continue
+            room.price = match["price"]
+            room.features = match["features"]
+            if match.get("name"):
+                room.name = match["name"]
+            if match.get("capacity"):
+                room.capacity = match["capacity"]
 
     get_or_create_hostel_info(db)
 
+    # Official price FAQ topics must stay in sync on every seed/startup.
+    FORCE_FAQ_TOPICS = {"tarifas", "dormitory"}
     if db.query(CommonAnswers).count() == 0:
         for item in DEFAULT_COMMON_ANSWERS:
             db.add(CommonAnswers(**item, is_active=True))
     else:
         by_topic = {item["topic"]: item for item in DEFAULT_COMMON_ANSWERS}
+        existing_topics = {row.topic for row in db.query(CommonAnswers).all()}
+        for item in DEFAULT_COMMON_ANSWERS:
+            if item["topic"] not in existing_topics:
+                db.add(CommonAnswers(**item, is_active=True))
         for row in db.query(CommonAnswers).all():
-            legacy = LEGACY_ENGLISH_ANSWERS.get(row.topic)
             updated = by_topic.get(row.topic)
-            if not legacy or not updated:
+            if not updated:
+                continue
+            if row.topic in FORCE_FAQ_TOPICS:
+                row.question = updated["question"]
+                row.answer_guide = updated["answer_guide"]
+                row.keywords = updated["keywords"]
+                continue
+            legacy = LEGACY_ENGLISH_ANSWERS.get(row.topic)
+            if not legacy:
                 continue
             if row.question.strip() == legacy[0] and row.answer_guide.strip() == legacy[1]:
                 row.question = updated["question"]
@@ -369,3 +390,7 @@ def seed_database(db: Session) -> None:
 
     db.commit()
     ensure_default_terms(db)
+    # Refresh packaged Instagram rates cache when defaults are newer.
+    from app.services.room_rates import load_room_rates
+
+    load_room_rates()

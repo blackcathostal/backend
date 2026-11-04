@@ -27,12 +27,30 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _rates_version(data: dict[str, Any] | None) -> int:
+    try:
+        return int((data or {}).get("rates_version") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def load_room_rates() -> dict[str, Any]:
     _ensure_cache_dir()
-    for path in (CACHE_FILE, DEFAULT_FILE):
-        data = _read_json(path)
-        if data and isinstance(data.get("rooms"), list):
-            return data
+    default = _read_json(DEFAULT_FILE)
+    cached = _read_json(CACHE_FILE)
+    # Prefer packaged defaults when newer so production picks up official price updates.
+    if default and isinstance(default.get("rooms"), list):
+        if _rates_version(default) > _rates_version(cached):
+            CACHE_FILE.write_text(
+                json.dumps(default, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return deepcopy(default)
+        if cached and isinstance(cached.get("rooms"), list):
+            return cached
+        return deepcopy(default)
+    if cached and isinstance(cached.get("rooms"), list):
+        return cached
     return {
         "currency": "CLP",
         "note": "Tarifas referenciales desde.",
@@ -72,7 +90,13 @@ def save_room_rates(payload: dict[str, Any]) -> dict[str, Any]:
     if not cleaned_rooms:
         raise ValueError("No hay habitaciones válidas")
 
+    current = load_room_rates()
+    try:
+        version = int(payload.get("rates_version") or current.get("rates_version") or 0)
+    except (TypeError, ValueError):
+        version = int(current.get("rates_version") or 0)
     out = {
+        "rates_version": max(version, 3),
         "currency": str(payload.get("currency") or "CLP").strip() or "CLP",
         "note": str(payload.get("note") or "").strip(),
         "includes": [
