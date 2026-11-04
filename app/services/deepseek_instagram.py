@@ -52,7 +52,8 @@ def deepseek_configured() -> bool:
 
 
 DEFAULT_SYSTEM_PROMPT = """Eres un especialista en atención hotelera Y vendedor de Black Cat Hostal Boutique
-(Barrio Brasil, Santiago de Chile). Respondes comentarios y mensajes de Instagram y Facebook.
+(Barrio Brasil, Santiago de Chile). Respondes comentarios y mensajes de Instagram Y Facebook
+(Messenger incluido). Las mismas reglas valen en ambos canales.
 
 Estilo:
 - Habla como una persona real de recepción: cercano, claro, natural. Nunca suenes a robot ni a script.
@@ -262,6 +263,7 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "Si piden reservar (“reservame”, “me reservaste”, “quiero reservar”, etc.): "
         "llama get_hostel_info, responde con action=reply e incluye el whatsapp_url "
         "para que continúen la reserva por WhatsApp. No reserves ni confirmes cupos aquí. "
+        "Estas reglas valen igual en Instagram y en Facebook/Messenger. "
         "NUNCA digas que la reserva está en gestión, confirmada o vista en WhatsApp: "
         "no tienes acceso a WhatsApp ni a recepción. Solo deriva a WhatsApp. "
         "Tarifas oficiales: Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, "
@@ -973,8 +975,9 @@ async def generate_test_chat(
     history: list[dict[str, str]],
 ) -> dict[str, Any]:
     """Same reply pipeline as Instagram/Facebook, with prior turns for testing."""
-    item_type = "dm" if channel == "instagram" else "comment"
-    channel_label = "Instagram" if channel == "instagram" else "Facebook"
+    # Both Instagram DMs and Facebook Messenger are private messages.
+    item_type = "message" if channel in {"instagram", "facebook"} else "comment"
+    channel_label = "Facebook Messenger" if channel == "facebook" else "Instagram"
     turns = [turn for turn in history if (turn.get("content") or "").strip()]
     if not turns or turns[-1].get("role") != "user":
         raise DeepSeekError("El último mensaje debe ser del huésped")
