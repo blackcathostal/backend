@@ -324,6 +324,15 @@ def _comment_group_key(item: dict[str, Any]) -> str:
     author = str(item.get("author_id") or "").strip()
     if not author:
         author = str(item.get("author_username") or "").strip().lower().lstrip("@")
+    if not author:
+        # Collab comments often lack username — never merge all anonymous bubbles
+        # into one fake thread (that made parking look like the guest said it).
+        anon = (
+            str(item.get("meta_comment_id") or "").strip()
+            or str(item.get("external_id") or "").strip()
+            or str(item.get("id") or "").strip()
+        )
+        return f"{media}|anon:{anon}"
     return f"{media}|{author}"
 
 
@@ -689,7 +698,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-collab-noloop-v20",
+        "comment_poller": "reels-collab-noloop-v21",
         "poller_debug": {
             "own": getattr(sync_recent_comments, "last_debug", {}) or {},
             "collaborative": getattr(
@@ -1429,7 +1438,17 @@ _BOT_PUBLIC_PHRASE_RE = re.compile(
     r"share the rates|"
     r"passamos os valores|"
     r"manda(?:r)?\s+(?:um\s+)?direct|"
-    r"chama no direct"
+    r"chama no direct|"
+    # Own public answers often come back without username — never treat as guest.
+    r"tenemos estacionamiento|"
+    r"contamos con estacionamiento|"
+    r"cupos limitados|"
+    r"sujeto a confirmaci[oó]n previa|"
+    r"matrimonial/suite|"
+    r"cama compartida\s*\(noche\)|"
+    r"^s[ií],?\s+tenemos\b|"
+    r"^as[ií] es\b|"
+    r"nos alegra que te sirva"
     r")",
     re.IGNORECASE,
 )
@@ -2850,13 +2869,15 @@ def _related_dm_items(item: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _related_comment_items(item: dict[str, Any]) -> list[dict[str, Any]]:
     """All comments from the same guest on the same post (one public chain)."""
-    if item.get("type") != "comment":
+    if item.get("type") not in {"comment", "mention"}:
         return [item]
     key = _comment_group_key(item)
     related = [
         row
-        for row in list_inbox(item_type="comment")
-        if _comment_group_key(row) == key
+        for row in list_inbox()
+        if row.get("type") in {"comment", "mention"}
+        and _comment_group_key(row) == key
+        and not _looks_like_own_public_reply(str(row.get("text") or ""))
     ]
     related.sort(key=lambda row: str(row.get("created_at") or ""))
     return related or [item]

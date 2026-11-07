@@ -54,6 +54,7 @@ _HOTEL_INQUIRY_RE = re.compile(
     r"how\s+much|per\s+night|disponib|availability|"
     r"habitaci[oó]n(?:es)?|dormitor|matrimonial|suite|twin|triple|compartid|"
     r"check[\s-]?in|check[\s-]?out|desayuno|breakfast|wifi|wi[\s-]?fi|"
+    r"estacionamiento|parking|aparcamiento|"
     r"ubicaci[oó]n|direcci[oó]n|d[oó]nde\s+(?:quedan|est[aá]n|queda)|"
     r"mensual|por\s+noche|capacidad|cu[aá]ntas?\s+personas|"
     r"reserv(?:a|ar)|booking|book(?:ing)?|voluntari"
