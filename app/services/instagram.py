@@ -684,7 +684,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-24h-v6",
+        "comment_poller": "reels-24h-v7",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1310,13 +1310,13 @@ async def send_dm_image(recipient_id: str, image_url: str, *, open_url: str = ""
 
 # Meta: comment webhooks do NOT fire for Reels. Poll Graph instead.
 COMMENT_POLL_INTERVAL_SECONDS = 45.0
-COMMENT_POLL_MEDIA_LIMIT = 80
-COMMENT_SYNC_MEDIA_LIMIT = 200
+COMMENT_POLL_MEDIA_LIMIT = 120
+COMMENT_SYNC_MEDIA_LIMIT = 400
 # Only ingest / auto-answer comments from the last 24 hours.
 COMMENT_MAX_AGE_SECONDS = 24 * 3600
 # Always open /comments for the newest N media; otherwise only when count grew.
-COMMENT_ALWAYS_CHECK_NEWEST = 15
-COMMENT_FETCH_BUDGET = 35
+COMMENT_ALWAYS_CHECK_NEWEST = 20
+COMMENT_FETCH_BUDGET = 50
 
 
 def _inbound_is_fresh(
@@ -1453,8 +1453,7 @@ async def sync_recent_comments(
     prev_counts = _load_media_comment_counts()
     next_counts = dict(prev_counts)
     priority: list[dict[str, Any]] = []
-    seed: list[dict[str, Any]] = []
-    reels_with_comments: list[dict[str, Any]] = []
+    with_comments: list[dict[str, Any]] = []
     for index, media in enumerate(media_rows):
         media_id = str(media.get("id") or "").strip()
         if not media_id:
@@ -1462,21 +1461,21 @@ async def sync_recent_comments(
         count = int(media.get("comments_count") or 0)
         previous = int(prev_counts.get(media_id, -1))
         # IMPORTANT: do NOT write the live count into cache until we actually
-        # fetch comments. Otherwise a new Reel comment is "acked" and never read.
+        # fetch comments. Otherwise a new comment is "acked" and never read.
         if count <= 0:
             next_counts[media_id] = 0
             continue
-        if _is_reel_media(media):
-            reels_with_comments.append(media)
+        with_comments.append(media)
         if index < COMMENT_ALWAYS_CHECK_NEWEST or (previous >= 0 and count > previous):
             priority.append(media)
-        elif previous < 0:
-            seed.append(media)
-    # Reels in feed order (newest first), not by total comment count — quiet
-    # reels with a brand-new question were losing to ancient viral ones.
+        elif previous < 0 and _is_reel_media(media):
+            # Unseen reels jump the queue — Meta never webhooks their comments.
+            priority.append(media)
+    # Feed order for the rest (posts + reels). Do not starve older quiet posts
+    # behind dozens of busy reels.
     seen_ids: set[str] = set()
     to_fetch: list[dict[str, Any]] = []
-    for media in [*priority, *reels_with_comments, *seed]:
+    for media in [*priority, *with_comments]:
         mid = str(media.get("id") or "")
         if not mid or mid in seen_ids:
             continue
@@ -1487,13 +1486,15 @@ async def sync_recent_comments(
 
     synced: list[dict[str, Any]] = []
     to_reply: list[str] = []
+    scanned_fresh = 0
     for media in to_fetch:
         media_id = str(media.get("id") or "")
         count = int(media.get("comments_count") or 0)
         rows = await _fetch_media_comments(media_id, token)
-        # Only mark this count as seen after a successful comments read.
         next_counts[media_id] = count
         for c in rows:
+            if _inbound_is_fresh(str(c.get("timestamp") or "")):
+                scanned_fresh += 1
             item = _ingest_comment_row(c, media=media)
             if not item:
                 continue
@@ -1512,6 +1513,14 @@ async def sync_recent_comments(
             await schedule_auto_reply(item_id)
         except Exception:  # noqa: BLE001
             logger.exception("Could not schedule auto-reply for synced comment %s", item_id)
+    # Attach lightweight debug on the list for callers that inspect __dict__ / return.
+    logger.info(
+        "IG comment sync media=%s fetch=%s fresh_seen=%s synced=%s",
+        len(media_rows),
+        len(to_fetch),
+        scanned_fresh,
+        len(synced),
+    )
     return synced
 
 

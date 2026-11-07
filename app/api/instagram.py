@@ -314,12 +314,22 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     subscription = await ig.subscribe_instagram_webhooks()
     if not subscription.get("ok"):
         warning = subscription.get("error")
+    fresh_preview = [
+        {
+            "author": c.get("author_username"),
+            "text": (c.get("text") or "")[:120],
+            "created_at": c.get("created_at"),
+            "status": c.get("status"),
+        }
+        for c in comments[:10]
+    ]
     return {
         "synced": len(comments),
         "comments": len(comments),
         "messages": 0,
         "warning": warning,
         "comment_poller": ig.connection_status().get("comment_poller"),
+        "preview": fresh_preview,
     }
 
 
