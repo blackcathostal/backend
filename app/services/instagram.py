@@ -2199,7 +2199,55 @@ def _echo_event(event: dict[str, Any]) -> tuple[str, str, str]:
     return recipient, str(message.get("mid") or ""), text
 
 
+async def _store_reaction_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Guest ❤️/👍 on a DM. Store in the thread; never auto-reply to a reaction."""
+    reaction = event.get("reaction")
+    if not isinstance(reaction, dict):
+        return None
+    own_ids = _own_instagram_ids()
+    sender = str((event.get("sender") or {}).get("id") or "")
+    recipient = str((event.get("recipient") or {}).get("id") or "")
+    if not sender or sender in own_ids:
+        return None
+    guest_id = sender
+    if recipient and recipient not in own_ids and recipient != guest_id:
+        # Unexpected shape — keep the sender as the guest.
+        pass
+    action = str(reaction.get("action") or "react").strip().lower() or "react"
+    emoji = str(reaction.get("emoji") or "").strip()
+    kind = str(reaction.get("reaction") or "").strip()
+    mid = str(reaction.get("mid") or "").strip()
+    label = emoji or kind or "❤️"
+    if action == "unreact":
+        text = f"Quitó la reacción {label}".strip()
+    else:
+        text = f"{label} (reacción)"
+    external = f"reaction:{mid or 'unknown'}:{action}:{guest_id}:{label}"
+    username = await _instagram_username(guest_id)
+    item = ingest_inbound(
+        item_type="message",
+        external_id=external,
+        text=text,
+        author_id=guest_id,
+        author_username=username,
+        thread_id=guest_id,
+        peer_id=guest_id,
+        direction="in",
+    )
+    if username and not item.get("author_username"):
+        item["author_username"] = username
+    # Reactions are signals, not questions — never trigger DeepSeek.
+    if item.get("status") == "pending":
+        item["status"] = "skipped"
+        item["escalation_reason"] = "reaction"
+        item["updated_at"] = _now_iso()
+        item = upsert_inbox_item(item)
+    return item
+
+
 async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(event.get("reaction"), dict):
+        return await _store_reaction_event(event)
     guest_id, echo_mid, echo_text = _echo_event(event)
     if guest_id and echo_text:
         return ingest_inbound(
@@ -2261,7 +2309,12 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
     except Exception:  # noqa: BLE001
         logger.exception("Could not silence pending own Instagram comments")
     results: list[dict[str, Any]] = []
-    dm_fields = {"messages", "message_echoes", "messaging_postbacks"}
+    dm_fields = {
+        "messages",
+        "message_echoes",
+        "messaging_postbacks",
+        "message_reactions",
+    }
     for entry in payload.get("entry") or []:
         for messaging in (entry.get("messaging") or []) + (entry.get("standby") or []):
             item = await _store_dm_event(messaging)
@@ -2273,7 +2326,7 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
             field = str(change.get("field") or "")
             if field in dm_fields or (
                 isinstance(value.get("message"), dict) and value.get("sender")
-            ):
+            ) or isinstance(value.get("reaction"), dict):
                 item = await _store_dm_event(value)
                 if item:
                     results.append(item)
