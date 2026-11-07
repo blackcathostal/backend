@@ -39,10 +39,13 @@ AUTO_REPLY_DEBOUNCE_SECONDS = 7.0
 AUTO_REPLY_MAX_BURST_SECONDS = 20.0
 # Don't ignore a new "hola" forever after an old greeting reply.
 GREETING_SKIP_WINDOW_SECONDS = 120.0
+# Collab/foreign: avoid spamming the long DM invite; still answer new asks.
+FOREIGN_REDIRECT_COOLDOWN_SECONDS = 12 * 60
 _auto_reply_debounce_tasks: dict[str, asyncio.Task[Any]] = {}
 _auto_reply_debounce_deadline: dict[str, float] = {}
 _auto_reply_debounce_lock = asyncio.Lock()
 _auto_reply_peer_locks: dict[str, asyncio.Lock] = {}
+_foreign_redirect_media_locks: dict[str, asyncio.Lock] = {}
 logger = logging.getLogger(__name__)
 _HELP_OFFER_MARKERS = (
     "en qué te puedo ayudar",
@@ -686,7 +689,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-collab-noloop-v18",
+        "comment_poller": "reels-collab-noloop-v19",
         "poller_debug": {
             "own": getattr(sync_recent_comments, "last_debug", {}) or {},
             "collaborative": getattr(
@@ -1417,6 +1420,7 @@ _BOT_PUBLIC_PHRASE_RE = re.compile(
     r"wie k[oö]nnen wir helfen|"
     r"escr[ií]benos por interno|"
     r"escribe(?:nos)?\s+por\s+interno|"
+    r"por interno te (?:ayudamos|pasamos)|"
     r"compartir los precios|"
     r"write us (?:in )?(?:dm|private|interno)|"
     r"\bdm us\b|"
@@ -1435,6 +1439,11 @@ _FOREIGN_REEL_DM_REDIRECT = {
     ),
     "en": "Hi! DM us and we'll share the rates for what you need.",
     "pt": "Oi! Chama no direct que te passamos os valores conforme o que precisa.",
+}
+_FOREIGN_REEL_DM_REDIRECT_SHORT = {
+    "es": "Por interno te pasamos eso.",
+    "en": "DM us and we'll share that.",
+    "pt": "Chama no direct que te passamos isso.",
 }
 
 
@@ -2529,40 +2538,54 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
         return await _run_auto_reply_locked(item_id)
 
 
-def _foreign_reel_dm_redirect(inbound_text: str) -> str:
+def _foreign_redirect_lang(inbound_text: str) -> str:
     sample = (inbound_text or "").lower()
     if re.search(r"\b(hello|hi|price|room|book|rate)\b", sample):
-        return _FOREIGN_REEL_DM_REDIRECT["en"]
+        return "en"
     if re.search(r"\b(oi|olá|ola|preço|preco|quarto)\b", sample):
-        return _FOREIGN_REEL_DM_REDIRECT["pt"]
-    return _FOREIGN_REEL_DM_REDIRECT["es"]
+        return "pt"
+    return "es"
 
 
-def _already_sent_foreign_redirect(item: dict[str, Any]) -> bool:
-    """At most one 'escríbenos por interno' per foreign/collab reel.
+def _foreign_reel_dm_redirect(inbound_text: str, *, short: bool = False) -> str:
+    lang = _foreign_redirect_lang(inbound_text)
+    table = _FOREIGN_REEL_DM_REDIRECT_SHORT if short else _FOREIGN_REEL_DM_REDIRECT
+    return table[lang]
 
-    Graph often omits author on collab comments, so per-guest dedupe fails and the
-    bot loops. One public DM invite on the media is enough.
-    """
-    media_id = str(item.get("media_id") or item.get("thread_id") or "")
-    if not media_id:
-        return False
-    # Already answered this bubble.
-    for reply in item.get("replies") or []:
-        if _looks_like_own_public_reply(str(reply.get("text") or "")):
-            return True
+
+def _seconds_since_media_foreign_redirect(media_id: str) -> float | None:
+    """Age of the newest DM-redirect we posted on this media, if any."""
+    mid = str(media_id or "").strip()
+    if not mid:
+        return None
+    newest: datetime | None = None
     for row in list_inbox():
-        if str(row.get("media_id") or row.get("thread_id") or "") != media_id:
+        if str(row.get("media_id") or row.get("thread_id") or "") != mid:
             continue
         if row.get("type") not in {"comment", "mention"}:
             continue
+        candidates: list[tuple[Any, str]] = []
         for reply in row.get("replies") or []:
-            if _looks_like_own_public_reply(str(reply.get("text") or "")):
-                return True
-        # Our own redirect sometimes comes back as a new inbox row.
-        if row.get("id") != item.get("id") and _looks_like_own_public_reply(
-            str(row.get("text") or "")
-        ):
+            candidates.append((reply.get("created_at"), str(reply.get("text") or "")))
+        candidates.append((row.get("created_at"), str(row.get("text") or "")))
+        for stamp_raw, text in candidates:
+            if not _looks_like_own_public_reply(text):
+                continue
+            stamp = _parse_iso(str(stamp_raw or ""))
+            if not stamp:
+                continue
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if newest is None or stamp > newest:
+                newest = stamp
+    if newest is None:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - newest).total_seconds())
+
+
+def _item_already_has_public_reply(item: dict[str, Any]) -> bool:
+    for reply in item.get("replies") or []:
+        if str(reply.get("text") or "").strip():
             return True
     return False
 
@@ -2626,21 +2649,41 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
             latest["escalation_reason"] = "caption_mention_only"
             latest["updated_at"] = _now_iso()
             return upsert_inbox_item(latest)
-        if _already_sent_foreign_redirect(latest):
+        if _item_already_has_public_reply(latest):
             latest["status"] = "skipped"
-            latest["escalation_reason"] = "foreign_redirect_already_sent"
+            latest["escalation_reason"] = "already_replied"
             latest["updated_at"] = _now_iso()
             return upsert_inbox_item(latest)
-        for row in burst[:-1]:
-            row["status"] = "batched"
-            row["escalation_reason"] = "merged_burst"
-            row["updated_at"] = _now_iso()
-            upsert_inbox_item(row)
-        return await send_inbox_reply(
-            str(latest.get("id") or item_id),
-            _foreign_reel_dm_redirect(inbound),
-            source="deepseek",
+        media_id = str(latest.get("media_id") or latest.get("thread_id") or "")
+        media_lock = _foreign_redirect_media_locks.setdefault(
+            media_id or str(latest.get("id") or item_id),
+            asyncio.Lock(),
         )
+        if media_lock.locked():
+            latest["status"] = "skipped"
+            latest["escalation_reason"] = "foreign_redirect_in_flight"
+            latest["updated_at"] = _now_iso()
+            return upsert_inbox_item(latest)
+        async with media_lock:
+            # Re-check after waiting: another worker may have just replied.
+            latest = get_inbox_item(str(latest.get("id") or item_id)) or latest
+            if _item_already_has_public_reply(latest):
+                latest["status"] = "skipped"
+                latest["escalation_reason"] = "already_replied"
+                latest["updated_at"] = _now_iso()
+                return upsert_inbox_item(latest)
+            age = _seconds_since_media_foreign_redirect(media_id)
+            short = age is not None and age < FOREIGN_REDIRECT_COOLDOWN_SECONDS
+            for row in burst[:-1]:
+                row["status"] = "batched"
+                row["escalation_reason"] = "merged_burst"
+                row["updated_at"] = _now_iso()
+                upsert_inbox_item(row)
+            return await send_inbox_reply(
+                str(latest.get("id") or item_id),
+                _foreign_reel_dm_redirect(inbound, short=short),
+                source="deepseek",
+            )
 
     try:
         db = SessionLocal()
