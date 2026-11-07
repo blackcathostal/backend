@@ -548,8 +548,10 @@ async def reply_messenger(thread_id: str, message: str) -> dict[str, Any]:
     peer_id = str(thread.get("peer_id") or "")
     if not peer_id:
         raise InstagramError("Falta el destinatario de Messenger")
-    text, wa_url = extract_whatsapp_link(raw)
-    if wa_url:
+    from app.services.deepseek_instagram import whatsapp_click_url
+
+    text, wa_direct = extract_whatsapp_link(raw)
+    if wa_direct:
         body = (text or "Escríbenos por WhatsApp.").strip()
         if len(body) > 640:
             body = body[:637].rstrip() + "…"
@@ -560,7 +562,7 @@ async def reply_messenger(thread_id: str, message: str) -> dict[str, Any]:
                     "template_type": "button",
                     "text": body,
                     "buttons": [
-                        {"type": "web_url", "url": wa_url, "title": "WhatsApp"},
+                        {"type": "web_url", "url": wa_direct, "title": "WhatsApp"},
                     ],
                 },
             }
@@ -575,9 +577,11 @@ async def reply_messenger(thread_id: str, message: str) -> dict[str, Any]:
                     "messaging_type": "RESPONSE",
                 },
             )
-            text = f"{body} {wa_url}".strip()
+            text = body
         except InstagramError:
-            text = raw
+            # Never paste wa.me into Messenger text (triggers WhatsApp OG image).
+            share = whatsapp_click_url(wa_direct)
+            text = f"{body} {share}".strip()
             result = await _graph_post(
                 f"/{conn['page_id']}/messages",
                 conn["page_access_token"],

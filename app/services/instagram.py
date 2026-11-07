@@ -931,19 +931,24 @@ async def send_dm_whatsapp_button(
 
 
 async def send_dm(recipient_id: str, message: str) -> dict[str, Any]:
-    from app.services.deepseek_instagram import extract_whatsapp_link
+    from app.services.deepseek_instagram import extract_whatsapp_link, whatsapp_click_url
 
-    text, wa_url = extract_whatsapp_link(message or "")
-    if wa_url:
+    text, wa_direct = extract_whatsapp_link(message or "")
+    if wa_direct:
+        # Prefer button (no OG card). Never fall back to raw wa.me in text.
         try:
             return await send_dm_whatsapp_button(
                 recipient_id,
                 text or "Escríbenos por WhatsApp.",
-                wa_url,
+                wa_direct,
             )
-        except InstagramError:
-            # Fall back to plain text with the link (may show preview).
-            text = (message or "").strip()
+        except InstagramError as button_exc:
+            logger.warning(
+                "WhatsApp button failed, using preview-safe share link: %s",
+                button_exc,
+            )
+            share = whatsapp_click_url(wa_direct)
+            text = f"{text or 'Escríbenos por WhatsApp.'} {share}".strip()
     else:
         text = (message or "").strip()
     if not text:

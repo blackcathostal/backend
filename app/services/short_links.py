@@ -138,6 +138,31 @@ def resolve_short_link(code: str) -> str:
     return ""
 
 
+def whatsapp_share_url(whatsapp_url: str = "") -> str:
+    """Public /api/w/… landing (no OG image). Never paste wa.me into IG text."""
+    raw = str(whatsapp_url or "").strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        digits = "56949105984"
+    if digits.startswith("9") and len(digits) == 9:
+        digits = f"56{digits}"
+    if not digits.startswith("56"):
+        digits = f"56{digits}" if len(digits) >= 8 else "56949105984"
+    return f"{_public_short_origin()}/api/w/{digits}"
+
+
+def whatsapp_direct_url(whatsapp_url: str = "") -> str:
+    raw = str(whatsapp_url or "").strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        digits = "56949105984"
+    if digits.startswith("9") and len(digits) == 9:
+        digits = f"56{digits}"
+    if not digits.startswith("56"):
+        digits = f"56{digits}" if len(digits) >= 8 else "56949105984"
+    return f"https://wa.me/{digits}"
+
+
 def ver_mapa_message(maps_url: str, *, language: str = "es") -> str:
     """Short tap target for Instagram: label + clickable short URL."""
     url = str(maps_url or "").strip()

@@ -276,20 +276,32 @@ def strip_opening_greeting(message: str) -> str:
 
 def whatsapp_digits(whatsapp_url: str = "") -> str:
     raw = (whatsapp_url or "").strip()
-    match = _WA_ME_RE.search(raw) or _WA_ME_PLAIN_RE.search(raw)
-    if match:
-        return match.group(1)
+    for pattern in (_WA_ME_RE, _WA_ME_PLAIN_RE, _SHARE_WA_RE):
+        match = pattern.search(raw)
+        if match:
+            return match.group(1)
     digits = re.sub(r"\D", "", raw)
+    # Prefer a Chile mobile block if the string had a long digit soup.
+    chile = re.search(r"56\d{9,11}", digits)
+    if chile:
+        return chile.group(0)
     if digits.startswith("56") and len(digits) >= 11:
-        return digits
+        return digits[:11] if len(digits) > 13 else digits
     if digits.startswith("9") and len(digits) == 9:
         return f"56{digits}"
     return digits or "56949105984"
 
 
-def whatsapp_click_url(whatsapp_url: str = "") -> str:
-    """Canonical WhatsApp link (https://wa.me/...)."""
+def whatsapp_direct_url(whatsapp_url: str = "") -> str:
+    """Real WhatsApp deep link (only for buttons / landing redirect, never IG text)."""
     return f"https://wa.me/{whatsapp_digits(whatsapp_url)}"
+
+
+def whatsapp_click_url(whatsapp_url: str = "") -> str:
+    """Public share link without WhatsApp OG image (safe to put in IG text)."""
+    from app.services.short_links import whatsapp_share_url
+
+    return whatsapp_share_url(whatsapp_digits(whatsapp_url))
 
 
 def whatsapp_phone_display(whatsapp_url: str = "") -> str:
@@ -316,37 +328,45 @@ _RECEPTION_CLAIM_RE = re.compile(
     r")[^.!?…]*[.!?…]?"
 )
 _PHONE_AS_WA_RE = re.compile(
-    r"(?<!\w)(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+?569\d{8})(?!\w)"
+    r"(?<![/\d\w])(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+?569\d{8})(?!\w)"
+)
+_SHARE_WA_RE = re.compile(
+    r"https?://(?:api\.)?blackcathostal\.com/api/w/(56\d{8,12})\S*",
+    re.IGNORECASE,
+)
+_ANY_WA_TOKEN_RE = re.compile(
+    r"(?:"
+    r"https?://(?:api\.)?blackcathostal\.com/api/w/56\d{8,12}\S*"
+    r"|https?://(?:wa\.me/|api\.whatsapp\.com/send\?phone=)\d{8,15}\S*"
+    r"|wa\.me/\d{8,15}"
+    r"|(?<![/\d\w])(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+?569\d{8})(?!\w)"
+    r")",
+    re.IGNORECASE,
 )
 
 
 def sanitize_outbound_message(message: str) -> str:
-    """Normalize WhatsApp to https://wa.me/... (IG sends it as a button, not OG image)."""
+    """Normalize WhatsApp mentions to ONE /api/w/… link (no WhatsApp OG image)."""
     text = message or ""
-
-    def _replace_wa(match: re.Match[str]) -> str:
-        return whatsapp_click_url(match.group(0))
-
-    def _replace_phone(match: re.Match[str]) -> str:
-        return whatsapp_click_url(match.group(0))
-
-    text = _WA_ME_RE.sub(_replace_wa, text)
-    text = _WA_ME_PLAIN_RE.sub(_replace_wa, text)
-    text = _PHONE_AS_WA_RE.sub(_replace_phone, text)
+    found = _ANY_WA_TOKEN_RE.search(text)
+    if found:
+        share = whatsapp_click_url(found.group(0))
+        text = _ANY_WA_TOKEN_RE.sub(" ", text)
+        text = f"{text.strip()} {share}".strip()
     text = _RECEPTION_CLAIM_RE.sub(" ", text)
     return re.sub(r"\s{2,}", " ", re.sub(r"\n{3,}", "\n\n", text)).strip()
 
 
 def extract_whatsapp_link(message: str) -> tuple[str, str]:
-    """Split message into (text_without_url, https://wa.me/... or '')."""
+    """Split into (text_without_url, direct https://wa.me/... for button, or '')."""
     text = message or ""
-    match = _WA_ME_RE.search(text) or _WA_ME_PLAIN_RE.search(text)
+    match = _ANY_WA_TOKEN_RE.search(text)
     if not match:
         return text.strip(), ""
-    url = whatsapp_click_url(match.group(0))
-    cleaned = text[: match.start()] + text[match.end() :]
+    direct = whatsapp_direct_url(match.group(0))
+    cleaned = _ANY_WA_TOKEN_RE.sub(" ", text)
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,;-")
-    return cleaned, url
+    return cleaned, direct
 
 
 def thread_already_shared_whatsapp(prior: list[dict[str, Any]] | None) -> bool:
@@ -354,7 +374,12 @@ def thread_already_shared_whatsapp(prior: list[dict[str, Any]] | None) -> bool:
         if turn.get("role") != "assistant":
             continue
         text = str(turn.get("content") or "").lower()
-        if "whatsapp" in text or "+56" in text or "wa.me" in text:
+        if (
+            "whatsapp" in text
+            or "+56" in text
+            or "wa.me" in text
+            or "/api/w/" in text
+        ):
             return True
     return False
 
