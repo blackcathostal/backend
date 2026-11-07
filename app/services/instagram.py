@@ -63,12 +63,17 @@ SCOPES = [
     "business_management",
 ]
 
+# DMs + public comments/mentions. Mentions = @hotel in captions/comments on
+# OTHER people's posts/reels (Stories are not supported by Meta).
 MESSAGE_WEBHOOK_FIELDS = (
     "messages",
     "messaging_postbacks",
     "message_reads",
     "messaging_referrals",
     "message_reactions",
+    "comments",
+    "live_comments",
+    "mentions",
 )
 
 
@@ -850,19 +855,33 @@ async def exchange_code_and_connect(code: str) -> dict[str, Any]:
 
 
 async def subscribe_instagram_webhooks(conn: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Ask Meta to deliver Instagram DMs for this Page, not only comments."""
+    """Ask Meta to deliver DMs, comments, and @mentions for this Page/IG account."""
     conn = conn or _require_connection()
     page_id = conn.get("page_id")
+    ig_user_id = conn.get("ig_user_id")
     token = conn.get("page_access_token")
     if not page_id or not token:
         return {"ok": False, "error": "Falta la página de Facebook conectada."}
+    fields = ",".join(MESSAGE_WEBHOOK_FIELDS)
     try:
-        result = await _graph_post(
+        page_result = await _graph_post(
             f"/{page_id}/subscribed_apps",
             token,
-            {"subscribed_fields": ",".join(MESSAGE_WEBHOOK_FIELDS)},
+            {"subscribed_fields": fields},
         )
-        return {"ok": True, "result": result}
+        ig_result: dict[str, Any] | None = None
+        # Instagram object subscription (mentions/comments on others' media).
+        if ig_user_id:
+            try:
+                ig_result = await _graph_post(
+                    f"/{ig_user_id}/subscribed_apps",
+                    token,
+                    {"subscribed_fields": fields},
+                )
+            except InstagramError as exc:
+                logger.warning("IG subscribed_apps partial failure: %s", exc)
+                ig_result = {"ok": False, "error": str(exc)}
+        return {"ok": True, "result": page_result, "ig_result": ig_result}
     except InstagramError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -881,6 +900,97 @@ async def reply_to_comment(comment_id: str, message: str) -> dict[str, Any]:
         conn["page_access_token"],
         {"message": message},
     )
+
+
+async def reply_to_mention(
+    *,
+    media_id: str,
+    message: str,
+    comment_id: str | None = None,
+) -> dict[str, Any]:
+    """Public reply when someone @mentions the hotel on another account's post/reel."""
+    conn = _require_connection()
+    ig_user_id = conn.get("ig_user_id")
+    if not ig_user_id:
+        raise InstagramError("Falta ig_user_id para responder menciones")
+    if not media_id:
+        raise InstagramError("Falta media_id para responder la mención")
+    payload: dict[str, Any] = {"media_id": media_id, "message": message}
+    if comment_id:
+        payload["comment_id"] = comment_id
+    return await _graph_post(
+        f"/{ig_user_id}/mentions",
+        conn["page_access_token"],
+        payload,
+    )
+
+
+async def fetch_mention_details(
+    *,
+    media_id: str | None,
+    comment_id: str | None,
+) -> dict[str, Any]:
+    """Webhook mentions only send ids — pull caption/comment text + author from Graph."""
+    conn = _require_connection()
+    ig_user_id = conn["ig_user_id"]
+    token = conn["page_access_token"]
+    text = ""
+    author_id = ""
+    author_username = ""
+    if comment_id:
+        try:
+            data = await _graph_get(
+                f"/{ig_user_id}",
+                token,
+                {
+                    "fields": (
+                        f"mentioned_comment.comment_id({comment_id})"
+                        "{text,username,from{id,username},media{id}}"
+                    ),
+                },
+            )
+            mentioned = data.get("mentioned_comment") or {}
+            text = str(mentioned.get("text") or "")
+            author_username = str(
+                mentioned.get("username")
+                or (mentioned.get("from") or {}).get("username")
+                or ""
+            )
+            author_id = str((mentioned.get("from") or {}).get("id") or "")
+            media_id = media_id or str((mentioned.get("media") or {}).get("id") or "")
+        except InstagramError as exc:
+            logger.warning("mentioned_comment fetch failed (%s): %s", comment_id, exc)
+    if not text and media_id:
+        try:
+            data = await _graph_get(
+                f"/{ig_user_id}",
+                token,
+                {
+                    "fields": (
+                        f"mentioned_media.media_id({media_id})"
+                        "{caption,username,owner{id,username}}"
+                    ),
+                },
+            )
+            mentioned = data.get("mentioned_media") or {}
+            text = str(mentioned.get("caption") or "")
+            if not author_username:
+                author_username = str(
+                    mentioned.get("username")
+                    or (mentioned.get("owner") or {}).get("username")
+                    or ""
+                )
+            if not author_id:
+                author_id = str((mentioned.get("owner") or {}).get("id") or "")
+        except InstagramError as exc:
+            logger.warning("mentioned_media fetch failed (%s): %s", media_id, exc)
+    return {
+        "text": text,
+        "author_id": author_id,
+        "author_username": author_username,
+        "media_id": media_id or "",
+        "comment_id": comment_id or "",
+    }
 
 
 async def send_dm_whatsapp_button(
@@ -1444,7 +1554,16 @@ async def send_inbox_reply(
 
     try:
         meta_result: dict[str, Any]
-        if item.get("type") == "comment":
+        if item.get("type") == "mention":
+            media_id = str(item.get("media_id") or item.get("thread_id") or "").strip()
+            if not media_id:
+                raise InstagramError("Falta media_id para responder la mención")
+            meta_result = await reply_to_mention(
+                media_id=media_id,
+                message=text,
+                comment_id=str(item.get("meta_comment_id") or "").strip() or None,
+            )
+        elif item.get("type") == "comment":
             comment_id = item.get("meta_comment_id")
             if not comment_id:
                 raise InstagramError("Falta meta_comment_id")
@@ -1525,9 +1644,13 @@ async def send_inbox_reply(
 
 
 def _thread_debounce_key(item: dict[str, Any]) -> str:
-    # Comments: one timer per comment (never merge with other commenters on the post).
-    if item.get("type") == "comment":
-        return f"comment:{item.get('id') or item.get('external_id') or item.get('meta_comment_id') or ''}"
+    # Comments/mentions: one timer each (never merge with other guests on the post).
+    if item.get("type") in {"comment", "mention"}:
+        prefix = "mention" if item.get("type") == "mention" else "comment"
+        return (
+            f"{prefix}:"
+            f"{item.get('id') or item.get('external_id') or item.get('meta_comment_id') or ''}"
+        )
     return str(item.get("peer_id") or item.get("thread_id") or item.get("id") or "")
 
 
@@ -1622,7 +1745,7 @@ async def schedule_auto_reply(item_id: str) -> None:
     item = get_inbox_item(item_id)
     if not item or item.get("status") != "pending":
         return
-    if item.get("type") == "comment" and _is_own_instagram_actor(
+    if item.get("type") in {"comment", "mention"} and _is_own_instagram_actor(
         author_id=str(item.get("author_id") or ""),
         author_username=str(item.get("author_username") or ""),
     ):
@@ -1688,7 +1811,7 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
     if not item:
         raise InstagramError("Item de inbox no encontrado")
 
-    if item.get("type") == "comment" and _is_own_instagram_actor(
+    if item.get("type") in {"comment", "mention"} and _is_own_instagram_actor(
         author_id=str(item.get("author_id") or ""),
         author_username=str(item.get("author_username") or ""),
     ):
@@ -2155,7 +2278,66 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
                 if item:
                     results.append(item)
                 continue
-            if field not in {"comments", "mentions", "live_comments"} and "text" not in value:
+
+            # @mention on someone else's caption/comment (reels/posts). Webhook
+            # only sends media_id + optional comment_id — no text/from.
+            if field == "mentions":
+                media_id = str(value.get("media_id") or "").strip()
+                comment_id = str(value.get("comment_id") or "").strip()
+                if not media_id and not comment_id:
+                    continue
+                try:
+                    details = await fetch_mention_details(
+                        media_id=media_id or None,
+                        comment_id=comment_id or None,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Could not enrich Instagram mention webhook")
+                    details = {
+                        "text": "",
+                        "author_id": "",
+                        "author_username": "",
+                        "media_id": media_id,
+                        "comment_id": comment_id,
+                    }
+                media_id = str(details.get("media_id") or media_id)
+                comment_id = str(details.get("comment_id") or comment_id)
+                text = str(details.get("text") or "").strip()
+                author_id = str(details.get("author_id") or "")
+                author_username = str(details.get("author_username") or "")
+                if _is_own_instagram_actor(
+                    author_id=author_id,
+                    author_username=author_username,
+                ):
+                    continue
+                if not media_id:
+                    continue
+                external = (
+                    f"mention:{comment_id}"
+                    if comment_id
+                    else f"mention:media:{media_id}"
+                )
+                item = ingest_inbound(
+                    item_type="mention",
+                    external_id=external,
+                    text=text or "(mención en reel/post)",
+                    author_id=author_id or None,
+                    author_username=author_username or None,
+                    thread_id=media_id,
+                    meta_comment_id=comment_id or None,
+                    media_id=media_id,
+                )
+                if auto_reply_enabled() and item.get("status") == "pending":
+                    try:
+                        await schedule_auto_reply(item["id"])
+                    except Exception as exc:  # noqa: BLE001
+                        item["status"] = "failed"
+                        item["escalation_reason"] = str(exc)
+                        upsert_inbox_item(item)
+                results.append(item)
+                continue
+
+            if field not in {"comments", "live_comments"} and "text" not in value:
                 continue
             comment_id = value.get("id") or value.get("comment_id")
             text = value.get("text") or ""

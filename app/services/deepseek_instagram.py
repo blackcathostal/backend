@@ -812,6 +812,8 @@ def _prepared_route_reply(
 
 
 def _channel_label(item_type: str) -> str:
+    if item_type == "mention":
+        return "mención (@) en reel/post ajeno"
     if item_type == "comment":
         return "comentario público"
     if item_type in {"message", "dm"}:
@@ -838,7 +840,7 @@ def _guest_turn(
     history = person_history or {}
     comments = list(history.get("comments") or [])
     messages = list(history.get("messages") or [])
-    wrote_comment = "sí" if comments or item_type == "comment" else "no"
+    wrote_comment = "sí" if comments or item_type in {"comment", "mention"} else "no"
     wrote_message = "sí" if messages or item_type in {"message", "dm"} else "no"
     lines = [
         f"Canal de este texto: {_channel_label(item_type)}.",
