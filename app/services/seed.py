@@ -161,7 +161,7 @@ DEFAULT_COMMON_ANSWERS = [
         "topic": "voluntariado",
         "keywords": "voluntariado,voluntario,volunteer,workaway,gratis,trabajo gratis,helpxx",
         "question": "¿Aceptan voluntariado o trabajo a cambio de alojamiento?",
-        "answer_guide": "Por ahora no estamos aceptando voluntariado. Gracias por escribir.",
+        "answer_guide": "Por ahora no estamos aceptando voluntariado.",
         "sort_order": 32,
     },
     {

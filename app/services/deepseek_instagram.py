@@ -945,11 +945,11 @@ def _volunteer_reply(
     ]
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
     if lang == "en":
-        message = "Thanks for asking — we're not accepting volunteers right now."
+        message = "We're not accepting volunteers right now."
     elif lang == "pt":
-        message = "Obrigado! No momento não estamos aceitando voluntariado."
+        message = "No momento não estamos aceitando voluntariado."
     else:
-        message = "Gracias por escribir: por ahora no estamos aceptando voluntariado."
+        message = "Por ahora no estamos aceptando voluntariado."
     return {
         "action": "reply",
         "message": message,
