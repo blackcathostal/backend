@@ -685,7 +685,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-2h-tagged-v11",
+        "comment_poller": "reels-2h-tagged-v12",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1399,6 +1399,26 @@ def watch_mention_media(media_id: str | None) -> None:
         logger.exception("Could not persist Instagram mention watch list")
 
 
+_BOT_PUBLIC_PHRASE_RE = re.compile(
+    r"("
+    r"en qu[eé] te podemos ayudar|"
+    r"how can we help|"
+    r"em que podemos ajudar|"
+    r"comment pouvons-nous vous aider|"
+    r"wie k[oö]nnen wir helfen"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_own_public_reply(text: str) -> bool:
+    """Detect our own Mentions-API replies so the poller does not answer itself."""
+    sample = (text or "").strip()
+    if not sample:
+        return False
+    return bool(_BOT_PUBLIC_PHRASE_RE.search(sample))
+
+
 def _ingest_comment_row(
     c: dict[str, Any],
     *,
@@ -1421,10 +1441,18 @@ def _ingest_comment_row(
     from_user = c.get("from") or {}
     author_username = c.get("username") or from_user.get("username")
     author_id = from_user.get("id")
+    text = str(c.get("text") or "")
     if _is_own_instagram_actor(
         author_id=str(author_id or ""),
         author_username=str(author_username or ""),
     ):
+        return None
+    # Own Mentions-API replies often arrive without username — still skip them.
+    if _looks_like_own_public_reply(text):
+        return None
+    if kind == "mention" and not str(author_id or "").strip() and not str(
+        author_username or ""
+    ).strip():
         return None
     created = c.get("timestamp") or _now_iso()
     # Drop anything older than 2h — do not pollute the inbox with ancient threads.
@@ -1440,7 +1468,7 @@ def _ingest_comment_row(
             "media_id": media_id,
             "author_username": author_username,
             "author_id": author_id,
-            "text": c.get("text") or "",
+            "text": text,
             "created_at": created,
             "status": "pending",
             "replies": [],
@@ -1798,15 +1826,36 @@ def silence_stale_pending_public(max_age_seconds: float = COMMENT_MAX_AGE_SECOND
     return fixed
 
 
+def silence_self_greeting_loop() -> int:
+    """Stop the Mentions poller from answering our own public greeting forever."""
+    fixed = 0
+    for item in list_inbox():
+        if item.get("type") not in {"comment", "mention"}:
+            continue
+        if not _looks_like_own_public_reply(str(item.get("text") or "")):
+            continue
+        if item.get("status") == "skipped" and item.get("escalation_reason") == "own_public_reply":
+            continue
+        item["status"] = "skipped"
+        item["escalation_reason"] = "own_public_reply"
+        item["updated_at"] = _now_iso()
+        upsert_inbox_item(item)
+        fixed += 1
+    return fixed
+
+
 async def schedule_pending_public_replies(limit: int = 25) -> int:
     """Kick auto-reply for pending comments/mentions from the last 2 hours only."""
     if not auto_reply_enabled():
         return 0
     silence_stale_pending_public()
+    silence_self_greeting_loop()
     queued = 0
     pending = list_inbox(status="pending")
     for item in pending:
         if item.get("type") not in {"comment", "mention"}:
+            continue
+        if _looks_like_own_public_reply(str(item.get("text") or "")):
             continue
         if not _inbound_is_fresh(str(item.get("created_at") or "")):
             continue
@@ -1828,6 +1877,7 @@ async def poll_instagram_comments_loop() -> None:
         try:
             if load_connection() and auto_reply_enabled():
                 tick += 1
+                silence_self_greeting_loop()
                 deep = tick % 3 == 0
                 await sync_recent_comments(
                     limit_media=(

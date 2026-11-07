@@ -870,9 +870,15 @@ def _looks_like_reservation(text: str) -> bool:
     return bool(_RESERVATION_RE.search(sample))
 
 
+def _strip_ig_mentions(text: str) -> str:
+    """Remove @handles so '@hotel hola valor' is classified by the real words."""
+    cleaned = re.sub(r"@[\w.]+", " ", text or "", flags=re.UNICODE)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def _looks_like_greeting_only(text: str) -> bool:
     """True for one or several greeting bubbles sent in a burst (hola + buenas)."""
-    sample = (text or "").strip()
+    sample = _strip_ig_mentions(text or "")
     if not sample or len(sample) > 120:
         return False
     lines = [line.strip() for line in sample.splitlines() if line.strip()]
