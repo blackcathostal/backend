@@ -689,7 +689,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-collab-noloop-v19",
+        "comment_poller": "reels-collab-noloop-v20",
         "poller_debug": {
             "own": getattr(sync_recent_comments, "last_debug", {}) or {},
             "collaborative": getattr(
@@ -1421,6 +1421,8 @@ _BOT_PUBLIC_PHRASE_RE = re.compile(
     r"escr[ií]benos por interno|"
     r"escribe(?:nos)?\s+por\s+interno|"
     r"por interno te (?:ayudamos|pasamos)|"
+    r"te ayudamos por interno|"
+    r"con gusto te (?:ayudamos|compartimos)|"
     r"compartir los precios|"
     r"write us (?:in )?(?:dm|private|interno)|"
     r"\bdm us\b|"
@@ -1434,16 +1436,16 @@ _BOT_PUBLIC_PHRASE_RE = re.compile(
 
 _FOREIGN_REEL_DM_REDIRECT = {
     "es": (
-        "Hola! Escríbenos por interno para compartir los precios "
-        "según lo que necesites."
+        "Hola! Escríbenos por interno y con gusto te compartimos "
+        "los valores según lo que necesites."
     ),
-    "en": "Hi! DM us and we'll share the rates for what you need.",
-    "pt": "Oi! Chama no direct que te passamos os valores conforme o que precisa.",
+    "en": "Hi! Please message us privately and we'll gladly share the rates for what you need.",
+    "pt": "Oi! Nos chama no direct que com prazer te passamos os valores conforme o que precisa.",
 }
 _FOREIGN_REEL_DM_REDIRECT_SHORT = {
-    "es": "Por interno te pasamos eso.",
-    "en": "DM us and we'll share that.",
-    "pt": "Chama no direct que te passamos isso.",
+    "es": "Con gusto te ayudamos por interno con eso.",
+    "en": "Happy to help you with that in a private message.",
+    "pt": "Com prazer te ajudamos no direct com isso.",
 }
 
 
