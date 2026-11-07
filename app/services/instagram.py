@@ -682,6 +682,8 @@ def connection_status() -> dict[str, Any]:
         "ig_user_id": (conn or {}).get("ig_user_id"),
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
+        # Bump when poller behavior changes — used to verify prod deploy.
+        "comment_poller": "reels-fallback-v2",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1373,31 +1375,84 @@ def _ingest_comment_row(
     )
 
 
+async def _comments_for_media(
+    media: dict[str, Any],
+    token: str,
+) -> list[dict[str, Any]]:
+    """Nested comments often come empty on Reels — fall back to /comments."""
+    nested = list((media.get("comments") or {}).get("data") or [])
+    if nested:
+        return nested
+    media_id = str(media.get("id") or "").strip()
+    count = int(media.get("comments_count") or 0)
+    product = str(media.get("media_product_type") or media.get("media_type") or "").upper()
+    # Always hit /comments for reels/videos with activity; nested field is unreliable.
+    if not media_id or (count <= 0 and product not in {"REELS", "VIDEO"}):
+        return []
+    if count <= 0:
+        return []
+    try:
+        data = await _graph_get(
+            f"/{media_id}/comments",
+            token,
+            {"fields": "id,text,username,timestamp,from", "limit": 25},
+        )
+    except InstagramError as exc:
+        logger.warning("comments fetch failed for media %s: %s", media_id, exc)
+        return []
+    return list(data.get("data") or [])
+
+
 async def sync_recent_comments(
     limit_media: int = COMMENT_POLL_MEDIA_LIMIT,
     *,
     auto_reply: bool = False,
 ) -> list[dict[str, Any]]:
-    """Pull comments from recent posts/reels in a few Graph calls (no N+1)."""
+    """Pull comments from recent posts/reels; Reels use /comments fallback."""
     conn = _require_connection()
     ig_user_id = conn["ig_user_id"]
     token = conn["page_access_token"]
     wanted = max(10, min(int(limit_media or COMMENT_POLL_MEDIA_LIMIT), COMMENT_SYNC_MEDIA_LIMIT))
     per_page = 25
     pages = max(1, (wanted + per_page - 1) // per_page)
-    # Nested comments → one request per page instead of 1 + N media calls.
+    # First pass: media list with comments_count (+ nested when Meta provides it).
     media_rows = await _graph_pages(
         f"/{ig_user_id}/media",
         token,
-        {"fields": _MEDIA_COMMENT_FIELDS, "limit": per_page},
+        {
+            "fields": (
+                "id,caption,timestamp,permalink,media_type,media_product_type,"
+                "comments_count,comments.limit(15){id,text,username,timestamp,from}"
+            ),
+            "limit": per_page,
+        },
         max_pages=min(pages, 8),
     )
     synced: list[dict[str, Any]] = []
     to_reply: list[str] = []
-    for m in media_rows:
-        if int(m.get("comments_count") or 0) <= 0 and not (m.get("comments") or {}).get("data"):
-            continue
-        for c in (m.get("comments") or {}).get("data") or []:
+    # Prefer media that already have comments; check reels even if nested is empty.
+    candidates = [
+        m
+        for m in media_rows
+        if int(m.get("comments_count") or 0) > 0
+        or str(m.get("media_product_type") or "").upper() == "REELS"
+    ]
+    # Reels first: nested comments field is often empty for them.
+    candidates.sort(
+        key=lambda row: 0 if str(row.get("media_product_type") or "").upper() == "REELS" else 1
+    )
+    # Cap fallback /comments calls so sync never hangs for minutes.
+    fallback_budget = 40
+    for m in candidates:
+        nested = list((m.get("comments") or {}).get("data") or [])
+        if nested:
+            rows = nested
+        elif fallback_budget > 0:
+            fallback_budget -= 1
+            rows = await _comments_for_media(m, token)
+        else:
+            rows = []
+        for c in rows:
             item = _ingest_comment_row(c, media=m)
             if not item:
                 continue
