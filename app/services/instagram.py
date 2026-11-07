@@ -684,7 +684,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-24h-v5",
+        "comment_poller": "reels-24h-v6",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1316,7 +1316,7 @@ COMMENT_SYNC_MEDIA_LIMIT = 200
 COMMENT_MAX_AGE_SECONDS = 24 * 3600
 # Always open /comments for the newest N media; otherwise only when count grew.
 COMMENT_ALWAYS_CHECK_NEWEST = 15
-COMMENT_FETCH_BUDGET = 25
+COMMENT_FETCH_BUDGET = 35
 
 
 def _inbound_is_fresh(
@@ -1327,11 +1327,18 @@ def _inbound_is_fresh(
     """True only for guest messages younger than max_age (default 24h)."""
     parsed = _parse_iso(stamp)
     if not parsed:
-        return False
+        # If Meta sends a weird stamp, keep it — better reply than silently drop.
+        return True
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     age = (datetime.now(timezone.utc) - parsed).total_seconds()
     return 0 <= age <= max_age_seconds
+
+
+def _is_reel_media(media: dict[str, Any]) -> bool:
+    product = str(media.get("media_product_type") or "").upper()
+    permalink = str(media.get("permalink") or "").lower()
+    return product == "REELS" or "/reel/" in permalink
 
 
 def _load_media_comment_counts() -> dict[str, int]:
@@ -1454,25 +1461,22 @@ async def sync_recent_comments(
             continue
         count = int(media.get("comments_count") or 0)
         previous = int(prev_counts.get(media_id, -1))
-        next_counts[media_id] = count
-        product = str(media.get("media_product_type") or "").upper()
-        if count > 0 and product == "REELS":
-            reels_with_comments.append(media)
+        # IMPORTANT: do NOT write the live count into cache until we actually
+        # fetch comments. Otherwise a new Reel comment is "acked" and never read.
         if count <= 0:
+            next_counts[media_id] = 0
             continue
-        # Newest always; count grew = new comment on an older viral reel.
+        if _is_reel_media(media):
+            reels_with_comments.append(media)
         if index < COMMENT_ALWAYS_CHECK_NEWEST or (previous >= 0 and count > previous):
             priority.append(media)
         elif previous < 0:
-            # First time we see this media: seed once so existing fresh comments are not skipped.
             seed.append(media)
-    # Always re-check the busiest reels (old viral ones get comments Meta never webhooks).
-    reels_with_comments.sort(key=lambda row: int(row.get("comments_count") or 0), reverse=True)
-    viral_reels = reels_with_comments[:8]
-    # De-dupe while preserving order: priority → viral reels → seed.
+    # Reels in feed order (newest first), not by total comment count — quiet
+    # reels with a brand-new question were losing to ancient viral ones.
     seen_ids: set[str] = set()
     to_fetch: list[dict[str, Any]] = []
-    for media in [*priority, *viral_reels, *seed]:
+    for media in [*priority, *reels_with_comments, *seed]:
         mid = str(media.get("id") or "")
         if not mid or mid in seen_ids:
             continue
@@ -1485,7 +1489,11 @@ async def sync_recent_comments(
     to_reply: list[str] = []
     for media in to_fetch:
         media_id = str(media.get("id") or "")
-        for c in await _fetch_media_comments(media_id, token):
+        count = int(media.get("comments_count") or 0)
+        rows = await _fetch_media_comments(media_id, token)
+        # Only mark this count as seen after a successful comments read.
+        next_counts[media_id] = count
+        for c in rows:
             item = _ingest_comment_row(c, media=media)
             if not item:
                 continue
