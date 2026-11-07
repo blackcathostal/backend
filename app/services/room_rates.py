@@ -96,7 +96,7 @@ def save_room_rates(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         version = int(current.get("rates_version") or 0)
     out = {
-        "rates_version": max(version, 3),
+        "rates_version": max(version, 4),
         "currency": str(payload.get("currency") or "CLP").strip() or "CLP",
         "note": str(payload.get("note") or "").strip(),
         "includes": [
