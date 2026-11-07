@@ -11,6 +11,7 @@ from app.api import api_router
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.models import (  # noqa: F401
+    AccountingAccounts,
     AiGenerationRuns,
     AiSources,
     AiUsage,
@@ -163,6 +164,9 @@ def _ensure_schema_patches() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    import asyncio
+
+    comment_poll_task: asyncio.Task | None = None
     try:
         Base.metadata.create_all(bind=engine)
         _ensure_schema_patches()
@@ -174,7 +178,27 @@ async def lifespan(_: FastAPI):
     except OperationalError:
         logger.warning("Database unavailable at startup; API will run without MySQL.")
 
-    yield
+    try:
+        from app.services.instagram import poll_instagram_comments_loop
+
+        comment_poll_task = asyncio.create_task(
+            poll_instagram_comments_loop(),
+            name="instagram-comment-poll",
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not start Instagram comment poller")
+
+    try:
+        yield
+    finally:
+        if comment_poll_task is not None:
+            comment_poll_task.cancel()
+            try:
+                await comment_poll_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # noqa: BLE001
+                logger.exception("Instagram comment poller shutdown error")
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

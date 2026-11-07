@@ -300,7 +300,9 @@ async def auto_reply_inbox_item(
 async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     warning = None
     try:
-        comments = await ig.sync_recent_comments()
+        # Auto-reply on sync: Meta does not webhook comments on Reels.
+        comments = await ig.sync_recent_comments(auto_reply=True)
+        await ig.schedule_pending_public_replies()
     except ig.InstagramConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ig.InstagramError as exc:

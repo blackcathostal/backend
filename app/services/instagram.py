@@ -1305,18 +1305,49 @@ async def send_dm_image(recipient_id: str, image_url: str, *, open_url: str = ""
     return data
 
 
-async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
-    """Pull recent media comments into local inbox (best-effort)."""
+# Meta: comment webhooks do NOT fire for Reels. Poll Graph instead.
+COMMENT_POLL_INTERVAL_SECONDS = 90.0
+COMMENT_POLL_MEDIA_LIMIT = 50
+# Only auto-answer comments this fresh (avoid re-replying days-old threads).
+COMMENT_AUTO_REPLY_MAX_AGE_SECONDS = 2 * 3600
+
+
+def _inbound_is_fresh(
+    stamp: str | None,
+    *,
+    max_age_seconds: float = COMMENT_AUTO_REPLY_MAX_AGE_SECONDS,
+) -> bool:
+    parsed = _parse_iso(stamp)
+    if not parsed:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - parsed).total_seconds()
+    return 0 <= age <= max_age_seconds
+
+
+async def sync_recent_comments(
+    limit_media: int = COMMENT_POLL_MEDIA_LIMIT,
+    *,
+    auto_reply: bool = False,
+) -> list[dict[str, Any]]:
+    """Pull recent media comments (posts + reels) into local inbox."""
     conn = _require_connection()
     ig_user_id = conn["ig_user_id"]
     token = conn["page_access_token"]
-    media = await _graph_get(
+    per_page = 25
+    pages = max(1, (max(8, int(limit_media or COMMENT_POLL_MEDIA_LIMIT)) + per_page - 1) // per_page)
+    media_rows = await _graph_pages(
         f"/{ig_user_id}/media",
         token,
-        {"fields": "id,caption,timestamp,permalink", "limit": limit_media},
+        {
+            "fields": "id,caption,timestamp,permalink,media_type,media_product_type",
+            "limit": per_page,
+        },
+        max_pages=min(pages, 6),
     )
     synced: list[dict[str, Any]] = []
-    for m in media.get("data") or []:
+    for m in media_rows:
         media_id = m.get("id")
         if not media_id:
             continue
@@ -1344,6 +1375,7 @@ async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
                 author_username=str(author_username or ""),
             ):
                 continue
+            created = c.get("timestamp") or _now_iso()
             item = upsert_inbox_item(
                 {
                     "id": str(uuid.uuid4()),
@@ -1355,15 +1387,65 @@ async def sync_recent_comments(limit_media: int = 8) -> list[dict[str, Any]]:
                     "author_username": author_username,
                     "author_id": author_id,
                     "text": c.get("text") or "",
-                    "created_at": c.get("timestamp") or _now_iso(),
+                    "created_at": created,
                     "status": "pending",
                     "replies": [],
                     "escalation_reason": None,
                     "permalink": m.get("permalink"),
+                    "media_type": m.get("media_type") or m.get("media_product_type"),
                 }
             )
             synced.append(item)
+            if (
+                auto_reply
+                and auto_reply_enabled()
+                and item.get("status") == "pending"
+                and _inbound_is_fresh(str(created))
+            ):
+                try:
+                    await schedule_auto_reply(item["id"])
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Could not schedule auto-reply for synced comment %s",
+                        item.get("id"),
+                    )
     return synced
+
+
+async def schedule_pending_public_replies(limit: int = 25) -> int:
+    """Kick auto-reply for fresh pending comments/mentions already in the inbox."""
+    if not auto_reply_enabled():
+        return 0
+    queued = 0
+    pending = list_inbox(status="pending")
+    for item in pending:
+        if item.get("type") not in {"comment", "mention"}:
+            continue
+        if not _inbound_is_fresh(str(item.get("created_at") or "")):
+            continue
+        try:
+            await schedule_auto_reply(str(item.get("id") or ""))
+            queued += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not schedule pending public reply %s", item.get("id"))
+        if queued >= limit:
+            break
+    return queued
+
+
+async def poll_instagram_comments_loop() -> None:
+    """Meta does not webhook Reel comments — poll Graph every ~90s when auto-reply is on."""
+    await asyncio.sleep(8.0)
+    while True:
+        try:
+            if load_connection() and auto_reply_enabled():
+                await sync_recent_comments(auto_reply=True)
+                await schedule_pending_public_replies()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("Instagram comment poll failed")
+        await asyncio.sleep(COMMENT_POLL_INTERVAL_SECONDS)
 
 
 async def _hydrate_ig_message(msg: dict[str, Any], token: str) -> dict[str, Any]:
@@ -1658,8 +1740,11 @@ def _parse_iso(stamp: str | None) -> datetime | None:
     raw = str(stamp or "").strip()
     if not raw:
         return None
+    # Instagram Graph often returns +0000; fromisoformat wants +00:00.
+    raw = raw.replace("Z", "+00:00")
+    raw = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", raw)
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return datetime.fromisoformat(raw)
     except ValueError:
         return None
 
