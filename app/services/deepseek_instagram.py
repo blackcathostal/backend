@@ -43,6 +43,36 @@ _GUEST_GOODBYE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_GOODBYE_ONLY_RE = re.compile(
+    r"^\s*(?:[¡!]?\s*)?(?:"
+    r"(?:ok|okay|vale|listo|perfecto|gracias|thanks|thank\s+you|merci|obrigad[oa])\s*[,.!]?\s*"
+    r")?(?:"
+    r"chao+|chau+|adi[oó]s|bye+|goodbye|good\s*bye|hasta\s+luego|hasta\s+pronto|"
+    r"nos\s+vemos|cu[ií]date|tchau+|até\s+logo|au\s+revoir"
+    r")(?:\s*(?:gracias|thanks|bye|chao|chau))?(?:\s*[,!.…?]*)?(?:\s+(?:👋|🙂|😊|✨))?\s*$",
+    re.IGNORECASE,
+)
+_DISTANCE_QUESTION_RE = re.compile(
+    r"("
+    r"cu[aá]nto\s+tiempo|"
+    r"a\s+cu[aá]nto(?:s|as)?\s+(?:minutos?|km|kil[oó]metros?)|"
+    r"qu[eé]\s+tan\s+lejos|"
+    r"qu[eé]\s+tan\s+cerca|"
+    r"cu[aá]nta\s+distancia|"
+    r"distancia\s+(?:a|de|hasta|entre)|"
+    r"est[aá]n?\s+(?:muy\s+)?(?:cerca|lejos)|"
+    r"queda(?:n)?\s+(?:muy\s+)?(?:cerca|lejos)|"
+    r"ubicad[oa]s?\s+(?:de|desde|hasta|a)|"
+    r"de\s+aqu[ií]\s+a|"
+    r"how\s+far|"
+    r"how\s+long\s+(?:to|does|is|from)|"
+    r"how\s+many\s+minutes|"
+    r"minutes?\s+(?:from|to|away)|"
+    r"quanto\s+tempo|"
+    r"qu[aã]o\s+longe"
+    r")",
+    re.IGNORECASE,
+)
 _BOT_FAREWELL_RE = re.compile(
     r"(?is)(?:^|[.!?…]\s+)"
     r"(?:"
@@ -104,8 +134,12 @@ Datos (OBLIGATORIO):
 - Otras dudas del hostal → search_common_answers.
 - Si NO sabes o no está en FAQ/info: action=reply y deriva a WhatsApp con el número
   (formato +56 9 …, SIN pegar https://wa.me/… para evitar preview de imagen). Breve.
-- Cómo llegar desde el hostal → get_directions_from_hostel. Una sola vez. Sin URLs.
+- Tiempo/distancia (“cuánto tiempo”, “qué tan lejos”, “how far”) → get_directions_from_hostel
+  con eta_only=true. Responde SOLO minutos en auto (ej. «Estás a unos 12 min en auto.»).
+  Sin mapa, sin metro, sin detalle.
+- Cómo llegar / ruta paso a paso → get_directions_from_hostel con eta_only=false. Sin URLs.
   Cierra con “Te lo indico en el siguiente mapa.” No digas Google Maps. No inventes calles.
+- Si el huésped se despide (chao, bye, gracias chao…), despídete corto igual. Si no se despide, no te despidas.
 - Reserva → deriva a WhatsApp corto (fechas + personas). Nunca inventes estado de reserva.
 - Tarifas: Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, cama $19.990.
 - Pago/factura/reclamo conflictivo → escalate. Spam/vacío → escalate.
@@ -303,7 +337,9 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "(el link genera preview/imagen antes del texto en Instagram).\n"
         "- Reserva: WhatsApp corto con fechas y personas. No inventes estado de reserva.\n"
         "- Precios solo FAQ: Matrimonial/Suite 54990, Twin 54990, Triple 69990, cama 19990.\n"
-        "- Rutas: get_directions_from_hostel, sin URLs, «Te lo indico en el siguiente mapa.»\n"
+        "- Tiempo/distancia: get_directions_from_hostel eta_only=true → solo minutos en auto, SIN mapa.\n"
+        "- Cómo llegar: get_directions_from_hostel eta_only=false, sin URLs, «Te lo indico en el siguiente mapa.»\n"
+        "- Si el huésped se despide, despídete corto. Si no, no te despidas.\n"
         "- Tema ajeno al hostal: di breve que este canal es solo para el hostal.\n"
         "- Instagram y Facebook: mismas reglas.\n"
     )
@@ -621,13 +657,12 @@ def _guest_turn(
         "",
         "Responde corto y ejecutivo (1–2 frases). "
         "Idioma: toda la charla; mensajes cortos heredan el idioma del hilo. No mezcles. "
-        "Saludo solo → «Hola, ¿en qué te podemos ayudar?» (o equivalente) y PARA. "
-        "Si no sabes → WhatsApp con +56 9… sin link https. "
-        "Reserva → WhatsApp corto. No inventes estado. "
-        "No te despidas si el huésped no se despidió. "
-        "No repitas Barrio Brasil/desayuno si no preguntaron. "
-        "Precios solo FAQ: 54990 / 54990 / 69990 / 19990. "
-        "Rutas: get_directions_from_hostel. Luego JSON final.",
+        "Saludo solo → «Hola, ¿en qué te podemos ayudar?» y PARA. "
+        "Tiempo/distancia → get_directions_from_hostel eta_only=true: solo min en auto, sin mapa. "
+        "Cómo llegar → eta_only=false. "
+        "Si se despide → despídete corto. Si no, no te despidas. "
+        "Si no sabes → WhatsApp +56 9… sin https. "
+        "Precios FAQ: 54990 / 54990 / 69990 / 19990. JSON final.",
     ]
     return "\n".join(lines)
 
@@ -648,6 +683,23 @@ def _looks_like_greeting_only(text: str) -> bool:
     if not lines:
         return False
     return all(bool(_GREETING_ONLY_RE.match(line)) for line in lines)
+
+
+def _looks_like_goodbye_only(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample or len(sample) > 120:
+        return False
+    lines = [line.strip() for line in sample.splitlines() if line.strip()]
+    if not lines:
+        return False
+    return all(bool(_GOODBYE_ONLY_RE.match(line)) for line in lines)
+
+
+def _looks_like_distance_question(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample:
+        return False
+    return bool(_DISTANCE_QUESTION_RE.search(sample))
 
 
 def _already_offered_help(prior: list[dict[str, Any]] | None) -> bool:
@@ -712,6 +764,75 @@ def _human_greeting_reply(
         "map_image_url": "",
         "maps_url": "",
     }
+
+
+def _goodbye_reply(
+    *,
+    inbound_text: str,
+    prior: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    prior_texts = [
+        str(turn.get("content") or "")
+        for turn in (prior or [])
+        if turn.get("role") == "user"
+    ]
+    lang = _conversation_language([*prior_texts, inbound_text], default="es")
+    if lang == "en":
+        message = "Bye! Take care."
+    elif lang == "pt":
+        message = "Tchau! Cuide-se."
+    elif lang == "fr":
+        message = "Au revoir !"
+    elif lang == "de":
+        message = "Tschüss! Bis bald."
+    else:
+        message = "¡Chao! Que estés bien."
+    return {
+        "action": "reply",
+        "message": message,
+        "reason": "goodbye",
+        "model": "rule:goodbye",
+        "map_image_url": "",
+        "maps_url": "",
+    }
+
+
+def _short_driving_eta_message(route: dict[str, Any], language: str) -> str:
+    replies = route.get("replies") if isinstance(route.get("replies"), dict) else {}
+    if language in replies and str(replies.get(language) or "").strip():
+        return str(replies[language]).strip()
+    minutes = route.get("duration_minutes")
+    if minutes is None:
+        minutes = _spoken_minutes_from_duration(str(route.get("duration") or ""))
+    if minutes is None:
+        return str(replies.get("es") or route.get("summary") or "").strip()
+    if language == "en":
+        return f"About {minutes} min by car."
+    if language == "pt":
+        return f"Fica a uns {minutes} min de carro."
+    if language == "fr":
+        return f"Environ {minutes} min en voiture."
+    if language == "de":
+        return f"Etwa {minutes} Min. mit dem Auto."
+    return f"Estás a unos {minutes} min en auto."
+
+
+def _spoken_minutes_from_duration(duration: str) -> int | None:
+    text = str(duration or "").strip().lower()
+    if not text:
+        return None
+    total = 0
+    found = False
+    for match in re.finditer(r"(\d+)\s*(h|hr|hora|horas|min|mins|minute|minutes)?", text):
+        value = int(match.group(1))
+        unit = (match.group(2) or "").lower()
+        if unit.startswith("h"):
+            total += value * 60
+            found = True
+        elif unit.startswith("min") or not unit:
+            total += value
+            found = True
+    return total if found else None
 
 
 def _reservation_whatsapp_reply(
@@ -835,28 +956,50 @@ async def _run_reply_loop(
             reason = str(data.get("reason") or "").strip()
             map_image_url = ""
             maps_url = ""
+            guest_blob = " ".join(
+                _guest_raw_text(str(turn.get("content") or ""))
+                for turn in messages
+                if turn.get("role") == "user"
+            )
+            distance_only = _looks_like_distance_question(guest_blob) or str(
+                route_reply.get("style") if route_reply else ""
+            ) == "eta"
             if action == "reply" and route_reply:
-                prepared = _prepared_route_reply(
-                    route_reply,
-                    messages,
-                    is_follow_up=is_follow_up,
-                    model_message=reply_message,
-                )
-                if prepared:
-                    reply_message = prepared
-                map_image_url = str(route_reply.get("map_image_url") or "").strip()
-                maps_url = str(route_reply.get("maps_url") or "").strip()
+                language = _route_language(messages)
+                if distance_only:
+                    # Force car ETA only — never attach a map for “how far / how long”.
+                    if str(route_reply.get("style") or "") != "eta":
+                        try:
+                            from app.services.hostel_directions import driving_eta_from_hostel
+
+                            eta = driving_eta_from_hostel(
+                                str(route_reply.get("destination") or "")
+                            )
+                            if isinstance(eta, dict) and eta.get("ok"):
+                                route_reply = eta
+                        except Exception:
+                            pass
+                    reply_message = _short_driving_eta_message(route_reply, language)
+                    map_image_url = ""
+                    maps_url = ""
+                    reason = reason or "driving_eta"
+                else:
+                    prepared = _prepared_route_reply(
+                        route_reply,
+                        messages,
+                        is_follow_up=is_follow_up,
+                        model_message=reply_message,
+                    )
+                    if prepared:
+                        reply_message = prepared
+                    map_image_url = str(route_reply.get("map_image_url") or "").strip()
+                    maps_url = str(route_reply.get("maps_url") or "").strip()
             reply_message = apply_time_greeting(reply_message, is_follow_up=is_follow_up)
             # Never leave a raw Google Maps /maps/dir URL in the guest text (IG puts preview on top).
             reply_message = re.sub(
                 r"https?://(?:www\.)?(?:google\.com/maps|maps\.googleapis\.com|maps\.google\.com|goo\.gl/maps|maps\.app\.goo\.gl)\S*",
                 "",
                 reply_message or "",
-            )
-            guest_blob = " ".join(
-                str(turn.get("content") or "")
-                for turn in messages
-                if turn.get("role") == "user"
             )
             reply_message = strip_unsolicited_goodbye(reply_message, guest_text=guest_blob)
             reply_message = sanitize_outbound_message(reply_message)
@@ -910,6 +1053,8 @@ async def generate_instagram_reply(
             prior=prior,
             skip_duplicate_greeting=skip_duplicate_greeting,
         )
+    if _looks_like_goodbye_only(inbound_text):
+        return _goodbye_reply(inbound_text=inbound_text, prior=prior)
     if _looks_like_reservation(inbound_text):
         return _reservation_whatsapp_reply(
             db,
@@ -917,9 +1062,18 @@ async def generate_instagram_reply(
             is_follow_up=is_follow_up,
             prior=prior,
         )
+    distance_hint = (
+        "\n\nEste mensaje pregunta tiempo/distancia: usa get_directions_from_hostel "
+        "con eta_only=true y responde solo minutos en auto, sin mapa."
+        if _looks_like_distance_question(inbound_text)
+        else ""
+    )
     base, model, headers = _require_deepseek()
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system_prompt_for_reply(is_follow_up=is_follow_up)},
+        {
+            "role": "system",
+            "content": system_prompt_for_reply(distance_hint, is_follow_up=is_follow_up),
+        },
     ]
     for turn in prior[-12:]:
         text = (turn.get("content") or "").strip()
@@ -995,6 +1149,10 @@ async def generate_test_chat(
         )
         result["channel"] = channel
         return result
+    if _looks_like_goodbye_only(inbound_text):
+        result = _goodbye_reply(inbound_text=inbound_text, prior=prior)
+        result["channel"] = channel
+        return result
     if _looks_like_reservation(inbound_text):
         result = _reservation_whatsapp_reply(
             db,
@@ -1004,14 +1162,17 @@ async def generate_test_chat(
         )
         result["channel"] = channel
         return result
+    extra = f"\n\nCanal de esta conversación de prueba: {channel_label}."
+    if _looks_like_distance_question(inbound_text):
+        extra += (
+            "\nEste mensaje pregunta tiempo/distancia: get_directions_from_hostel "
+            "eta_only=true; solo minutos en auto, sin mapa."
+        )
     base, model, headers = _require_deepseek()
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": system_prompt_for_reply(
-                f"\n\nCanal de esta conversación de prueba: {channel_label}.",
-                is_follow_up=is_follow_up,
-            ),
+            "content": system_prompt_for_reply(extra, is_follow_up=is_follow_up),
         }
     ]
 

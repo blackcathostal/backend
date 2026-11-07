@@ -426,8 +426,76 @@ def _foot_summary(lat1: float, lng1: float, lat2: float, lng2: float) -> dict[st
     }
 
 
-def directions_from_hostel(destination: str) -> dict[str, Any]:
+def driving_eta_from_hostel(destination: str) -> dict[str, Any]:
+    """Short car ETA only — no map, no metro/walk detail (for “how far / how long”)."""
+    place = (destination or "").strip()
+    if len(place) < 2:
+        return {"ok": False, "error": "Indica el lugar de destino."}
+    try:
+        dest = _geocode(place)
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": f"No se pudo buscar el lugar: {exc}"}
+    if not dest:
+        return {
+            "ok": False,
+            "error": f"No encontré '{place}' en Santiago. Pide un nombre más preciso.",
+        }
+
+    driving = None
+    try:
+        driving = _google_directions(
+            origin_lat=HOSTEL_LAT,
+            origin_lng=HOSTEL_LNG,
+            dest_lat=float(dest["lat"]),
+            dest_lng=float(dest["lng"]),
+            mode="driving",
+        )
+    except httpx.HTTPError:
+        driving = None
+    if not driving:
+        driving = _osrm_route(float(dest["lat"]), float(dest["lng"]), profile="driving")
+    if not driving:
+        return {
+            "ok": False,
+            "destination": dest["name"],
+            "error": "No pude calcular el tiempo en auto hasta ese lugar.",
+        }
+
+    minutes = _duration_minutes(str(driving.get("duration") or ""))
+    if minutes is None:
+        minutes = 1
+    name = str(dest["name"] or place)
+    replies = {
+        "es": f"Estás a unos {minutes} min en auto.",
+        "en": f"About {minutes} min by car.",
+        "pt": f"Fica a uns {minutes} min de carro.",
+        "fr": f"Environ {minutes} min en voiture.",
+        "de": f"Etwa {minutes} Min. mit dem Auto.",
+    }
+    return {
+        "ok": True,
+        "style": "eta",
+        "origin": HOSTEL_ADDRESS,
+        "destination": name,
+        "mode": "driving",
+        "duration": driving.get("duration") or f"{minutes} min",
+        "duration_minutes": minutes,
+        "distance": driving.get("distance") or "",
+        "summary": replies["es"],
+        "maps_url": "",
+        "map_image_url": "",
+        "replies": replies,
+        "instruction": (
+            "Pregunta de tiempo/distancia: responde SOLO con replies (minutos en auto). "
+            "Sin mapa, sin metro, sin detalle de ruta, sin WhatsApp."
+        ),
+    }
+
+
+def directions_from_hostel(destination: str, *, eta_only: bool = False) -> dict[str, Any]:
     """How to get from the hostel: metro/bus first, then car; walk only if no transit."""
+    if eta_only:
+        return driving_eta_from_hostel(destination)
     place = (destination or "").strip()
     if len(place) < 2:
         return {"ok": False, "error": "Indica el lugar de destino."}

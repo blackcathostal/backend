@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.hostel_info import CommonAnswers, HostelInfo
-from app.services.hostel_directions import directions_from_hostel
+from app.services.hostel_directions import directions_from_hostel, driving_eta_from_hostel
 from app.models.rooms import Rooms
 
 
@@ -364,10 +364,11 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "get_directions_from_hostel",
             "description": (
-                "How to get from Black Cat Hostal (Compañía de Jesús 1921, Barrio Brasil) "
-                "to a place in Santiago. Prefers metro/bus, then car; walking only if transit "
-                "is unavailable. Use when a guest asks how to get somewhere from the hostel. "
-                "Answer with the returned replies text. Do not send them to WhatsApp."
+                "Travel info from Black Cat Hostal to a place in Santiago. "
+                "If the guest only asks how far / how long / how many minutes (eta_only=true), "
+                "return car minutes only — no map, no metro detail. "
+                "If they ask how to get there (eta_only=false), full route may include a map. "
+                "Do not send them to WhatsApp."
             ),
             "parameters": {
                 "type": "object",
@@ -375,7 +376,14 @@ DEEPSEEK_TOOLS = [
                     "destination": {
                         "type": "string",
                         "description": "Place name, e.g. Palacio de La Moneda",
-                    }
+                    },
+                    "eta_only": {
+                        "type": "boolean",
+                        "description": (
+                            "True when asking distance/time only "
+                            "(cuánto tiempo, qué tan lejos, how far). False for how-to-get."
+                        ),
+                    },
                 },
                 "required": ["destination"],
             },
@@ -393,7 +401,9 @@ def run_knowledge_tool(db: Session, name: str, arguments: dict[str, Any] | None 
     if name == "search_common_answers":
         return search_common_answers(db, args.get("query") or args.get("consulta"))
     if name == "get_directions_from_hostel":
-        return directions_from_hostel(
-            str(args.get("destination") or args.get("lugar") or args.get("query") or "")
-        )
+        destination = str(args.get("destination") or args.get("lugar") or args.get("query") or "")
+        eta_only = bool(args.get("eta_only") or args.get("solo_tiempo") or False)
+        if eta_only:
+            return driving_eta_from_hostel(destination)
+        return directions_from_hostel(destination)
     return {"error": f"Unknown tool: {name}"}
