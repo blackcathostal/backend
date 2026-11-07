@@ -165,8 +165,8 @@ Datos (OBLIGATORIO):
 - Mensual: $1.500.000 CLP (FAQ topic mensual).
 - Check-in, check-out, desayuno, estacionamiento, WhatsApp, dirección → get_hostel_info.
 - Otras dudas del hostal → search_common_answers.
-- WhatsApp: dalo MÁXIMO UNA vez por conversación como https://wa.me/… (se envía sin imagen).
-  Si ya lo diste antes en el hilo, no lo repitas; di solo “por WhatsApp”.
+- WhatsApp: dalo MÁXIMO UNA vez por conversación (enlace; se envía sin imagen).
+  Si ya lo diste en el hilo, NO lo vuelvas a mencionar ni cierres con “por WhatsApp”.
 - NUNCA digas que vas a confirmar con recepción, ni que hablas con recepción, ni que “recibimos
   tu mensaje en recepción”. Este canal NO habla con recepción.
 - Si NO sabes: deriva a WhatsApp (si aún no lo diste) o pide el dato faltante. Breve.
@@ -384,23 +384,30 @@ def thread_already_shared_whatsapp(prior: list[dict[str, Any]] | None) -> bool:
     return False
 
 
+_TRAILING_WHATSAPP_FLUFF_RE = re.compile(
+    r"(?is)(?:^|[.!?…,;:\s]+)"
+    r"(?:(?:escr[ií]benos|escribe|cont[aá]ctanos|contin[uú]a|sigue|confirma(?:lo)?|"
+    r"resuelve|cotiza|reserva)\s+)?"
+    r"(?:por|en|via|vía|on|pelo|pelo\s+o)?\s*whatsapp\.?\s*$"
+)
+
+
 def strip_repeated_whatsapp_number(message: str, *, already_shared: bool) -> str:
-    """Keep at most one WhatsApp link/number per conversation."""
+    """If WhatsApp was already shared, strip links/mentions — never append «por WhatsApp»."""
     text = message or ""
     if not already_shared:
-        return text
+        # Still drop empty trailing «por WhatsApp» tacked on by the model for no reason.
+        text = _TRAILING_WHATSAPP_FLUFF_RE.sub("", text)
+        return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
+    text = _ANY_WA_TOKEN_RE.sub("", text)
     text = _WA_ME_RE.sub("", text)
     text = _WA_ME_PLAIN_RE.sub("", text)
-    text = re.sub(
-        r"(?i)(?:por\s+)?whatsapp\s*(?::|-)?\s*\+?\d[\d\s-]{7,}\d",
-        "por WhatsApp",
-        text,
-    )
+    text = _SHARE_WA_RE.sub("", text)
     text = re.sub(r"\+56\s*9\s*\d{4}\s*\d{4}", "", text)
     text = re.sub(r"\+56\s*\d[\d\s-]{6,}\d", "", text)
-    if re.search(r"(?i)whatsapp", text):
-        return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
-    return re.sub(r"\s{2,}", " ", f"{text} por WhatsApp").strip(" ,;-")
+    text = re.sub(r"(?i)\bwhatsapp\b", "", text)
+    text = _TRAILING_WHATSAPP_FLUFF_RE.sub("", text)
+    return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
 
 
 def enforce_single_short_reply(message: str, *, max_chars: int = MAX_REPLY_CHARS) -> str:
@@ -516,7 +523,7 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- Mensual $1.500.000. Noche FAQ: 54990 / 54990 / 69990 / 19990.\n"
         "- Voluntariado/gratis: no estamos aceptando voluntariado (amable y corto).\n"
         "- Cédula/pasaporte/beneficio dudoso: WhatsApp, no inventes.\n"
-        "- WhatsApp máximo 1 vez por hilo (enlace https://wa.me/…; se envía sin imagen).\n"
+        "- WhatsApp máximo 1 vez por hilo. Si ya salió, no lo menciones otra vez ni digas «por WhatsApp».\n"
         "- NUNCA digas que confirmas o hablas con recepción.\n"
         "- Reserva: WhatsApp corto con fechas/personas.\n"
         "- Tiempo/distancia: eta_only=true → solo min en auto, SIN mapa.\n"
@@ -840,8 +847,8 @@ def _guest_turn(
         "UN solo mensaje corto. Sin segunda burbuja. "
         "Saludo solo → «Hola, ¿en qué te podemos ayudar?» y PARA. "
         "Una tarifa si preguntan un tipo; no listes todo. Mensual 1500000. "
-        "Voluntariado → no aceptamos (corto). Cédula dudosa → WhatsApp. "
-        "WhatsApp máx. 1 vez. Sin recepción. "
+        "Voluntariado → no aceptamos (corto). Cédula dudosa → WhatsApp una vez. "
+        "Si ya diste WhatsApp, no lo repitas ni cierres con «por WhatsApp». Sin recepción. "
         "Tiempo/distancia → eta_only=true. Si se despide → despídete. JSON final.",
     ]
     return "\n".join(lines)
@@ -965,19 +972,19 @@ def _unknown_whatsapp_reply(
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
     if lang == "en":
         message = (
-            "Please confirm that on WhatsApp."
+            "Please confirm that there."
             if already
             else f"Please confirm that on WhatsApp {link}"
         )
     elif lang == "pt":
         message = (
-            "Confirma isso pelo WhatsApp."
+            "Confirma isso por lá."
             if already
             else f"Confirma isso pelo WhatsApp {link}"
         )
     else:
         message = (
-            "Eso debes confirmarlo por WhatsApp."
+            "Eso debes confirmarlo por ahí."
             if already
             else f"Eso debes confirmarlo por WhatsApp {link}"
         )
@@ -1145,31 +1152,31 @@ def _reservation_whatsapp_reply(
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
     if lang == "en":
         message = (
-            "Write us on WhatsApp with dates and guest count."
+            "Send us the dates and guest count there."
             if already
             else f"Write us on WhatsApp with dates and guest count: {link}"
         )
     elif lang == "pt":
         message = (
-            "Escreva no WhatsApp com datas e quantas pessoas."
+            "Envie as datas e quantas pessoas por lá."
             if already
             else f"Escreva no WhatsApp com datas e quantas pessoas: {link}"
         )
     elif lang == "fr":
         message = (
-            "Écrivez-nous sur WhatsApp avec dates et nombre de personnes."
+            "Envoyez-nous les dates et le nombre de personnes là-bas."
             if already
             else f"Écrivez-nous sur WhatsApp avec dates et nombre de personnes: {link}"
         )
     elif lang == "de":
         message = (
-            "Schreib uns auf WhatsApp mit Daten und Personenanzahl."
+            "Schick uns Daten und Personenanzahl dort."
             if already
             else f"Schreib uns auf WhatsApp mit Daten und Personenanzahl: {link}"
         )
     else:
         message = (
-            "Escríbenos por WhatsApp con fechas y cantidad de personas."
+            "Pásanos las fechas y la cantidad de personas por ahí."
             if already
             else f"Escríbenos por WhatsApp con fechas y cantidad de personas: {link}"
         )
