@@ -686,7 +686,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-collab-social-v17",
+        "comment_poller": "reels-collab-noloop-v18",
         "poller_debug": {
             "own": getattr(sync_recent_comments, "last_debug", {}) or {},
             "collaborative": getattr(
@@ -1417,8 +1417,13 @@ _BOT_PUBLIC_PHRASE_RE = re.compile(
     r"wie k[oö]nnen wir helfen|"
     r"escr[ií]benos por interno|"
     r"escribe(?:nos)?\s+por\s+interno|"
+    r"compartir los precios|"
     r"write us (?:in )?(?:dm|private|interno)|"
-    r"manda(?:r)?\s+(?:um\s+)?direct"
+    r"\bdm us\b|"
+    r"share the rates|"
+    r"passamos os valores|"
+    r"manda(?:r)?\s+(?:um\s+)?direct|"
+    r"chama no direct"
     r")",
     re.IGNORECASE,
 )
@@ -2534,26 +2539,30 @@ def _foreign_reel_dm_redirect(inbound_text: str) -> str:
 
 
 def _already_sent_foreign_redirect(item: dict[str, Any]) -> bool:
-    """One 'escríbenos por interno' per guest on the same foreign/collab post."""
+    """At most one 'escríbenos por interno' per foreign/collab reel.
+
+    Graph often omits author on collab comments, so per-guest dedupe fails and the
+    bot loops. One public DM invite on the media is enough.
+    """
     media_id = str(item.get("media_id") or item.get("thread_id") or "")
-    author = str(item.get("author_id") or item.get("author_username") or "")
     if not media_id:
         return False
+    # Already answered this bubble.
+    for reply in item.get("replies") or []:
+        if _looks_like_own_public_reply(str(reply.get("text") or "")):
+            return True
     for row in list_inbox():
-        if row.get("id") == item.get("id"):
-            continue
         if str(row.get("media_id") or row.get("thread_id") or "") != media_id:
             continue
-        same_author = author and (
-            str(row.get("author_id") or "") == author
-            or str(row.get("author_username") or "") == author
-        )
-        if not same_author:
+        if row.get("type") not in {"comment", "mention"}:
             continue
         for reply in row.get("replies") or []:
             if _looks_like_own_public_reply(str(reply.get("text") or "")):
                 return True
-        if _looks_like_own_public_reply(str(row.get("text") or "")):
+        # Our own redirect sometimes comes back as a new inbox row.
+        if row.get("id") != item.get("id") and _looks_like_own_public_reply(
+            str(row.get("text") or "")
+        ):
             return True
     return False
 
@@ -2600,6 +2609,15 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
     latest = burst[-1]
     inbound = _combined_burst_text(burst) or str(latest.get("text") or "")
     burst_texts = {str(row.get("text") or "").strip() for row in burst if str(row.get("text") or "").strip()}
+
+    # Never answer our own public bubbles (Mentions poll can re-ingest them).
+    if _looks_like_own_public_reply(inbound):
+        for row in burst:
+            row["status"] = "skipped"
+            row["escalation_reason"] = "own_public_reply"
+            row["updated_at"] = _now_iso()
+            upsert_inbox_item(row)
+        return latest
 
     # Foreign + collab: DM invite only for precios/reserva/datos del hotel.
     if _should_redirect_public_to_dm(latest, inbound):
