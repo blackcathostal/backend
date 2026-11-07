@@ -684,7 +684,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-count-cache-v4",
+        "comment_poller": "reels-24h-v5",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1312,8 +1312,8 @@ async def send_dm_image(recipient_id: str, image_url: str, *, open_url: str = ""
 COMMENT_POLL_INTERVAL_SECONDS = 45.0
 COMMENT_POLL_MEDIA_LIMIT = 80
 COMMENT_SYNC_MEDIA_LIMIT = 200
-# Only auto-answer comments this fresh (avoid re-replying days-old threads).
-COMMENT_AUTO_REPLY_MAX_AGE_SECONDS = 12 * 3600
+# Only ingest / auto-answer comments from the last 24 hours.
+COMMENT_MAX_AGE_SECONDS = 24 * 3600
 # Always open /comments for the newest N media; otherwise only when count grew.
 COMMENT_ALWAYS_CHECK_NEWEST = 15
 COMMENT_FETCH_BUDGET = 25
@@ -1322,8 +1322,9 @@ COMMENT_FETCH_BUDGET = 25
 def _inbound_is_fresh(
     stamp: str | None,
     *,
-    max_age_seconds: float = COMMENT_AUTO_REPLY_MAX_AGE_SECONDS,
+    max_age_seconds: float = COMMENT_MAX_AGE_SECONDS,
 ) -> bool:
+    """True only for guest messages younger than max_age (default 24h)."""
     parsed = _parse_iso(stamp)
     if not parsed:
         return False
@@ -1379,6 +1380,9 @@ def _ingest_comment_row(
     ):
         return None
     created = c.get("timestamp") or _now_iso()
+    # Drop anything older than 24h — do not pollute the inbox with ancient threads.
+    if not _inbound_is_fresh(str(created)):
+        return None
     return upsert_inbox_item(
         {
             "id": str(uuid.uuid4()),
@@ -1503,10 +1507,27 @@ async def sync_recent_comments(
     return synced
 
 
+def silence_stale_pending_public(max_age_seconds: float = COMMENT_MAX_AGE_SECONDS) -> int:
+    """Mark pending comments/mentions older than 24h as skipped."""
+    fixed = 0
+    for item in list_inbox(status="pending"):
+        if item.get("type") not in {"comment", "mention"}:
+            continue
+        if _inbound_is_fresh(str(item.get("created_at") or ""), max_age_seconds=max_age_seconds):
+            continue
+        item["status"] = "skipped"
+        item["escalation_reason"] = "stale_over_24h"
+        item["updated_at"] = _now_iso()
+        upsert_inbox_item(item)
+        fixed += 1
+    return fixed
+
+
 async def schedule_pending_public_replies(limit: int = 25) -> int:
-    """Kick auto-reply for fresh pending comments/mentions already in the inbox."""
+    """Kick auto-reply for pending comments/mentions from the last 24 hours only."""
     if not auto_reply_enabled():
         return 0
+    silence_stale_pending_public()
     queued = 0
     pending = list_inbox(status="pending")
     for item in pending:
