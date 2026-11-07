@@ -685,7 +685,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-2h-tagged-v10",
+        "comment_poller": "reels-2h-tagged-v11",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1465,6 +1465,34 @@ async def _fetch_media_comments(media_id: str, token: str) -> list[dict[str, Any
     return list(data.get("data") or [])
 
 
+async def _fetch_mentioned_media_comments(
+    *,
+    ig_user_id: str,
+    media_id: str,
+    token: str,
+) -> list[dict[str, Any]]:
+    """Foreign media often blocks GET /{media-id}/comments — use mentioned_media."""
+    mid = str(media_id or "").strip()
+    if not mid:
+        return []
+    try:
+        data = await _graph_get(
+            f"/{ig_user_id}",
+            token,
+            {
+                "fields": (
+                    f"mentioned_media.media_id({mid})"
+                    "{id,caption,comments.limit(30){id,text,username,timestamp,from}}"
+                ),
+            },
+        )
+    except InstagramError as exc:
+        logger.warning("mentioned_media comments failed for %s: %s", mid, exc)
+        return []
+    mentioned = data.get("mentioned_media") or {}
+    return list((mentioned.get("comments") or {}).get("data") or [])
+
+
 async def sync_recent_comments(
     limit_media: int = COMMENT_POLL_MEDIA_LIMIT,
     *,
@@ -1674,17 +1702,29 @@ async def sync_tagged_media_comments(*, auto_reply: bool = False) -> list[dict[s
         cap = str(media.get("caption") or "").replace("\n", " ")[:60]
         tag_labels.append(f"{media.get('id')} @{uname} {cap}")
 
-    async def _load_one(media: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    async def _load_one(
+        media: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
         mid = str(media.get("id") or "")
         rows = await _fetch_media_comments(mid, token)
-        return media, rows
+        source = "comments"
+        if not rows:
+            rows = await _fetch_mentioned_media_comments(
+                ig_user_id=str(ig_user_id),
+                media_id=mid,
+                token=token,
+            )
+            source = "mentioned_media" if rows else "empty"
+        return media, rows, source
 
-    loaded: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
-    for start in range(0, len(to_fetch), 8):
-        chunk = to_fetch[start : start + 8]
+    loaded: list[tuple[dict[str, Any], list[dict[str, Any]], str]] = []
+    for start in range(0, len(to_fetch), 6):
+        chunk = to_fetch[start : start + 6]
         loaded.extend(await asyncio.gather(*[_load_one(m) for m in chunk]))
 
-    for media, rows in loaded:
+    sources: dict[str, int] = {}
+    for media, rows, source in loaded:
+        sources[source] = sources.get(source, 0) + 1
         for c in rows:
             text = str(c.get("text") or "")
             stamp = str(c.get("timestamp") or "")
@@ -1728,6 +1768,7 @@ async def sync_tagged_media_comments(*, auto_reply: bool = False) -> list[dict[s
         "fresh_samples": fresh_samples,
         "interesting_any_age": interesting,
         "tag_labels": tag_labels,
+        "comment_sources": sources,
     }
     logger.info(
         "IG tagged/mention media sync watched=%s fetched=%s synced=%s",
