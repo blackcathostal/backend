@@ -532,7 +532,7 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- Cédula/pasaporte/beneficio dudoso: WhatsApp, no inventes.\n"
         "- WhatsApp máximo 1 vez por hilo. Si ya salió, no lo menciones otra vez ni digas «por WhatsApp».\n"
         "- NUNCA digas que confirmas o hablas con recepción.\n"
-        "- Reserva: WhatsApp corto con fechas/personas.\n"
+        "- Reserva / «por dónde reservo»: SIEMPRE el enlace WhatsApp + fechas/personas. Nunca digas «por ahí».\n"
         "- Tiempo/distancia: eta_only=true → solo min en auto, SIN mapa.\n"
         "- Si se despide, despídete corto. Si no, no.\n"
         "- Instagram y Facebook: mismas reglas.\n"
@@ -1140,6 +1140,27 @@ def _spoken_minutes_from_duration(duration: str) -> int | None:
     return total if found else None
 
 
+_WHERE_TO_BOOK_RE = re.compile(
+    r"("
+    r"por\s+d[oó]nde\s+reserv|"
+    r"d[oó]nde\s+reserv|"
+    r"c[oó]mo\s+reserv|"
+    r"where\s+(?:do\s+i\s+)?(?:book|reserve)|"
+    r"how\s+(?:do\s+i\s+)?(?:book|reserve)|"
+    r"link\s+(?:de\s+)?(?:reserva|whatsapp)|"
+    r"cual\s+es\s+el\s+whatsapp|"
+    r"cu[aá]l\s+es\s+el\s+whatsapp|"
+    r"pasame\s+el\s+whatsapp|"
+    r"n[uú]mero\s+de\s+whatsapp"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_where_to_book(text: str) -> bool:
+    return bool(_WHERE_TO_BOOK_RE.search(text or ""))
+
+
 def _reservation_whatsapp_reply(
     db: Session,
     *,
@@ -1147,46 +1168,26 @@ def _reservation_whatsapp_reply(
     is_follow_up: bool,
     prior: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Fast path: never hang on DeepSeek when the guest asks to book."""
+    """Fast path: booking / where-to-reserve always includes the WhatsApp link."""
     info = hostel_info_dict(db)
     link = whatsapp_click_url(str(info.get("whatsapp_url") or ""))
-    already = thread_already_shared_whatsapp(prior)
     prior_texts = [
         str(turn.get("content") or "")
         for turn in (prior or [])
         if turn.get("role") == "user"
     ]
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
+    # Never answer “por ahí” without the link — guests ask again (see @emkrypted).
     if lang == "en":
-        message = (
-            "Send us the dates and guest count there."
-            if already
-            else f"Write us on WhatsApp with dates and guest count: {link}"
-        )
+        message = f"Reserve on WhatsApp with your dates and guest count: {link}"
     elif lang == "pt":
-        message = (
-            "Envie as datas e quantas pessoas por lá."
-            if already
-            else f"Escreva no WhatsApp com datas e quantas pessoas: {link}"
-        )
+        message = f"Reserve no WhatsApp com datas e quantas pessoas: {link}"
     elif lang == "fr":
-        message = (
-            "Envoyez-nous les dates et le nombre de personnes là-bas."
-            if already
-            else f"Écrivez-nous sur WhatsApp avec dates et nombre de personnes: {link}"
-        )
+        message = f"Réservez sur WhatsApp avec dates et nombre de personnes: {link}"
     elif lang == "de":
-        message = (
-            "Schick uns Daten und Personenanzahl dort."
-            if already
-            else f"Schreib uns auf WhatsApp mit Daten und Personenanzahl: {link}"
-        )
+        message = f"Reserviere per WhatsApp mit Daten und Personenanzahl: {link}"
     else:
-        message = (
-            "Pásanos las fechas y la cantidad de personas por ahí."
-            if already
-            else f"Escríbenos por WhatsApp con fechas y cantidad de personas: {link}"
-        )
+        message = f"Reserva por WhatsApp con fechas y cantidad de personas: {link}"
     message = apply_time_greeting(message, is_follow_up=is_follow_up)
     message = sanitize_outbound_message(message)
     return {
