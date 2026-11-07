@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -305,6 +306,8 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
         comments = await ig.sync_recent_comments(
             limit_media=ig.COMMENT_SYNC_MEDIA_LIMIT,
             auto_reply=True,
+            fetch_budget=ig.COMMENT_FETCH_BUDGET_SYNC,
+            rotate_offset=int(time.time()) // 60,
         )
         await ig.schedule_pending_public_replies()
     except ig.InstagramConfigError as exc:
@@ -323,6 +326,7 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
         }
         for c in comments[:10]
     ]
+    debug = getattr(ig.sync_recent_comments, "last_debug", {}) or {}
     return {
         "synced": len(comments),
         "comments": len(comments),
@@ -330,6 +334,7 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
         "warning": warning,
         "comment_poller": ig.connection_status().get("comment_poller"),
         "preview": fresh_preview,
+        "debug": debug,
     }
 
 

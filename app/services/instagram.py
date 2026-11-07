@@ -684,7 +684,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-24h-v7",
+        "comment_poller": "reels-2h-v8",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1310,13 +1310,14 @@ async def send_dm_image(recipient_id: str, image_url: str, *, open_url: str = ""
 
 # Meta: comment webhooks do NOT fire for Reels. Poll Graph instead.
 COMMENT_POLL_INTERVAL_SECONDS = 45.0
-COMMENT_POLL_MEDIA_LIMIT = 120
-COMMENT_SYNC_MEDIA_LIMIT = 400
-# Only ingest / auto-answer comments from the last 24 hours.
-COMMENT_MAX_AGE_SECONDS = 24 * 3600
+COMMENT_POLL_MEDIA_LIMIT = 150
+COMMENT_SYNC_MEDIA_LIMIT = 500
+# Only ingest / auto-answer comments from the last 2 hours.
+COMMENT_MAX_AGE_SECONDS = 2 * 3600
 # Always open /comments for the newest N media; otherwise only when count grew.
-COMMENT_ALWAYS_CHECK_NEWEST = 20
-COMMENT_FETCH_BUDGET = 50
+COMMENT_ALWAYS_CHECK_NEWEST = 25
+COMMENT_FETCH_BUDGET = 60
+COMMENT_FETCH_BUDGET_SYNC = 100
 
 
 def _inbound_is_fresh(
@@ -1324,7 +1325,7 @@ def _inbound_is_fresh(
     *,
     max_age_seconds: float = COMMENT_MAX_AGE_SECONDS,
 ) -> bool:
-    """True only for guest messages younger than max_age (default 24h)."""
+    """True only for guest messages younger than max_age (default 2h)."""
     parsed = _parse_iso(stamp)
     if not parsed:
         # If Meta sends a weird stamp, keep it — better reply than silently drop.
@@ -1387,7 +1388,7 @@ def _ingest_comment_row(
     ):
         return None
     created = c.get("timestamp") or _now_iso()
-    # Drop anything older than 24h — do not pollute the inbox with ancient threads.
+    # Drop anything older than 2h — do not pollute the inbox with ancient threads.
     if not _inbound_is_fresh(str(created)):
         return None
     return upsert_inbox_item(
@@ -1428,6 +1429,8 @@ async def sync_recent_comments(
     limit_media: int = COMMENT_POLL_MEDIA_LIMIT,
     *,
     auto_reply: bool = False,
+    fetch_budget: int | None = None,
+    rotate_offset: int = 0,
 ) -> list[dict[str, Any]]:
     """Fast comment poll: list media counts, fetch /comments only when needed.
 
@@ -1440,6 +1443,13 @@ async def sync_recent_comments(
     wanted = max(10, min(int(limit_media or COMMENT_POLL_MEDIA_LIMIT), COMMENT_SYNC_MEDIA_LIMIT))
     per_page = 50
     pages = max(1, (wanted + per_page - 1) // per_page)
+    budget = max(
+        10,
+        min(
+            int(fetch_budget or COMMENT_FETCH_BUDGET),
+            COMMENT_FETCH_BUDGET_SYNC,
+        ),
+    )
     # Lightweight list — no nested comments (those hang / come empty on Reels).
     media_rows = await _graph_pages(
         f"/{ig_user_id}/media",
@@ -1448,7 +1458,7 @@ async def sync_recent_comments(
             "fields": "id,caption,timestamp,permalink,media_type,media_product_type,comments_count",
             "limit": per_page,
         },
-        max_pages=min(pages, 4),
+        max_pages=min(pages, 12),
     )
     prev_counts = _load_media_comment_counts()
     next_counts = dict(prev_counts)
@@ -1469,32 +1479,55 @@ async def sync_recent_comments(
         if index < COMMENT_ALWAYS_CHECK_NEWEST or (previous >= 0 and count > previous):
             priority.append(media)
         elif previous < 0 and _is_reel_media(media):
-            # Unseen reels jump the queue — Meta never webhooks their comments.
             priority.append(media)
-    # Feed order for the rest (posts + reels). Do not starve older quiet posts
-    # behind dozens of busy reels.
+
+    # Rotate through the rest so older quiet posts are not permanently starved.
+    if with_comments and rotate_offset:
+        rot = abs(int(rotate_offset)) % len(with_comments)
+        rotated = with_comments[rot:] + with_comments[:rot]
+    else:
+        rotated = with_comments
+
     seen_ids: set[str] = set()
     to_fetch: list[dict[str, Any]] = []
-    for media in [*priority, *with_comments]:
+    for media in [*priority, *rotated]:
         mid = str(media.get("id") or "")
         if not mid or mid in seen_ids:
             continue
         seen_ids.add(mid)
         to_fetch.append(media)
-        if len(to_fetch) >= COMMENT_FETCH_BUDGET:
+        if len(to_fetch) >= budget:
             break
 
     synced: list[dict[str, Any]] = []
     to_reply: list[str] = []
     scanned_fresh = 0
-    for media in to_fetch:
+    fresh_samples: list[str] = []
+
+    async def _load_one(media: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        mid = str(media.get("id") or "")
+        rows = await _fetch_media_comments(mid, token)
+        return media, rows
+
+    # Parallel Graph reads — sequential was too slow and covered too little.
+    chunk_size = 10
+    loaded: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    for start in range(0, len(to_fetch), chunk_size):
+        chunk = to_fetch[start : start + chunk_size]
+        loaded.extend(await asyncio.gather(*[_load_one(media) for media in chunk]))
+
+    for media, rows in loaded:
         media_id = str(media.get("id") or "")
         count = int(media.get("comments_count") or 0)
-        rows = await _fetch_media_comments(media_id, token)
         next_counts[media_id] = count
         for c in rows:
-            if _inbound_is_fresh(str(c.get("timestamp") or "")):
+            stamp = str(c.get("timestamp") or "")
+            text = str(c.get("text") or "")
+            if _inbound_is_fresh(stamp):
                 scanned_fresh += 1
+                if len(fresh_samples) < 8:
+                    who = c.get("username") or (c.get("from") or {}).get("username") or "?"
+                    fresh_samples.append(f"@{who}: {text[:80]}")
             item = _ingest_comment_row(c, media=media)
             if not item:
                 continue
@@ -1513,19 +1546,31 @@ async def sync_recent_comments(
             await schedule_auto_reply(item_id)
         except Exception:  # noqa: BLE001
             logger.exception("Could not schedule auto-reply for synced comment %s", item_id)
-    # Attach lightweight debug on the list for callers that inspect __dict__ / return.
     logger.info(
-        "IG comment sync media=%s fetch=%s fresh_seen=%s synced=%s",
+        "IG comment sync media=%s fetch=%s fresh_seen=%s synced=%s samples=%s",
         len(media_rows),
         len(to_fetch),
         scanned_fresh,
         len(synced),
+        fresh_samples,
     )
+    # Stash debug for the HTTP sync endpoint.
+    sync_recent_comments.last_debug = {  # type: ignore[attr-defined]
+        "media_scanned": len(media_rows),
+        "media_with_comments": len(with_comments),
+        "fetched": len(to_fetch),
+        "fresh_seen": scanned_fresh,
+        "synced": len(synced),
+        "fresh_samples": fresh_samples,
+    }
     return synced
 
 
+sync_recent_comments.last_debug = {}  # type: ignore[attr-defined]
+
+
 def silence_stale_pending_public(max_age_seconds: float = COMMENT_MAX_AGE_SECONDS) -> int:
-    """Mark pending comments/mentions older than 24h as skipped."""
+    """Mark pending comments/mentions older than 2h as skipped."""
     fixed = 0
     for item in list_inbox(status="pending"):
         if item.get("type") not in {"comment", "mention"}:
@@ -1533,7 +1578,7 @@ def silence_stale_pending_public(max_age_seconds: float = COMMENT_MAX_AGE_SECOND
         if _inbound_is_fresh(str(item.get("created_at") or ""), max_age_seconds=max_age_seconds):
             continue
         item["status"] = "skipped"
-        item["escalation_reason"] = "stale_over_24h"
+        item["escalation_reason"] = "stale_over_2h"
         item["updated_at"] = _now_iso()
         upsert_inbox_item(item)
         fixed += 1
@@ -1541,7 +1586,7 @@ def silence_stale_pending_public(max_age_seconds: float = COMMENT_MAX_AGE_SECOND
 
 
 async def schedule_pending_public_replies(limit: int = 25) -> int:
-    """Kick auto-reply for pending comments/mentions from the last 24 hours only."""
+    """Kick auto-reply for pending comments/mentions from the last 2 hours only."""
     if not auto_reply_enabled():
         return 0
     silence_stale_pending_public()
@@ -1570,12 +1615,17 @@ async def poll_instagram_comments_loop() -> None:
         try:
             if load_connection() and auto_reply_enabled():
                 tick += 1
-                limit = (
-                    COMMENT_SYNC_MEDIA_LIMIT
-                    if tick % 4 == 0
-                    else COMMENT_POLL_MEDIA_LIMIT
+                deep = tick % 3 == 0
+                await sync_recent_comments(
+                    limit_media=(
+                        COMMENT_SYNC_MEDIA_LIMIT if deep else COMMENT_POLL_MEDIA_LIMIT
+                    ),
+                    auto_reply=True,
+                    fetch_budget=(
+                        COMMENT_FETCH_BUDGET_SYNC if deep else COMMENT_FETCH_BUDGET
+                    ),
+                    rotate_offset=tick * 17,
                 )
-                await sync_recent_comments(limit_media=limit, auto_reply=True)
                 await schedule_pending_public_replies()
         except asyncio.CancelledError:
             raise
