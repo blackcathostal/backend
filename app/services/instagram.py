@@ -28,6 +28,7 @@ CONNECTION_FILE = settings.uploads_dir / "cache" / "instagram_connection.json"
 INBOX_FILE = settings.uploads_dir / "cache" / "instagram_inbox.json"
 AUTO_REPLY_FILE = settings.uploads_dir / "cache" / "deepseek_auto_reply.json"
 MEDIA_COMMENT_COUNTS_FILE = settings.uploads_dir / "cache" / "instagram_media_comment_counts.json"
+MENTION_WATCH_FILE = settings.uploads_dir / "cache" / "instagram_mention_watch.json"
 _inbox_lock = threading.Lock()
 _inbox_cache: dict[str, Any] | None = None
 # Guests type in bursts ("hola" / "si" / "estoy interesado"). Wait after the last
@@ -684,7 +685,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-2h-v8",
+        "comment_poller": "reels-2h-tagged-v10",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1316,8 +1317,8 @@ COMMENT_SYNC_MEDIA_LIMIT = 500
 COMMENT_MAX_AGE_SECONDS = 2 * 3600
 # Always open /comments for the newest N media; otherwise only when count grew.
 COMMENT_ALWAYS_CHECK_NEWEST = 25
-COMMENT_FETCH_BUDGET = 60
-COMMENT_FETCH_BUDGET_SYNC = 100
+COMMENT_FETCH_BUDGET = 80
+COMMENT_FETCH_BUDGET_SYNC = 220
 
 
 def _inbound_is_fresh(
@@ -1367,17 +1368,55 @@ def _save_media_comment_counts(counts: dict[str, int]) -> None:
         logger.exception("Could not persist Instagram media comment counts")
 
 
+def _load_mention_watch() -> list[str]:
+    try:
+        if not MENTION_WATCH_FILE.exists():
+            return []
+        raw = json.loads(MENTION_WATCH_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, list):
+            return []
+        return [str(x) for x in raw if str(x).strip()]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def watch_mention_media(media_id: str | None) -> None:
+    """Keep watching others' posts/reels where @blackcathostal was mentioned."""
+    mid = str(media_id or "").strip()
+    if not mid:
+        return
+    items = _load_mention_watch()
+    if mid in items:
+        return
+    items.append(mid)
+    try:
+        MENTION_WATCH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        MENTION_WATCH_FILE.write_text(
+            json.dumps(items[-80:], ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not persist Instagram mention watch list")
+
+
 def _ingest_comment_row(
     c: dict[str, Any],
     *,
     media: dict[str, Any],
+    item_type: str = "comment",
 ) -> dict[str, Any] | None:
     media_id = str(media.get("id") or "").strip()
     comment_id = c.get("id")
     if not media_id or not comment_id:
         return None
-    external_id = f"comment:{comment_id}"
+    kind = "mention" if item_type == "mention" else "comment"
+    external_id = f"{kind}:{comment_id}"
     if find_by_external_id(external_id):
+        return None
+    # Also skip if already stored under the other prefix.
+    if find_by_external_id(f"comment:{comment_id}") or find_by_external_id(
+        f"mention:{comment_id}"
+    ):
         return None
     from_user = c.get("from") or {}
     author_username = c.get("username") or from_user.get("username")
@@ -1394,7 +1433,7 @@ def _ingest_comment_row(
     return upsert_inbox_item(
         {
             "id": str(uuid.uuid4()),
-            "type": "comment",
+            "type": kind,
             "thread_id": media_id,
             "external_id": external_id,
             "meta_comment_id": comment_id,
@@ -1408,6 +1447,7 @@ def _ingest_comment_row(
             "escalation_reason": None,
             "permalink": media.get("permalink"),
             "media_type": media.get("media_type") or media.get("media_product_type"),
+            "foreign_media": kind == "mention",
         }
     )
 
@@ -1502,7 +1542,9 @@ async def sync_recent_comments(
     synced: list[dict[str, Any]] = []
     to_reply: list[str] = []
     scanned_fresh = 0
+    raw_comments = 0
     fresh_samples: list[str] = []
+    raw_samples: list[str] = []
 
     async def _load_one(media: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         mid = str(media.get("id") or "")
@@ -1510,7 +1552,7 @@ async def sync_recent_comments(
         return media, rows
 
     # Parallel Graph reads — sequential was too slow and covered too little.
-    chunk_size = 10
+    chunk_size = 12
     loaded: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
     for start in range(0, len(to_fetch), chunk_size):
         chunk = to_fetch[start : start + chunk_size]
@@ -1521,12 +1563,15 @@ async def sync_recent_comments(
         count = int(media.get("comments_count") or 0)
         next_counts[media_id] = count
         for c in rows:
+            raw_comments += 1
             stamp = str(c.get("timestamp") or "")
             text = str(c.get("text") or "")
+            who = c.get("username") or (c.get("from") or {}).get("username") or "?"
+            if len(raw_samples) < 6:
+                raw_samples.append(f"{stamp} @{who}: {text[:70]}")
             if _inbound_is_fresh(stamp):
                 scanned_fresh += 1
                 if len(fresh_samples) < 8:
-                    who = c.get("username") or (c.get("from") or {}).get("username") or "?"
                     fresh_samples.append(f"@{who}: {text[:80]}")
             item = _ingest_comment_row(c, media=media)
             if not item:
@@ -1547,26 +1592,131 @@ async def sync_recent_comments(
         except Exception:  # noqa: BLE001
             logger.exception("Could not schedule auto-reply for synced comment %s", item_id)
     logger.info(
-        "IG comment sync media=%s fetch=%s fresh_seen=%s synced=%s samples=%s",
+        "IG comment sync media=%s fetch=%s raw=%s fresh_seen=%s synced=%s",
         len(media_rows),
         len(to_fetch),
+        raw_comments,
         scanned_fresh,
         len(synced),
-        fresh_samples,
     )
     # Stash debug for the HTTP sync endpoint.
     sync_recent_comments.last_debug = {  # type: ignore[attr-defined]
         "media_scanned": len(media_rows),
         "media_with_comments": len(with_comments),
         "fetched": len(to_fetch),
+        "raw_comments": raw_comments,
         "fresh_seen": scanned_fresh,
         "synced": len(synced),
         "fresh_samples": fresh_samples,
+        "raw_samples": raw_samples,
+        "max_age_hours": COMMENT_MAX_AGE_SECONDS / 3600,
     }
     return synced
 
 
 sync_recent_comments.last_debug = {}  # type: ignore[attr-defined]
+
+
+async def sync_tagged_media_comments(*, auto_reply: bool = False) -> list[dict[str, Any]]:
+    """Comments on OTHER people's posts/reels that tag or @mention the hotel.
+
+    Own-media polling never sees these. Meta Mentions API is used to reply.
+    """
+    conn = _require_connection()
+    ig_user_id = conn["ig_user_id"]
+    token = conn["page_access_token"]
+    media_by_id: dict[str, dict[str, Any]] = {}
+
+    # 1) Photo/people tags + collaborator tags.
+    try:
+        tagged = await _graph_pages(
+            f"/{ig_user_id}/tags",
+            token,
+            {
+                "fields": (
+                    "id,caption,timestamp,permalink,media_type,media_product_type,"
+                    "comments_count,username"
+                ),
+                "limit": 50,
+            },
+            max_pages=2,
+        )
+        for row in tagged:
+            mid = str(row.get("id") or "").strip()
+            if mid:
+                media_by_id[mid] = row
+                watch_mention_media(mid)
+    except InstagramError as exc:
+        logger.warning("IG tags poll failed: %s", exc)
+
+    # 2) Media ids from prior @mention webhooks (caption/comment mentions).
+    for mid in _load_mention_watch():
+        if mid in media_by_id:
+            continue
+        media_by_id[mid] = {"id": mid}
+
+    # Prefer media with activity; always include watch-list ids.
+    candidates = list(media_by_id.values())
+    candidates.sort(
+        key=lambda row: int(row.get("comments_count") or 0),
+        reverse=True,
+    )
+    to_fetch = candidates[:40]
+
+    synced: list[dict[str, Any]] = []
+    to_reply: list[str] = []
+    fresh_samples: list[str] = []
+
+    async def _load_one(media: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        mid = str(media.get("id") or "")
+        rows = await _fetch_media_comments(mid, token)
+        return media, rows
+
+    loaded: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    for start in range(0, len(to_fetch), 8):
+        chunk = to_fetch[start : start + 8]
+        loaded.extend(await asyncio.gather(*[_load_one(m) for m in chunk]))
+
+    for media, rows in loaded:
+        for c in rows:
+            text = str(c.get("text") or "")
+            stamp = str(c.get("timestamp") or "")
+            if _inbound_is_fresh(stamp) and len(fresh_samples) < 8:
+                who = c.get("username") or (c.get("from") or {}).get("username") or "?"
+                fresh_samples.append(f"@{who}: {text[:80]}")
+            item = _ingest_comment_row(c, media=media, item_type="mention")
+            if not item:
+                continue
+            synced.append(item)
+            if (
+                auto_reply
+                and auto_reply_enabled()
+                and item.get("status") == "pending"
+            ):
+                to_reply.append(str(item["id"]))
+
+    for item_id in to_reply:
+        try:
+            await schedule_auto_reply(item_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not schedule reply for tagged-media comment %s", item_id)
+
+    sync_tagged_media_comments.last_debug = {  # type: ignore[attr-defined]
+        "tagged_or_watched": len(media_by_id),
+        "fetched": len(to_fetch),
+        "synced": len(synced),
+        "fresh_samples": fresh_samples,
+    }
+    logger.info(
+        "IG tagged/mention media sync watched=%s fetched=%s synced=%s",
+        len(media_by_id),
+        len(to_fetch),
+        len(synced),
+    )
+    return synced
+
+
+sync_tagged_media_comments.last_debug = {}  # type: ignore[attr-defined]
 
 
 def silence_stale_pending_public(max_age_seconds: float = COMMENT_MAX_AGE_SECONDS) -> int:
@@ -1626,6 +1776,8 @@ async def poll_instagram_comments_loop() -> None:
                     ),
                     rotate_offset=tick * 17,
                 )
+                # Others' reels that @mention / tag the hotel (the common UGC case).
+                await sync_tagged_media_comments(auto_reply=True)
                 await schedule_pending_public_replies()
         except asyncio.CancelledError:
             raise
@@ -1826,11 +1978,29 @@ async def send_inbox_reply(
             media_id = str(item.get("media_id") or item.get("thread_id") or "").strip()
             if not media_id:
                 raise InstagramError("Falta media_id para responder la mención")
-            meta_result = await reply_to_mention(
-                media_id=media_id,
-                message=text,
-                comment_id=str(item.get("meta_comment_id") or "").strip() or None,
+            # Mentions API only threads under a comment if WE were @mentioned in it.
+            # Guests often just write "hola valor" — then reply at media level.
+            own = _own_instagram_username()
+            guest_text = str(item.get("text") or "").lower()
+            threaded = bool(own and f"@{own.lower()}" in guest_text)
+            comment_id = (
+                str(item.get("meta_comment_id") or "").strip() if threaded else ""
             )
+            try:
+                meta_result = await reply_to_mention(
+                    media_id=media_id,
+                    message=text,
+                    comment_id=comment_id or None,
+                )
+            except InstagramError:
+                if comment_id:
+                    meta_result = await reply_to_mention(
+                        media_id=media_id,
+                        message=text,
+                        comment_id=None,
+                    )
+                else:
+                    raise
         elif item.get("type") == "comment":
             comment_id = item.get("meta_comment_id")
             if not comment_id:
@@ -2610,6 +2780,8 @@ async def process_webhook_payload(payload: dict[str, Any]) -> list[dict[str, Any
                 comment_id = str(value.get("comment_id") or "").strip()
                 if not media_id and not comment_id:
                     continue
+                # Keep watching this foreign media for later guest questions (precio, etc.).
+                watch_mention_media(media_id)
                 try:
                     details = await fetch_mention_details(
                         media_id=media_id or None,
