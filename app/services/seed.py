@@ -152,10 +152,17 @@ DEFAULT_COMMON_ANSWERS = [
         "keywords": "cumpleaños,beneficio,cédula,pasaporte,fans,descuento",
         "question": "¿Cómo aplico el beneficio de cumpleaños?",
         "answer_guide": (
-            "Presentando tu cédula de identidad/pasaporte vigente en recepción al momento del check-in "
-            "durante el mes de tu cumpleaños."
+            "El beneficio de cumpleaños se confirma por WhatsApp. "
+            "En check-in presentas cédula o pasaporte vigente del mes de cumpleaños."
         ),
         "sort_order": 5,
+    },
+    {
+        "topic": "voluntariado",
+        "keywords": "voluntariado,voluntario,volunteer,workaway,gratis,trabajo gratis,helpxx",
+        "question": "¿Aceptan voluntariado o trabajo a cambio de alojamiento?",
+        "answer_guide": "Por ahora no estamos aceptando voluntariado. Gracias por escribir.",
+        "sort_order": 32,
     },
     {
         "topic": "services",
@@ -363,7 +370,7 @@ def seed_database(db: Session) -> None:
     get_or_create_hostel_info(db)
 
     # Official price FAQ topics must stay in sync on every seed/startup.
-    FORCE_FAQ_TOPICS = {"tarifas", "dormitory", "mensual"}
+    FORCE_FAQ_TOPICS = {"tarifas", "dormitory", "mensual", "voluntariado", "birthday"}
     if db.query(CommonAnswers).count() == 0:
         for item in DEFAULT_COMMON_ANSWERS:
             db.add(CommonAnswers(**item, is_active=True))

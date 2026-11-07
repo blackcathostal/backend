@@ -31,14 +31,15 @@ _inbox_lock = threading.Lock()
 _inbox_cache: dict[str, Any] | None = None
 # Guests type in bursts ("hola" / "si" / "estoy interesado"). Wait after the last
 # bubble, then answer once with everything that arrived together.
-AUTO_REPLY_DEBOUNCE_SECONDS = 5.0
+AUTO_REPLY_DEBOUNCE_SECONDS = 7.0
 # Even if they keep sending bubbles, force one reply before this cap.
-AUTO_REPLY_MAX_BURST_SECONDS = 18.0
+AUTO_REPLY_MAX_BURST_SECONDS = 20.0
 # Don't ignore a new "hola" forever after an old greeting reply.
 GREETING_SKIP_WINDOW_SECONDS = 120.0
 _auto_reply_debounce_tasks: dict[str, asyncio.Task[Any]] = {}
 _auto_reply_debounce_deadline: dict[str, float] = {}
 _auto_reply_debounce_lock = asyncio.Lock()
+_auto_reply_peer_locks: dict[str, asyncio.Lock] = {}
 logger = logging.getLogger(__name__)
 _HELP_OFFER_MARKERS = (
     "en qué te puedo ayudar",
@@ -1348,9 +1349,12 @@ async def send_inbox_reply(
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
-    from app.services.deepseek_instagram import sanitize_outbound_message
+    from app.services.deepseek_instagram import (
+        enforce_single_short_reply,
+        sanitize_outbound_message,
+    )
 
-    text = sanitize_outbound_message(_strip_maps_urls(message or ""))
+    text = enforce_single_short_reply(sanitize_outbound_message(_strip_maps_urls(message or "")))
     if not text:
         raise InstagramError("Mensaje vacío")
     # Only attach a map when this turn asked for one. Never reuse a stale pending image
@@ -1593,6 +1597,24 @@ async def _run_debounced_auto_reply(key: str, item_id: str, delay: float) -> Non
 
 
 async def run_auto_reply(item_id: str) -> dict[str, Any]:
+    item = get_inbox_item(item_id)
+    if not item:
+        raise InstagramError("Item de inbox no encontrado")
+
+    peer_key = _thread_debounce_key(item) or item_id
+    peer_lock = _auto_reply_peer_locks.setdefault(peer_key, asyncio.Lock())
+    if peer_lock.locked():
+        # Another reply for this chat is already running — avoid a second bubble.
+        item["status"] = "skipped"
+        item["escalation_reason"] = "peer_reply_in_flight"
+        item["updated_at"] = _now_iso()
+        return upsert_inbox_item(item)
+
+    async with peer_lock:
+        return await _run_auto_reply_locked(item_id)
+
+
+async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")

@@ -73,6 +73,33 @@ _DISTANCE_QUESTION_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_VOLUNTEER_RE = re.compile(
+    r"("
+    r"voluntari[oa]?s?|voluntariado|volunteer(?:ing)?|"
+    r"workaway|help[sx]x|woofing|wwoof|"
+    r"trabajo\s+gratis|trabajar\s+gratis|alojamiento\s+gratis|"
+    r"gratis\s+a\s+cambio|intercambio\s+de\s+trabajo|"
+    r"free\s+(?:stay|room|accommodation|volunteer)"
+    r")",
+    re.IGNORECASE,
+)
+_SHORT_ACK_RE = re.compile(
+    r"^\s*(?:[¡!]?\s*)?(?:"
+    r"ok|okay|vale|listo|perfecto|exacto|claro|dale|ya|s[ií]|sip|sep|"
+    r"gracias|thanks|thank\s+you|merci|obrigad[oa]|"
+    r"super|súper|genial|buenísimo|buenisimo|entendido|de\s+acuerdo|"
+    r"ah\s+ok|ah\s+ya|mm+|aha+|aja+"
+    r")(?:\s*[,!.…?]*)?(?:\s+(?:👋|🙂|😊|✨|👍|🙏))?\s*$",
+    re.IGNORECASE,
+)
+_DOC_ID_RE = re.compile(
+    r"("
+    r"c[eé]dula|pasaporte|documento\s+de\s+identidad|carnet|"
+    r"rut\b|dni\b|id\s+card|identity\s+card"
+    r")",
+    re.IGNORECASE,
+)
+MAX_REPLY_CHARS = 280
 _BOT_FAREWELL_RE = re.compile(
     r"(?is)(?:^|[.!?…]\s+)"
     r"(?:"
@@ -113,16 +140,19 @@ DEFAULT_SYSTEM_PROMPT = """Eres recepción de Black Cat Hostal Boutique (Santiag
 (Messenger). Mismas reglas en ambos canales.
 
 Estilo (OBLIGATORIO):
-- Respuestas EJECUTIVAS y cortas: 1–2 frases. Máx. ~220 caracteres (rutas hasta 450). Saludos ~60.
-- Habla natural, sin robot ni script. Máximo 1 emoji y solo si encaja.
-- NO repitas siempre lo mismo: no menciones Barrio Brasil, desayuno continental ni “ambiente boutique”
-  en cada mensaje. Úsalos SOLO si el huésped pregunta por ubicación, barrio o desayuno.
-- NUNCA te despidas (chao, hasta luego, que tengas buen día/viaje, saludos, quedamos atentos)
-  a menos que el huésped se haya despedido primero en este mensaje.
-- Si solo saluda (“hola”, “hi”, “buenas”) sin otra consulta: responde exactamente en ese idioma
-  el equivalente de «Hola, ¿en qué te podemos ayudar?» y PARA. Sin catálogo ni pitch.
-- Consulta real: contesta el dato pedido y listo. Sin relleno. Sin vender de más.
-- No asumas aeropuerto/transporte ni de dónde viene el huésped si no lo dijo.
+- UN solo mensaje por turno. Nunca mandes dos burbujas seguidas ni un “Exacto/Claro…” aparte.
+- Respuestas EJECUTIVAS: 1 frase (máx. 2). Máx. ~220 caracteres. Saludos ~60.
+- Habla natural. Máximo 1 emoji y solo si encaja.
+- NO listes todas las habitaciones ni todas las tarifas salvo que pidan el listado completo.
+  Si preguntan por una (ej. matrimonial), responde SOLO esa.
+- NO confirmes de más (“Exacto, ese es el valor”). Si ya diste el dato, no reenvíes otro mensaje.
+- Si el huésped solo dice ok/vale/exacto/gracias/sí → no hace falta responder (o una palabra).
+- NO repitas Barrio Brasil/desayuno/boutique salvo que pregunten eso.
+- NUNCA te despidas salvo que el huésped se despida primero.
+- Saludo solo → «Hola, ¿en qué te podemos ayudar?» y PARA.
+- Voluntariado / trabajo gratis / stay gratis → amable y corto: no se está aceptando.
+- Cédula/documentos/beneficios dudosos → deriva a WhatsApp (no inventes).
+- No asumas aeropuerto/transporte si no lo dijo.
 
 Idioma (OBLIGATORIO):
 - Detecta el idioma por toda la charla y responde SOLO en ese idioma.
@@ -313,6 +343,35 @@ def strip_repeated_whatsapp_number(message: str, *, already_shared: bool) -> str
     return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
 
 
+def enforce_single_short_reply(message: str, *, max_chars: int = MAX_REPLY_CHARS) -> str:
+    """One short bubble: collapse paragraphs and hard-cap length."""
+    text = (message or "").strip()
+    if not text:
+        return ""
+    # Model sometimes fakes two bubbles with blank lines.
+    parts = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    if len(parts) > 1:
+        # Prefer the factual first part; drop trailing “Exacto/Claro…” confirmations.
+        keep = [parts[0]]
+        for part in parts[1:]:
+            if _SHORT_ACK_RE.match(part) or re.match(
+                r"^(?:exacto|claro|perfecto|as[ií]\s+es)\b",
+                part,
+                re.IGNORECASE,
+            ):
+                continue
+            keep.append(part)
+        text = " ".join(keep)
+    text = re.sub(r"\s*\n\s*", " ", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    if len(text) <= max_chars:
+        return text
+    cut = text[: max_chars - 1]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;:-") + "…"
+
+
 def guest_said_goodbye(text: str) -> bool:
     return bool(_GUEST_GOODBYE_RE.search(text or ""))
 
@@ -381,15 +440,16 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- Respuestas cortas y ejecutivas (1–2 frases). Sin párrafos ni listas largas.\n"
         "- Nunca te despidas si el huésped no se despidió primero.\n"
         "- No repitas Barrio Brasil / desayuno / boutique en cada mensaje; solo si preguntan eso.\n"
-        "- Precios/habitaciones SOLO si el huésped lo pide. No listes tipos ni tarifas de más.\n"
+        "- UN mensaje por respuesta. Corto. Sin segunda burbuja de confirmación.\n"
+        "- Precios/habitaciones SOLO si lo pide; una sola tarifa si pregunta por un tipo.\n"
         "- Mensual $1.500.000. Noche FAQ: 54990 / 54990 / 69990 / 19990.\n"
-        "- WhatsApp máximo 1 vez por hilo (+56 9… sin https://wa.me). Si ya salió, no repitas el número.\n"
-        "- NUNCA digas que confirmas o hablas con recepción: este canal no habla con recepción.\n"
-        "- Reserva: WhatsApp corto con fechas/personas (número solo si aún no lo diste).\n"
-        "- Tiempo/distancia: eta_only=true → solo minutos en auto, SIN mapa.\n"
-        "- Cómo llegar: eta_only=false, sin URLs, «Te lo indico en el siguiente mapa.»\n"
-        "- Si el huésped se despide, despídete corto. Si no, no te despidas.\n"
-        "- Tema ajeno al hostal: di breve que este canal es solo para el hostal.\n"
+        "- Voluntariado/gratis: no estamos aceptando voluntariado (amable y corto).\n"
+        "- Cédula/pasaporte/beneficio dudoso: WhatsApp, no inventes.\n"
+        "- WhatsApp máximo 1 vez por hilo (+56 9… sin https://wa.me).\n"
+        "- NUNCA digas que confirmas o hablas con recepción.\n"
+        "- Reserva: WhatsApp corto con fechas/personas.\n"
+        "- Tiempo/distancia: eta_only=true → solo min en auto, SIN mapa.\n"
+        "- Si se despide, despídete corto. Si no, no.\n"
         "- Instagram y Facebook: mismas reglas.\n"
     )
     if is_follow_up:
@@ -706,11 +766,12 @@ def _guest_turn(
         "",
         "Responde corto y ejecutivo (1–2 frases). "
         "Idioma: toda la charla; mensajes cortos heredan el idioma del hilo. No mezcles. "
+        "UN solo mensaje corto. Sin segunda burbuja. "
         "Saludo solo → «Hola, ¿en qué te podemos ayudar?» y PARA. "
-        "Precios/tipos de habitación solo si los piden. Mensual 1500000. "
-        "WhatsApp máximo una vez en el hilo. Nunca digas que confirmas con recepción. "
-        "Tiempo/distancia → eta_only=true (solo min en auto, sin mapa). "
-        "Si se despide → despídete corto. JSON final.",
+        "Una tarifa si preguntan un tipo; no listes todo. Mensual 1500000. "
+        "Voluntariado → no aceptamos (corto). Cédula dudosa → WhatsApp. "
+        "WhatsApp máx. 1 vez. Sin recepción. "
+        "Tiempo/distancia → eta_only=true. Si se despide → despídete. JSON final.",
     ]
     return "\n".join(lines)
 
@@ -748,6 +809,117 @@ def _looks_like_distance_question(text: str) -> bool:
     if not sample:
         return False
     return bool(_DISTANCE_QUESTION_RE.search(sample))
+
+
+def _looks_like_short_ack(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample or len(sample) > 80:
+        return False
+    lines = [line.strip() for line in sample.splitlines() if line.strip()]
+    if not lines:
+        return False
+    return all(bool(_SHORT_ACK_RE.match(line)) for line in lines)
+
+
+def _looks_like_volunteer(text: str) -> bool:
+    return bool(_VOLUNTEER_RE.search(text or ""))
+
+
+def _looks_like_doc_id_question(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample:
+        return False
+    if not _DOC_ID_RE.search(sample):
+        return False
+    # Birthday FAQ already covers cédula for that benefit; other ID asks → WhatsApp.
+    if re.search(r"cumplea[nñ]os|birthday|fans?", sample, re.IGNORECASE):
+        return False
+    return True
+
+
+def _skip_reply(reason: str) -> dict[str, Any]:
+    return {
+        "action": "skip",
+        "message": "",
+        "reason": reason,
+        "model": f"rule:{reason}",
+        "map_image_url": "",
+        "maps_url": "",
+    }
+
+
+def _volunteer_reply(
+    *,
+    inbound_text: str,
+    prior: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    prior_texts = [
+        str(turn.get("content") or "")
+        for turn in (prior or [])
+        if turn.get("role") == "user"
+    ]
+    lang = _conversation_language([*prior_texts, inbound_text], default="es")
+    if lang == "en":
+        message = "Thanks for asking — we're not accepting volunteers right now."
+    elif lang == "pt":
+        message = "Obrigado! No momento não estamos aceitando voluntariado."
+    else:
+        message = "Gracias por escribir: por ahora no estamos aceptando voluntariado."
+    return {
+        "action": "reply",
+        "message": message,
+        "reason": "volunteer_closed",
+        "model": "rule:volunteer",
+        "map_image_url": "",
+        "maps_url": "",
+    }
+
+
+def _unknown_whatsapp_reply(
+    db: Session,
+    *,
+    inbound_text: str,
+    is_follow_up: bool,
+    prior: list[dict[str, Any]] | None = None,
+    reason: str = "unknown_whatsapp",
+) -> dict[str, Any]:
+    info = hostel_info_dict(db)
+    phone = whatsapp_phone_display(str(info.get("whatsapp_url") or ""))
+    already = thread_already_shared_whatsapp(prior)
+    prior_texts = [
+        str(turn.get("content") or "")
+        for turn in (prior or [])
+        if turn.get("role") == "user"
+    ]
+    lang = _conversation_language([*prior_texts, inbound_text], default="es")
+    if lang == "en":
+        message = (
+            "Please confirm that on WhatsApp."
+            if already
+            else f"Please confirm that on WhatsApp {phone}."
+        )
+    elif lang == "pt":
+        message = (
+            "Confirma isso pelo WhatsApp."
+            if already
+            else f"Confirma isso pelo WhatsApp {phone}."
+        )
+    else:
+        message = (
+            "Eso debes confirmarlo por WhatsApp."
+            if already
+            else f"Eso debes confirmarlo por WhatsApp {phone}."
+        )
+    message = apply_time_greeting(message, is_follow_up=is_follow_up)
+    message = sanitize_outbound_message(message)
+    return {
+        "action": "reply",
+        "message": message,
+        "reason": reason,
+        "model": f"rule:{reason}",
+        "map_image_url": "",
+        "maps_url": "",
+    }
 
 
 def _already_offered_help(prior: list[dict[str, Any]] | None) -> bool:
@@ -1081,7 +1253,7 @@ async def _run_reply_loop(
             reply_message = strip_repeated_whatsapp_number(
                 reply_message, already_shared=already_wa
             )
-            reply_message = re.sub(r"\n{3,}", "\n\n", reply_message).strip()
+            reply_message = enforce_single_short_reply(reply_message)
             if action == "reply" and not reply_message:
                 action = "escalate"
                 reason = reason or "empty_reply"
@@ -1133,6 +1305,19 @@ async def generate_instagram_reply(
         )
     if _looks_like_goodbye_only(inbound_text):
         return _goodbye_reply(inbound_text=inbound_text, prior=prior)
+    if is_follow_up and _looks_like_short_ack(inbound_text):
+        # Avoid a second bubble like “Exacto, ese es el valor” after already answering.
+        return _skip_reply("short_ack")
+    if _looks_like_volunteer(inbound_text):
+        return _volunteer_reply(inbound_text=inbound_text, prior=prior)
+    if _looks_like_doc_id_question(inbound_text):
+        return _unknown_whatsapp_reply(
+            db,
+            inbound_text=inbound_text,
+            is_follow_up=is_follow_up,
+            prior=prior,
+            reason="doc_id_whatsapp",
+        )
     if _looks_like_reservation(inbound_text):
         return _reservation_whatsapp_reply(
             db,
@@ -1229,6 +1414,24 @@ async def generate_test_chat(
         return result
     if _looks_like_goodbye_only(inbound_text):
         result = _goodbye_reply(inbound_text=inbound_text, prior=prior)
+        result["channel"] = channel
+        return result
+    if is_follow_up and _looks_like_short_ack(inbound_text):
+        result = _skip_reply("short_ack")
+        result["channel"] = channel
+        return result
+    if _looks_like_volunteer(inbound_text):
+        result = _volunteer_reply(inbound_text=inbound_text, prior=prior)
+        result["channel"] = channel
+        return result
+    if _looks_like_doc_id_question(inbound_text):
+        result = _unknown_whatsapp_reply(
+            db,
+            inbound_text=inbound_text,
+            is_follow_up=is_follow_up,
+            prior=prior,
+            reason="doc_id_whatsapp",
+        )
         result["channel"] = channel
         return result
     if _looks_like_reservation(inbound_text):
