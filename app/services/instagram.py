@@ -685,7 +685,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-collab-v15",
+        "comment_poller": "reels-collab-dm-v16",
         "poller_debug": {
             "own": getattr(sync_recent_comments, "last_debug", {}) or {},
             "collaborative": getattr(
@@ -1423,9 +1423,12 @@ _BOT_PUBLIC_PHRASE_RE = re.compile(
 )
 
 _FOREIGN_REEL_DM_REDIRECT = {
-    "es": "Hola! Escríbenos por interno para ayudarte con eso.",
-    "en": "Hi! Please DM us and we'll help you with that.",
-    "pt": "Oi! Nos chama no direct que te ajudamos.",
+    "es": (
+        "Hola! Escríbenos por interno para compartir los precios "
+        "según lo que necesites."
+    ),
+    "en": "Hi! DM us and we'll share the rates for what you need.",
+    "pt": "Oi! Chama no direct que te passamos os valores conforme o que precisa.",
 }
 
 
@@ -2522,7 +2525,7 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
 
 def _foreign_reel_dm_redirect(inbound_text: str) -> str:
     sample = (inbound_text or "").lower()
-    if re.search(r"\b(hello|hi|price|room|book)\b", sample):
+    if re.search(r"\b(hello|hi|price|room|book|rate)\b", sample):
         return _FOREIGN_REEL_DM_REDIRECT["en"]
     if re.search(r"\b(oi|olá|ola|preço|preco|quarto)\b", sample):
         return _FOREIGN_REEL_DM_REDIRECT["pt"]
@@ -2530,7 +2533,7 @@ def _foreign_reel_dm_redirect(inbound_text: str) -> str:
 
 
 def _already_sent_foreign_redirect(item: dict[str, Any]) -> bool:
-    """One 'escríbenos por interno' per guest on the same foreign post."""
+    """One 'escríbenos por interno' per guest on the same foreign/collab post."""
     media_id = str(item.get("media_id") or item.get("thread_id") or "")
     author = str(item.get("author_id") or item.get("author_username") or "")
     if not media_id:
@@ -2552,6 +2555,15 @@ def _already_sent_foreign_redirect(item: dict[str, Any]) -> bool:
         if _looks_like_own_public_reply(str(row.get("text") or "")):
             return True
     return False
+
+
+def _should_redirect_public_to_dm(item: dict[str, Any]) -> bool:
+    """Foreign UGC and collaborative reels: never post prices in public comments."""
+    return bool(
+        item.get("type") == "mention"
+        or item.get("foreign_media")
+        or item.get("collaborative")
+    )
 
 
 async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
@@ -2579,8 +2591,8 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
     inbound = _combined_burst_text(burst) or str(latest.get("text") or "")
     burst_texts = {str(row.get("text") or "").strip() for row in burst if str(row.get("text") or "").strip()}
 
-    # Reels/posts of OTHER accounts: never dump prices publicly — send to DM.
-    if latest.get("type") == "mention" or latest.get("foreign_media"):
+    # Foreign + collab reels: invite DM — never dump prices publicly.
+    if _should_redirect_public_to_dm(latest):
         if not latest.get("meta_comment_id"):
             latest["status"] = "skipped"
             latest["escalation_reason"] = "caption_mention_only"
