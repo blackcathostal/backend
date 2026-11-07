@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api import (
+    accounting_accounts,
     ai,
     analytics,
     auth,
@@ -48,3 +49,4 @@ api_router.include_router(instagram.router)
 api_router.include_router(facebook.router)
 api_router.include_router(analytics.router)
 api_router.include_router(terms.router)
+api_router.include_router(accounting_accounts.router)

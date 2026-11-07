@@ -1,3 +1,4 @@
+from app.models.accounting_accounts import AccountingAccounts
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_sources import AiSources
 from app.models.ai_usage import AiUsage
@@ -19,6 +20,7 @@ from app.models.users import Users
 from app.models.visitor_analytics import VisitorEvents, VisitorSessions
 
 __all__ = [
+    "AccountingAccounts",
     "AiSources",
     "AiGenerationRuns",
     "AiUsage",
