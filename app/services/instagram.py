@@ -883,7 +883,71 @@ async def reply_to_comment(comment_id: str, message: str) -> dict[str, Any]:
     )
 
 
+async def send_dm_whatsapp_button(
+    recipient_id: str,
+    text: str,
+    whatsapp_url: str,
+) -> dict[str, Any]:
+    """Send text + WhatsApp URL as a button (no OG preview image of the WhatsApp account)."""
+    conn = _require_connection()
+    page_id = conn["page_id"]
+    body = (text or "").strip() or "Escríbenos por WhatsApp."
+    if len(body) > 640:
+        body = body[:637].rstrip() + "…"
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "text": body,
+                    "buttons": [
+                        {
+                            "type": "web_url",
+                            "url": whatsapp_url,
+                            "title": "WhatsApp",
+                        }
+                    ],
+                },
+            }
+        },
+    }
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        response = await client.post(
+            f"{_graph_base()}/{page_id}/messages",
+            params={"access_token": conn["page_access_token"]},
+            json=payload,
+        )
+    data = response.json() if response.content else {}
+    if response.status_code >= 400 or data.get("error"):
+        err = data.get("error") or {}
+        raise InstagramError(
+            _meta_error_message(err, "No se pudo enviar el botón de WhatsApp"),
+            details=data,
+        )
+    data["_whatsapp_button"] = True
+    return data
+
+
 async def send_dm(recipient_id: str, message: str) -> dict[str, Any]:
+    from app.services.deepseek_instagram import extract_whatsapp_link
+
+    text, wa_url = extract_whatsapp_link(message or "")
+    if wa_url:
+        try:
+            return await send_dm_whatsapp_button(
+                recipient_id,
+                text or "Escríbenos por WhatsApp.",
+                wa_url,
+            )
+        except InstagramError:
+            # Fall back to plain text with the link (may show preview).
+            text = (message or "").strip()
+    else:
+        text = (message or "").strip()
+    if not text:
+        raise InstagramError("Mensaje vacío")
     conn = _require_connection()
     page_id = conn["page_id"]
     async with httpx.AsyncClient(timeout=45.0) as client:
@@ -892,7 +956,7 @@ async def send_dm(recipient_id: str, message: str) -> dict[str, Any]:
             params={"access_token": conn["page_access_token"]},
             json={
                 "recipient": {"id": recipient_id},
-                "message": {"text": message},
+                "message": {"text": text},
             },
         )
     data = response.json() if response.content else {}

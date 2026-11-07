@@ -165,8 +165,8 @@ Datos (OBLIGATORIO):
 - Mensual: $1.500.000 CLP (FAQ topic mensual).
 - Check-in, check-out, desayuno, estacionamiento, WhatsApp, dirección → get_hostel_info.
 - Otras dudas del hostal → search_common_answers.
-- WhatsApp: dalo MÁXIMO UNA vez por conversación (número +56 9…, SIN https://wa.me/).
-  Si ya lo diste antes en el hilo, no lo repitas; di solo “por WhatsApp” sin número.
+- WhatsApp: dalo MÁXIMO UNA vez por conversación como https://wa.me/… (se envía sin imagen).
+  Si ya lo diste antes en el hilo, no lo repitas; di solo “por WhatsApp”.
 - NUNCA digas que vas a confirmar con recepción, ni que hablas con recepción, ni que “recibimos
   tu mensaje en recepción”. Este canal NO habla con recepción.
 - Si NO sabes: deriva a WhatsApp (si aún no lo diste) o pide el dato faltante. Breve.
@@ -274,15 +274,27 @@ def strip_opening_greeting(message: str) -> str:
     return text
 
 
-def whatsapp_phone_display(whatsapp_url: str = "") -> str:
-    """Human phone for DMs — avoids Instagram link-preview image before the text."""
+def whatsapp_digits(whatsapp_url: str = "") -> str:
     raw = (whatsapp_url or "").strip()
-    digits = ""
     match = _WA_ME_RE.search(raw) or _WA_ME_PLAIN_RE.search(raw)
     if match:
-        digits = match.group(1)
-    else:
-        digits = re.sub(r"\D", "", raw)
+        return match.group(1)
+    digits = re.sub(r"\D", "", raw)
+    if digits.startswith("56") and len(digits) >= 11:
+        return digits
+    if digits.startswith("9") and len(digits) == 9:
+        return f"56{digits}"
+    return digits or "56949105984"
+
+
+def whatsapp_click_url(whatsapp_url: str = "") -> str:
+    """Canonical WhatsApp link (https://wa.me/...)."""
+    return f"https://wa.me/{whatsapp_digits(whatsapp_url)}"
+
+
+def whatsapp_phone_display(whatsapp_url: str = "") -> str:
+    """Human phone fallback when a plain number is needed."""
+    digits = whatsapp_digits(whatsapp_url)
     if digits.startswith("56") and len(digits) >= 11:
         rest = digits[2:]
         if rest.startswith("9") and len(rest) == 9:
@@ -303,19 +315,38 @@ _RECEPTION_CLAIM_RE = re.compile(
     r"(?:ya\s+)?(?:lo\s+)?(?:vi|vimos|recibimos)\s+(?:en|por)\s+recepci[oó]n"
     r")[^.!?…]*[.!?…]?"
 )
+_PHONE_AS_WA_RE = re.compile(
+    r"(?<!\w)(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+?569\d{8})(?!\w)"
+)
 
 
 def sanitize_outbound_message(message: str) -> str:
-    """Replace wa.me links with a phone number so IG does not show WhatsApp preview first."""
+    """Normalize WhatsApp to https://wa.me/... (IG sends it as a button, not OG image)."""
     text = message or ""
 
-    def _replace(match: re.Match[str]) -> str:
-        return whatsapp_phone_display(match.group(0))
+    def _replace_wa(match: re.Match[str]) -> str:
+        return whatsapp_click_url(match.group(0))
 
-    text = _WA_ME_RE.sub(_replace, text)
-    text = _WA_ME_PLAIN_RE.sub(_replace, text)
+    def _replace_phone(match: re.Match[str]) -> str:
+        return whatsapp_click_url(match.group(0))
+
+    text = _WA_ME_RE.sub(_replace_wa, text)
+    text = _WA_ME_PLAIN_RE.sub(_replace_wa, text)
+    text = _PHONE_AS_WA_RE.sub(_replace_phone, text)
     text = _RECEPTION_CLAIM_RE.sub(" ", text)
     return re.sub(r"\s{2,}", " ", re.sub(r"\n{3,}", "\n\n", text)).strip()
+
+
+def extract_whatsapp_link(message: str) -> tuple[str, str]:
+    """Split message into (text_without_url, https://wa.me/... or '')."""
+    text = message or ""
+    match = _WA_ME_RE.search(text) or _WA_ME_PLAIN_RE.search(text)
+    if not match:
+        return text.strip(), ""
+    url = whatsapp_click_url(match.group(0))
+    cleaned = text[: match.start()] + text[match.end() :]
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,;-")
+    return cleaned, url
 
 
 def thread_already_shared_whatsapp(prior: list[dict[str, Any]] | None) -> bool:
@@ -329,10 +360,12 @@ def thread_already_shared_whatsapp(prior: list[dict[str, Any]] | None) -> bool:
 
 
 def strip_repeated_whatsapp_number(message: str, *, already_shared: bool) -> str:
-    """Keep at most one WhatsApp number per conversation."""
+    """Keep at most one WhatsApp link/number per conversation."""
     text = message or ""
     if not already_shared:
         return text
+    text = _WA_ME_RE.sub("", text)
+    text = _WA_ME_PLAIN_RE.sub("", text)
     text = re.sub(
         r"(?i)(?:por\s+)?whatsapp\s*(?::|-)?\s*\+?\d[\d\s-]{7,}\d",
         "por WhatsApp",
@@ -340,7 +373,9 @@ def strip_repeated_whatsapp_number(message: str, *, already_shared: bool) -> str
     )
     text = re.sub(r"\+56\s*9\s*\d{4}\s*\d{4}", "", text)
     text = re.sub(r"\+56\s*\d[\d\s-]{6,}\d", "", text)
-    return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
+    if re.search(r"(?i)whatsapp", text):
+        return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
+    return re.sub(r"\s{2,}", " ", f"{text} por WhatsApp").strip(" ,;-")
 
 
 def enforce_single_short_reply(message: str, *, max_chars: int = MAX_REPLY_CHARS) -> str:
@@ -364,9 +399,20 @@ def enforce_single_short_reply(message: str, *, max_chars: int = MAX_REPLY_CHARS
         text = " ".join(keep)
     text = re.sub(r"\s*\n\s*", " ", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
-    if len(text) <= max_chars:
+    # Never chop a WhatsApp link — keep it intact even if the reply is a bit longer.
+    wa_match = _WA_ME_RE.search(text) or _WA_ME_PLAIN_RE.search(text)
+    wa_tail = wa_match.group(0) if wa_match else ""
+    limit = max(max_chars, len(wa_tail) + 80) if wa_tail else max_chars
+    if len(text) <= limit:
         return text
-    cut = text[: max_chars - 1]
+    if wa_tail and wa_tail in text:
+        prefix = text.replace(wa_tail, " ", 1)
+        prefix = re.sub(r"\s{2,}", " ", prefix).strip(" ,;-")
+        budget = max(40, limit - len(wa_tail) - 1)
+        if len(prefix) > budget:
+            prefix = prefix[:budget].rsplit(" ", 1)[0].rstrip(" ,;:-")
+        return f"{prefix} {whatsapp_click_url(wa_tail)}".strip()
+    cut = text[: limit - 1]
     if " " in cut:
         cut = cut.rsplit(" ", 1)[0]
     return cut.rstrip(" ,;:-") + "…"
@@ -445,7 +491,7 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- Mensual $1.500.000. Noche FAQ: 54990 / 54990 / 69990 / 19990.\n"
         "- Voluntariado/gratis: no estamos aceptando voluntariado (amable y corto).\n"
         "- Cédula/pasaporte/beneficio dudoso: WhatsApp, no inventes.\n"
-        "- WhatsApp máximo 1 vez por hilo (+56 9… sin https://wa.me).\n"
+        "- WhatsApp máximo 1 vez por hilo (enlace https://wa.me/…; se envía sin imagen).\n"
         "- NUNCA digas que confirmas o hablas con recepción.\n"
         "- Reserva: WhatsApp corto con fechas/personas.\n"
         "- Tiempo/distancia: eta_only=true → solo min en auto, SIN mapa.\n"
@@ -884,7 +930,7 @@ def _unknown_whatsapp_reply(
     reason: str = "unknown_whatsapp",
 ) -> dict[str, Any]:
     info = hostel_info_dict(db)
-    phone = whatsapp_phone_display(str(info.get("whatsapp_url") or ""))
+    link = whatsapp_click_url(str(info.get("whatsapp_url") or ""))
     already = thread_already_shared_whatsapp(prior)
     prior_texts = [
         str(turn.get("content") or "")
@@ -896,19 +942,19 @@ def _unknown_whatsapp_reply(
         message = (
             "Please confirm that on WhatsApp."
             if already
-            else f"Please confirm that on WhatsApp {phone}."
+            else f"Please confirm that on WhatsApp {link}"
         )
     elif lang == "pt":
         message = (
             "Confirma isso pelo WhatsApp."
             if already
-            else f"Confirma isso pelo WhatsApp {phone}."
+            else f"Confirma isso pelo WhatsApp {link}"
         )
     else:
         message = (
             "Eso debes confirmarlo por WhatsApp."
             if already
-            else f"Eso debes confirmarlo por WhatsApp {phone}."
+            else f"Eso debes confirmarlo por WhatsApp {link}"
         )
     message = apply_time_greeting(message, is_follow_up=is_follow_up)
     message = sanitize_outbound_message(message)
@@ -1064,7 +1110,7 @@ def _reservation_whatsapp_reply(
 ) -> dict[str, Any]:
     """Fast path: never hang on DeepSeek when the guest asks to book."""
     info = hostel_info_dict(db)
-    phone = whatsapp_phone_display(str(info.get("whatsapp_url") or ""))
+    link = whatsapp_click_url(str(info.get("whatsapp_url") or ""))
     already = thread_already_shared_whatsapp(prior)
     prior_texts = [
         str(turn.get("content") or "")
@@ -1076,31 +1122,31 @@ def _reservation_whatsapp_reply(
         message = (
             "Write us on WhatsApp with dates and guest count."
             if already
-            else f"Write us on WhatsApp {phone} with dates and guest count."
+            else f"Write us on WhatsApp with dates and guest count: {link}"
         )
     elif lang == "pt":
         message = (
             "Escreva no WhatsApp com datas e quantas pessoas."
             if already
-            else f"Escreva no WhatsApp {phone} com datas e quantas pessoas."
+            else f"Escreva no WhatsApp com datas e quantas pessoas: {link}"
         )
     elif lang == "fr":
         message = (
             "Écrivez-nous sur WhatsApp avec dates et nombre de personnes."
             if already
-            else f"Écrivez-nous sur WhatsApp {phone} avec dates et nombre de personnes."
+            else f"Écrivez-nous sur WhatsApp avec dates et nombre de personnes: {link}"
         )
     elif lang == "de":
         message = (
             "Schreib uns auf WhatsApp mit Daten und Personenanzahl."
             if already
-            else f"Schreib uns auf WhatsApp {phone} mit Daten und Personenanzahl."
+            else f"Schreib uns auf WhatsApp mit Daten und Personenanzahl: {link}"
         )
     else:
         message = (
             "Escríbenos por WhatsApp con fechas y cantidad de personas."
             if already
-            else f"Escríbenos por WhatsApp {phone} con fechas y cantidad de personas."
+            else f"Escríbenos por WhatsApp con fechas y cantidad de personas: {link}"
         )
     message = apply_time_greeting(message, is_follow_up=is_follow_up)
     message = sanitize_outbound_message(message)

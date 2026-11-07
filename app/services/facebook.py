@@ -538,23 +538,66 @@ def ingest_messenger_webhook(payload: dict[str, Any]) -> int:
 
 
 async def reply_messenger(thread_id: str, message: str) -> dict[str, Any]:
+    from app.services.deepseek_instagram import extract_whatsapp_link
+
     conn = _require_connection()
-    text = (message or "").strip()
-    if not text:
+    raw = (message or "").strip()
+    if not raw:
         raise InstagramError("El mensaje no puede estar vacío")
     thread = get_messenger_thread(thread_id)
     peer_id = str(thread.get("peer_id") or "")
     if not peer_id:
         raise InstagramError("Falta el destinatario de Messenger")
-    result = await _graph_post(
-        f"/{conn['page_id']}/messages",
-        conn["page_access_token"],
-        {
-            "recipient": json.dumps({"id": peer_id}),
-            "message": json.dumps({"text": text}),
-            "messaging_type": "RESPONSE",
-        },
-    )
+    text, wa_url = extract_whatsapp_link(raw)
+    if wa_url:
+        body = (text or "Escríbenos por WhatsApp.").strip()
+        if len(body) > 640:
+            body = body[:637].rstrip() + "…"
+        message_payload: dict[str, Any] = {
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "text": body,
+                    "buttons": [
+                        {"type": "web_url", "url": wa_url, "title": "WhatsApp"},
+                    ],
+                },
+            }
+        }
+        try:
+            result = await _graph_post(
+                f"/{conn['page_id']}/messages",
+                conn["page_access_token"],
+                {
+                    "recipient": json.dumps({"id": peer_id}),
+                    "message": json.dumps(message_payload),
+                    "messaging_type": "RESPONSE",
+                },
+            )
+            text = f"{body} {wa_url}".strip()
+        except InstagramError:
+            text = raw
+            result = await _graph_post(
+                f"/{conn['page_id']}/messages",
+                conn["page_access_token"],
+                {
+                    "recipient": json.dumps({"id": peer_id}),
+                    "message": json.dumps({"text": text}),
+                    "messaging_type": "RESPONSE",
+                },
+            )
+    else:
+        text = raw
+        result = await _graph_post(
+            f"/{conn['page_id']}/messages",
+            conn["page_access_token"],
+            {
+                "recipient": json.dumps({"id": peer_id}),
+                "message": json.dumps({"text": text}),
+                "messaging_type": "RESPONSE",
+            },
+        )
     thread.setdefault("messages", []).append(
         {
             "id": result.get("message_id") or str(uuid.uuid4()),
