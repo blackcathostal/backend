@@ -66,15 +66,15 @@ SCOPES = [
 
 # DMs + public comments/mentions. Mentions = @hotel in captions/comments on
 # OTHER people's posts/reels (Stories are not supported by Meta).
+# Page subscribed_apps only accepts Page messaging fields — NOT Instagram
+# comments/mentions (those are configured in App Dashboard → Instagram webhooks).
 MESSAGE_WEBHOOK_FIELDS = (
     "messages",
     "messaging_postbacks",
     "message_reads",
     "messaging_referrals",
     "message_reactions",
-    "comments",
-    "live_comments",
-    "mentions",
+    "message_echoes",
 )
 
 
@@ -684,7 +684,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-count-cache-v3",
+        "comment_poller": "reels-count-cache-v4",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1443,6 +1443,7 @@ async def sync_recent_comments(
     next_counts = dict(prev_counts)
     priority: list[dict[str, Any]] = []
     seed: list[dict[str, Any]] = []
+    reels_with_comments: list[dict[str, Any]] = []
     for index, media in enumerate(media_rows):
         media_id = str(media.get("id") or "").strip()
         if not media_id:
@@ -1450,6 +1451,9 @@ async def sync_recent_comments(
         count = int(media.get("comments_count") or 0)
         previous = int(prev_counts.get(media_id, -1))
         next_counts[media_id] = count
+        product = str(media.get("media_product_type") or "").upper()
+        if count > 0 and product == "REELS":
+            reels_with_comments.append(media)
         if count <= 0:
             continue
         # Newest always; count grew = new comment on an older viral reel.
@@ -1458,7 +1462,20 @@ async def sync_recent_comments(
         elif previous < 0:
             # First time we see this media: seed once so existing fresh comments are not skipped.
             seed.append(media)
-    to_fetch = (priority + seed)[:COMMENT_FETCH_BUDGET]
+    # Always re-check the busiest reels (old viral ones get comments Meta never webhooks).
+    reels_with_comments.sort(key=lambda row: int(row.get("comments_count") or 0), reverse=True)
+    viral_reels = reels_with_comments[:8]
+    # De-dupe while preserving order: priority → viral reels → seed.
+    seen_ids: set[str] = set()
+    to_fetch: list[dict[str, Any]] = []
+    for media in [*priority, *viral_reels, *seed]:
+        mid = str(media.get("id") or "")
+        if not mid or mid in seen_ids:
+            continue
+        seen_ids.add(mid)
+        to_fetch.append(media)
+        if len(to_fetch) >= COMMENT_FETCH_BUDGET:
+            break
 
     synced: list[dict[str, Any]] = []
     to_reply: list[str] = []
