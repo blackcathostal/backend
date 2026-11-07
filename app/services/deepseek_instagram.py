@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.services.instagram_knowledge import DEEPSEEK_TOOLS, hostel_info_dict
 from app.services.mcp_sources import call_reply_tool
+from app.services.room_rates import load_room_rates
 
 SANTIAGO = ZoneInfo("America/Santiago")
 REPLY_LOOP_TIMEOUT_SECONDS = 70.0
@@ -33,6 +34,16 @@ _GREETING_ONLY_RE = re.compile(
     r"good\s+morning|good\s+afternoon|good\s+evening|"
     r"bom\s+dia|boa\s+tarde|boa\s+noite|ol[aá]+"
     r")(?:\s*[,!.…?]*)?(?:\s+(?:👋|🙂|😊|✨))?\s*$",
+    re.IGNORECASE,
+)
+# Chilean guests often write «hola valor» / «valor?» meaning prices — never treat as hello-only.
+_PRICE_INTENT_RE = re.compile(
+    r"("
+    r"\bvalor(?:es)?\b|\bprecios?\b|\btarifas?\b|\brates?\b|\bcostos?\b|\bcostes?\b|"
+    r"cu[aá]nto\s+(?:vale|sale|cuesta|cobran|es)|"
+    r"how\s+much|price\s*list|nightly\s+rate|per\s+night|"
+    r"quanto\s+(?:custa|fica)|pre[cç]o"
+    r")",
     re.IGNORECASE,
 )
 _GUEST_GOODBYE_RE = re.compile(
@@ -527,6 +538,8 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- No repitas Barrio Brasil / desayuno / boutique en cada mensaje; solo si preguntan eso.\n"
         "- UN mensaje por respuesta. Corto. Sin segunda burbuja de confirmación.\n"
         "- Precios/habitaciones SOLO si lo pide; una sola tarifa si pregunta por un tipo.\n"
+        "- «valor», «hola valor», «precios», «tarifa» = pide precios. Contesta tarifas YA; "
+        "NO respondas solo «¿en qué te podemos ayudar?».\n"
         "- Mensual $1.500.000. Noche FAQ: 54990 / 54990 / 69990 / 19990.\n"
         "- Voluntariado/gratis: no estamos aceptando voluntariado (amable y corto).\n"
         "- Cédula/pasaporte/beneficio dudoso: WhatsApp, no inventes.\n"
@@ -544,9 +557,10 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         )
     else:
         greeting = (
-            "\nPrimer mensaje. Si solo dijo hola/hi/buenas: "
-            "«Hola, ¿en qué te podemos ayudar?» (o equivalente en su idioma) y PARA. "
-            "Si hay consulta real, contesta el dato sin pitch."
+            "\nPrimer mensaje. Si SOLO dijo hola/hi/buenas (nada más): "
+            "«Hola, ¿en qué te podemos ayudar?» y PARA. "
+            "Si dice hola + valor/precio/tarifa/consulta: saluda en la misma frase "
+            "y contesta el dato (precios si pidió valor). Nunca ignores la consulta."
         )
     return get_system_prompt().rstrip() + scope + greeting + (extra or "")
 
@@ -854,7 +868,8 @@ def _guest_turn(
         "Responde corto y ejecutivo (1–2 frases). "
         "Idioma: toda la charla; mensajes cortos heredan el idioma del hilo. No mezcles. "
         "UN solo mensaje corto. Sin segunda burbuja. "
-        "Saludo solo → «Hola, ¿en qué te podemos ayudar?» y PARA. "
+        "Saludo solo (sin valor/precio) → «Hola, ¿en qué te podemos ayudar?» y PARA. "
+        "«hola valor» / valor / precios → da tarifas YA en este mensaje. "
         "Una tarifa si preguntan un tipo; no listes todo. Mensual 1500000. "
         "Voluntariado → no aceptamos (corto). Cédula dudosa → WhatsApp una vez. "
         "Si ya diste WhatsApp, no lo repitas ni cierres con «por WhatsApp». Sin recepción. "
@@ -876,15 +891,83 @@ def _strip_ig_mentions(text: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+def _looks_like_price_question(text: str) -> bool:
+    """True when the guest asks for rates («valor», precios, how much…)."""
+    sample = _strip_ig_mentions(text or "")
+    if not sample:
+        return False
+    return bool(_PRICE_INTENT_RE.search(sample))
+
+
 def _looks_like_greeting_only(text: str) -> bool:
     """True for one or several greeting bubbles sent in a burst (hola + buenas)."""
     sample = _strip_ig_mentions(text or "")
     if not sample or len(sample) > 120:
         return False
+    # «Hola valor» is a price ask, not a bare hello.
+    if _looks_like_price_question(sample):
+        return False
     lines = [line.strip() for line in sample.splitlines() if line.strip()]
     if not lines:
         return False
     return all(bool(_GREETING_ONLY_RE.match(line)) for line in lines)
+
+
+def _format_clp(amount: int) -> str:
+    return f"${amount:,}".replace(",", ".")
+
+
+def _price_summary_reply(
+    *,
+    inbound_text: str,
+    is_follow_up: bool,
+    prior: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Deterministic rates for «hola valor» / precios — do not leave this to the LLM."""
+    prior_texts = [
+        str(turn.get("content") or "")
+        for turn in (prior or [])
+        if turn.get("role") == "user"
+    ]
+    lang = _conversation_language([*prior_texts, inbound_text], default="es")
+    rates = load_room_rates()
+    by_slug = {
+        str(room.get("slug") or ""): room for room in (rates.get("rooms") or [])
+    }
+    matrimonial = int((by_slug.get("matrimonial-suite") or {}).get("price_from_clp") or 54990)
+    twin = int((by_slug.get("twin") or {}).get("price_from_clp") or 54990)
+    triple = int((by_slug.get("triple") or {}).get("price_from_clp") or 69990)
+    shared = int((by_slug.get("shared") or {}).get("price_from_clp") or 19990)
+    m = _format_clp(matrimonial)
+    t = _format_clp(twin)
+    tr = _format_clp(triple)
+    s = _format_clp(shared)
+    if lang == "en":
+        body = (
+            f"From {m} double/suite, {t} twin, {tr} triple, "
+            f"{s} shared bed (per night)."
+        )
+        message = body if is_follow_up else f"Hi! {body}"
+    elif lang == "pt":
+        body = (
+            f"A partir de {m} casal/suite, {t} twin, {tr} triplo, "
+            f"{s} cama compartilhada (por noite)."
+        )
+        message = body if is_follow_up else f"Olá! {body}"
+    else:
+        body = (
+            f"Desde {m} matrimonial/suite, {t} twin, {tr} triple "
+            f"y {s} cama compartida (noche)."
+        )
+        message = body if is_follow_up else f"Hola! {body}"
+    return {
+        "action": "reply",
+        "message": message,
+        "reason": "price_question",
+        "model": "rule:prices",
+        "map_image_url": "",
+        "maps_url": "",
+    }
 
 
 def _looks_like_goodbye_only(text: str) -> bool:
@@ -1390,6 +1473,12 @@ async def generate_instagram_reply(
         if (turn.get("content") or "").strip() and turn.get("role") in {"user", "assistant"}
     ]
     is_follow_up = bool(prior)
+    if _looks_like_price_question(inbound_text):
+        return _price_summary_reply(
+            inbound_text=inbound_text,
+            is_follow_up=is_follow_up,
+            prior=prior,
+        )
     if _looks_like_greeting_only(inbound_text):
         return _human_greeting_reply(
             inbound_text=inbound_text,
@@ -1498,6 +1587,14 @@ async def generate_test_chat(
     prior = turns[:-1]
     is_follow_up = bool(prior)
     inbound_text = turns[-1]["content"]
+    if _looks_like_price_question(inbound_text):
+        result = _price_summary_reply(
+            inbound_text=inbound_text,
+            is_follow_up=is_follow_up,
+            prior=prior,
+        )
+        result["channel"] = channel
+        return result
     if _looks_like_greeting_only(inbound_text):
         result = _human_greeting_reply(
             inbound_text=inbound_text,

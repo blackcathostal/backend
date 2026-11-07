@@ -685,7 +685,15 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-collab-v14",
+        "comment_poller": "reels-collab-v15",
+        "poller_debug": {
+            "own": getattr(sync_recent_comments, "last_debug", {}) or {},
+            "collaborative": getattr(
+                sync_collaborative_media_comments, "last_debug", {}
+            )
+            or {},
+            "tagged": getattr(sync_tagged_media_comments, "last_debug", {}) or {},
+        },
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",

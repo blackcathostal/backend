@@ -300,18 +300,20 @@ async def auto_reply_inbox_item(
 @router.post("/sync-comments")
 async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     warning = None
+    # Collab + tagged first (UGC / «y N personas más»). Own grid last — heavy and
+    # used to make this endpoint time out before collab ever ran.
+    comments: list = []
+    collab: list = []
+    tagged: list = []
     try:
-        # Auto-reply on sync: Meta does not webhook comments on Reels.
-        # Keep this endpoint fast — do NOT pull full DM history here (that caused 502s).
-        comments = await ig.sync_recent_comments(
-            limit_media=ig.COMMENT_SYNC_MEDIA_LIMIT,
-            auto_reply=True,
-            # Manual sync: cover (almost) every media that has comments.
-            fetch_budget=ig.COMMENT_FETCH_BUDGET_SYNC,
-            rotate_offset=0,
-        )
         collab = await ig.sync_collaborative_media_comments(auto_reply=True)
         tagged = await ig.sync_tagged_media_comments(auto_reply=True)
+        comments = await ig.sync_recent_comments(
+            limit_media=ig.COMMENT_POLL_MEDIA_LIMIT,
+            auto_reply=True,
+            fetch_budget=ig.COMMENT_FETCH_BUDGET,
+            rotate_offset=0,
+        )
         await ig.schedule_pending_public_replies()
     except ig.InstagramConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -320,7 +322,7 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     subscription = await ig.subscribe_instagram_webhooks()
     if not subscription.get("ok"):
         warning = subscription.get("error")
-    all_new = list(comments) + list(collab) + list(tagged)
+    all_new = list(collab) + list(tagged) + list(comments)
     fresh_preview = [
         {
             "author": c.get("author_username"),
