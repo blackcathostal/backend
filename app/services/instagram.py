@@ -1666,6 +1666,13 @@ async def sync_tagged_media_comments(*, auto_reply: bool = False) -> list[dict[s
     synced: list[dict[str, Any]] = []
     to_reply: list[str] = []
     fresh_samples: list[str] = []
+    interesting: list[str] = []
+    tag_labels: list[str] = []
+
+    for media in to_fetch[:12]:
+        uname = str(media.get("username") or "")
+        cap = str(media.get("caption") or "").replace("\n", " ")[:60]
+        tag_labels.append(f"{media.get('id')} @{uname} {cap}")
 
     async def _load_one(media: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         mid = str(media.get("id") or "")
@@ -1681,8 +1688,21 @@ async def sync_tagged_media_comments(*, auto_reply: bool = False) -> list[dict[s
         for c in rows:
             text = str(c.get("text") or "")
             stamp = str(c.get("timestamp") or "")
+            who = str(
+                c.get("username") or (c.get("from") or {}).get("username") or "?"
+            )
+            lowered = text.lower()
+            if (
+                len(interesting) < 10
+                and (
+                    "valor" in lowered
+                    or "precio" in lowered
+                    or who.lower() == "emkrypted"
+                    or "blackcathostal" in lowered
+                )
+            ):
+                interesting.append(f"{stamp} @{who}: {text[:90]}")
             if _inbound_is_fresh(stamp) and len(fresh_samples) < 8:
-                who = c.get("username") or (c.get("from") or {}).get("username") or "?"
                 fresh_samples.append(f"@{who}: {text[:80]}")
             item = _ingest_comment_row(c, media=media, item_type="mention")
             if not item:
@@ -1706,6 +1726,8 @@ async def sync_tagged_media_comments(*, auto_reply: bool = False) -> list[dict[s
         "fetched": len(to_fetch),
         "synced": len(synced),
         "fresh_samples": fresh_samples,
+        "interesting_any_age": interesting,
+        "tag_labels": tag_labels,
     }
     logger.info(
         "IG tagged/mention media sync watched=%s fetched=%s synced=%s",
