@@ -685,7 +685,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-2h-tagged-v12",
+        "comment_poller": "reels-2h-tagged-v13",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1405,10 +1405,20 @@ _BOT_PUBLIC_PHRASE_RE = re.compile(
     r"how can we help|"
     r"em que podemos ajudar|"
     r"comment pouvons-nous vous aider|"
-    r"wie k[oö]nnen wir helfen"
+    r"wie k[oö]nnen wir helfen|"
+    r"escr[ií]benos por interno|"
+    r"escribe(?:nos)?\s+por\s+interno|"
+    r"write us (?:in )?(?:dm|private|interno)|"
+    r"manda(?:r)?\s+(?:um\s+)?direct"
     r")",
     re.IGNORECASE,
 )
+
+_FOREIGN_REEL_DM_REDIRECT = {
+    "es": "Hola! Escríbenos por interno para ayudarte con eso.",
+    "en": "Hi! Please DM us and we'll help you with that.",
+    "pt": "Oi! Nos chama no direct que te ajudamos.",
+}
 
 
 def _looks_like_own_public_reply(text: str) -> bool:
@@ -2360,6 +2370,40 @@ async def run_auto_reply(item_id: str) -> dict[str, Any]:
         return await _run_auto_reply_locked(item_id)
 
 
+def _foreign_reel_dm_redirect(inbound_text: str) -> str:
+    sample = (inbound_text or "").lower()
+    if re.search(r"\b(hello|hi|price|room|book)\b", sample):
+        return _FOREIGN_REEL_DM_REDIRECT["en"]
+    if re.search(r"\b(oi|olá|ola|preço|preco|quarto)\b", sample):
+        return _FOREIGN_REEL_DM_REDIRECT["pt"]
+    return _FOREIGN_REEL_DM_REDIRECT["es"]
+
+
+def _already_sent_foreign_redirect(item: dict[str, Any]) -> bool:
+    """One 'escríbenos por interno' per guest on the same foreign post."""
+    media_id = str(item.get("media_id") or item.get("thread_id") or "")
+    author = str(item.get("author_id") or item.get("author_username") or "")
+    if not media_id:
+        return False
+    for row in list_inbox():
+        if row.get("id") == item.get("id"):
+            continue
+        if str(row.get("media_id") or row.get("thread_id") or "") != media_id:
+            continue
+        same_author = author and (
+            str(row.get("author_id") or "") == author
+            or str(row.get("author_username") or "") == author
+        )
+        if not same_author:
+            continue
+        for reply in row.get("replies") or []:
+            if _looks_like_own_public_reply(str(reply.get("text") or "")):
+                return True
+        if _looks_like_own_public_reply(str(row.get("text") or "")):
+            return True
+    return False
+
+
 async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
@@ -2384,6 +2428,29 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
     latest = burst[-1]
     inbound = _combined_burst_text(burst) or str(latest.get("text") or "")
     burst_texts = {str(row.get("text") or "").strip() for row in burst if str(row.get("text") or "").strip()}
+
+    # Reels/posts of OTHER accounts: never dump prices publicly — send to DM.
+    if latest.get("type") == "mention" or latest.get("foreign_media"):
+        if not latest.get("meta_comment_id"):
+            latest["status"] = "skipped"
+            latest["escalation_reason"] = "caption_mention_only"
+            latest["updated_at"] = _now_iso()
+            return upsert_inbox_item(latest)
+        if _already_sent_foreign_redirect(latest):
+            latest["status"] = "skipped"
+            latest["escalation_reason"] = "foreign_redirect_already_sent"
+            latest["updated_at"] = _now_iso()
+            return upsert_inbox_item(latest)
+        for row in burst[:-1]:
+            row["status"] = "batched"
+            row["escalation_reason"] = "merged_burst"
+            row["updated_at"] = _now_iso()
+            upsert_inbox_item(row)
+        return await send_inbox_reply(
+            str(latest.get("id") or item_id),
+            _foreign_reel_dm_redirect(inbound),
+            source="deepseek",
+        )
 
     try:
         db = SessionLocal()
