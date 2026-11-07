@@ -1306,10 +1306,15 @@ async def send_dm_image(recipient_id: str, image_url: str, *, open_url: str = ""
 
 
 # Meta: comment webhooks do NOT fire for Reels. Poll Graph instead.
-COMMENT_POLL_INTERVAL_SECONDS = 90.0
-COMMENT_POLL_MEDIA_LIMIT = 50
+COMMENT_POLL_INTERVAL_SECONDS = 60.0
+COMMENT_POLL_MEDIA_LIMIT = 30
+COMMENT_SYNC_MEDIA_LIMIT = 120
 # Only auto-answer comments this fresh (avoid re-replying days-old threads).
-COMMENT_AUTO_REPLY_MAX_AGE_SECONDS = 2 * 3600
+COMMENT_AUTO_REPLY_MAX_AGE_SECONDS = 6 * 3600
+_MEDIA_COMMENT_FIELDS = (
+    "id,caption,timestamp,permalink,media_type,media_product_type,comments_count,"
+    "comments.limit(25){id,text,username,timestamp,from}"
+)
 
 
 def _inbound_is_fresh(
@@ -1326,89 +1331,89 @@ def _inbound_is_fresh(
     return 0 <= age <= max_age_seconds
 
 
+def _ingest_comment_row(
+    c: dict[str, Any],
+    *,
+    media: dict[str, Any],
+) -> dict[str, Any] | None:
+    media_id = str(media.get("id") or "").strip()
+    comment_id = c.get("id")
+    if not media_id or not comment_id:
+        return None
+    external_id = f"comment:{comment_id}"
+    if find_by_external_id(external_id):
+        return None
+    from_user = c.get("from") or {}
+    author_username = c.get("username") or from_user.get("username")
+    author_id = from_user.get("id")
+    if _is_own_instagram_actor(
+        author_id=str(author_id or ""),
+        author_username=str(author_username or ""),
+    ):
+        return None
+    created = c.get("timestamp") or _now_iso()
+    return upsert_inbox_item(
+        {
+            "id": str(uuid.uuid4()),
+            "type": "comment",
+            "thread_id": media_id,
+            "external_id": external_id,
+            "meta_comment_id": comment_id,
+            "media_id": media_id,
+            "author_username": author_username,
+            "author_id": author_id,
+            "text": c.get("text") or "",
+            "created_at": created,
+            "status": "pending",
+            "replies": [],
+            "escalation_reason": None,
+            "permalink": media.get("permalink"),
+            "media_type": media.get("media_type") or media.get("media_product_type"),
+        }
+    )
+
+
 async def sync_recent_comments(
     limit_media: int = COMMENT_POLL_MEDIA_LIMIT,
     *,
     auto_reply: bool = False,
 ) -> list[dict[str, Any]]:
-    """Pull recent media comments (posts + reels) into local inbox."""
+    """Pull comments from recent posts/reels in a few Graph calls (no N+1)."""
     conn = _require_connection()
     ig_user_id = conn["ig_user_id"]
     token = conn["page_access_token"]
+    wanted = max(10, min(int(limit_media or COMMENT_POLL_MEDIA_LIMIT), COMMENT_SYNC_MEDIA_LIMIT))
     per_page = 25
-    pages = max(1, (max(8, int(limit_media or COMMENT_POLL_MEDIA_LIMIT)) + per_page - 1) // per_page)
+    pages = max(1, (wanted + per_page - 1) // per_page)
+    # Nested comments → one request per page instead of 1 + N media calls.
     media_rows = await _graph_pages(
         f"/{ig_user_id}/media",
         token,
-        {
-            "fields": "id,caption,timestamp,permalink,media_type,media_product_type",
-            "limit": per_page,
-        },
-        max_pages=min(pages, 6),
+        {"fields": _MEDIA_COMMENT_FIELDS, "limit": per_page},
+        max_pages=min(pages, 8),
     )
     synced: list[dict[str, Any]] = []
+    to_reply: list[str] = []
     for m in media_rows:
-        media_id = m.get("id")
-        if not media_id:
+        if int(m.get("comments_count") or 0) <= 0 and not (m.get("comments") or {}).get("data"):
             continue
-        try:
-            comments = await _graph_get(
-                f"/{media_id}/comments",
-                token,
-                {
-                    "fields": "id,text,username,timestamp,from",
-                    "limit": 50,
-                },
-            )
-        except InstagramError:
-            continue
-        for c in comments.get("data") or []:
-            external_id = f"comment:{c.get('id')}"
-            if find_by_external_id(external_id):
+        for c in (m.get("comments") or {}).get("data") or []:
+            item = _ingest_comment_row(c, media=m)
+            if not item:
                 continue
-            from_user = c.get("from") or {}
-            author_username = c.get("username") or from_user.get("username")
-            author_id = from_user.get("id")
-            # Never treat our own public replies as inbound guest comments.
-            if _is_own_instagram_actor(
-                author_id=str(author_id or ""),
-                author_username=str(author_username or ""),
-            ):
-                continue
-            created = c.get("timestamp") or _now_iso()
-            item = upsert_inbox_item(
-                {
-                    "id": str(uuid.uuid4()),
-                    "type": "comment",
-                    "thread_id": media_id,
-                    "external_id": external_id,
-                    "meta_comment_id": c.get("id"),
-                    "media_id": media_id,
-                    "author_username": author_username,
-                    "author_id": author_id,
-                    "text": c.get("text") or "",
-                    "created_at": created,
-                    "status": "pending",
-                    "replies": [],
-                    "escalation_reason": None,
-                    "permalink": m.get("permalink"),
-                    "media_type": m.get("media_type") or m.get("media_product_type"),
-                }
-            )
             synced.append(item)
             if (
                 auto_reply
                 and auto_reply_enabled()
                 and item.get("status") == "pending"
-                and _inbound_is_fresh(str(created))
+                and _inbound_is_fresh(str(item.get("created_at") or ""))
             ):
-                try:
-                    await schedule_auto_reply(item["id"])
-                except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "Could not schedule auto-reply for synced comment %s",
-                        item.get("id"),
-                    )
+                to_reply.append(str(item["id"]))
+    for item_id in to_reply:
+        try:
+            await schedule_auto_reply(item_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not schedule auto-reply for synced comment %s", item_id)
     return synced
 
 
@@ -1434,12 +1439,20 @@ async def schedule_pending_public_replies(limit: int = 25) -> int:
 
 
 async def poll_instagram_comments_loop() -> None:
-    """Meta does not webhook Reel comments — poll Graph every ~90s when auto-reply is on."""
-    await asyncio.sleep(8.0)
+    """Meta does not webhook Reel comments — poll Graph often when auto-reply is on."""
+    await asyncio.sleep(5.0)
+    tick = 0
     while True:
         try:
             if load_connection() and auto_reply_enabled():
-                await sync_recent_comments(auto_reply=True)
+                tick += 1
+                # Most cycles: last ~30. Every 5th: deeper sweep for older viral reels.
+                limit = (
+                    COMMENT_SYNC_MEDIA_LIMIT
+                    if tick % 5 == 0
+                    else COMMENT_POLL_MEDIA_LIMIT
+                )
+                await sync_recent_comments(limit_media=limit, auto_reply=True)
                 await schedule_pending_public_replies()
         except asyncio.CancelledError:
             raise
