@@ -22,6 +22,7 @@ from app.services.deepseek_instagram import (
     DeepSeekError,
     deepseek_configured,
     generate_instagram_reply,
+    looks_like_hotel_inquiry,
 )
 
 CONNECTION_FILE = settings.uploads_dir / "cache" / "instagram_connection.json"
@@ -685,7 +686,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-collab-dm-v16",
+        "comment_poller": "reels-collab-social-v17",
         "poller_debug": {
             "own": getattr(sync_recent_comments, "last_debug", {}) or {},
             "collaborative": getattr(
@@ -2557,13 +2558,22 @@ def _already_sent_foreign_redirect(item: dict[str, Any]) -> bool:
     return False
 
 
-def _should_redirect_public_to_dm(item: dict[str, Any]) -> bool:
-    """Foreign UGC and collaborative reels: never post prices in public comments."""
+def _is_foreign_or_collaborative(item: dict[str, Any]) -> bool:
     return bool(
         item.get("type") == "mention"
         or item.get("foreign_media")
         or item.get("collaborative")
     )
+
+
+def _should_redirect_public_to_dm(item: dict[str, Any], inbound_text: str) -> bool:
+    """On foreign/collab reels, only invite DM when they ask prices/hotel ops.
+
+    Compliments («qué lindo») stay public — short dialogue, not «por interno».
+    """
+    if not _is_foreign_or_collaborative(item):
+        return False
+    return looks_like_hotel_inquiry(inbound_text)
 
 
 async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
@@ -2591,8 +2601,8 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
     inbound = _combined_burst_text(burst) or str(latest.get("text") or "")
     burst_texts = {str(row.get("text") or "").strip() for row in burst if str(row.get("text") or "").strip()}
 
-    # Foreign + collab reels: invite DM — never dump prices publicly.
-    if _should_redirect_public_to_dm(latest):
+    # Foreign + collab: DM invite only for precios/reserva/datos del hotel.
+    if _should_redirect_public_to_dm(latest, inbound):
         if not latest.get("meta_comment_id"):
             latest["status"] = "skipped"
             latest["escalation_reason"] = "caption_mention_only"
@@ -2642,6 +2652,7 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
                 skip_duplicate_greeting=(
                     recent_help is not None and recent_help < GREETING_SKIP_WINDOW_SECONDS
                 ),
+                public_ugc=_is_foreign_or_collaborative(latest),
             )
         finally:
             db.close()

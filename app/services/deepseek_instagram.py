@@ -46,6 +46,20 @@ _PRICE_INTENT_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+# Ops questions on foreign/collab reels → invite DM. Compliments stay public.
+_HOTEL_INQUIRY_RE = re.compile(
+    r"("
+    r"\bvalor(?:es)?\b|\bprecios?\b|\btarifas?\b|\brates?\b|\bcostos?\b|"
+    r"cu[aá]nto\s+(?:vale|sale|cuesta|cobran|es|sale)|"
+    r"how\s+much|per\s+night|disponib|availability|"
+    r"habitaci[oó]n(?:es)?|dormitor|matrimonial|suite|twin|triple|compartid|"
+    r"check[\s-]?in|check[\s-]?out|desayuno|breakfast|wifi|wi[\s-]?fi|"
+    r"ubicaci[oó]n|direcci[oó]n|d[oó]nde\s+(?:quedan|est[aá]n|queda)|"
+    r"mensual|por\s+noche|capacidad|cu[aá]ntas?\s+personas|"
+    r"reserv(?:a|ar)|booking|book(?:ing)?|voluntari"
+    r")",
+    re.IGNORECASE,
+)
 _GUEST_GOODBYE_RE = re.compile(
     r"\b("
     r"chao|chau|adios|adi[oó]s|bye|goodbye|good\s*bye|hasta\s+luego|"
@@ -899,6 +913,16 @@ def _looks_like_price_question(text: str) -> bool:
     return bool(_PRICE_INTENT_RE.search(sample))
 
 
+def looks_like_hotel_inquiry(text: str) -> bool:
+    """Prices, rooms, booking, location, amenities — not social compliments."""
+    sample = _strip_ig_mentions(text or "")
+    if not sample:
+        return False
+    if _looks_like_price_question(sample) or _looks_like_reservation(sample):
+        return True
+    return bool(_HOTEL_INQUIRY_RE.search(sample))
+
+
 def _looks_like_greeting_only(text: str) -> bool:
     """True for one or several greeting bubbles sent in a burst (hola + buenas)."""
     sample = _strip_ig_mentions(text or "")
@@ -1465,6 +1489,7 @@ async def generate_instagram_reply(
     person_history: dict[str, Any] | None = None,
     thread_history: list[dict[str, str]] | None = None,
     skip_duplicate_greeting: bool = False,
+    public_ugc: bool = False,
 ) -> dict[str, Any]:
     """Return {action, message, reason, model} using DeepSeek + knowledge tools."""
     prior = [
@@ -1473,7 +1498,8 @@ async def generate_instagram_reply(
         if (turn.get("content") or "").strip() and turn.get("role") in {"user", "assistant"}
     ]
     is_follow_up = bool(prior)
-    if _looks_like_price_question(inbound_text):
+    # On foreign/collab reels, prices/booking are redirected to DM by the caller.
+    if _looks_like_price_question(inbound_text) and not public_ugc:
         return _price_summary_reply(
             inbound_text=inbound_text,
             is_follow_up=is_follow_up,
@@ -1491,9 +1517,9 @@ async def generate_instagram_reply(
     if is_follow_up and _looks_like_short_ack(inbound_text):
         # Avoid a second bubble like “Exacto, ese es el valor” after already answering.
         return _skip_reply("short_ack")
-    if _looks_like_volunteer(inbound_text):
+    if _looks_like_volunteer(inbound_text) and not public_ugc:
         return _volunteer_reply(inbound_text=inbound_text, prior=prior)
-    if _looks_like_doc_id_question(inbound_text):
+    if _looks_like_doc_id_question(inbound_text) and not public_ugc:
         return _unknown_whatsapp_reply(
             db,
             inbound_text=inbound_text,
@@ -1501,7 +1527,7 @@ async def generate_instagram_reply(
             prior=prior,
             reason="doc_id_whatsapp",
         )
-    if _looks_like_reservation(inbound_text):
+    if _looks_like_reservation(inbound_text) and not public_ugc:
         return _reservation_whatsapp_reply(
             db,
             inbound_text=inbound_text,
@@ -1511,14 +1537,23 @@ async def generate_instagram_reply(
     distance_hint = (
         "\n\nEste mensaje pregunta tiempo/distancia: usa get_directions_from_hostel "
         "con eta_only=true y responde solo minutos en auto, sin mapa."
-        if _looks_like_distance_question(inbound_text)
+        if _looks_like_distance_question(inbound_text) and not public_ugc
+        else ""
+    )
+    ugc_hint = (
+        "\n\nComentario público en reel ajeno/colaborativo: responde corto, cálido y "
+        "ejecutivo; dialoga con la gente (ej. «qué lindo» → agradece y sigue el hilo). "
+        "NUNCA publiques precios, tarifas, WhatsApp ni datos de reserva aquí."
+        if public_ugc
         else ""
     )
     base, model, headers = _require_deepseek()
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": system_prompt_for_reply(distance_hint, is_follow_up=is_follow_up),
+            "content": system_prompt_for_reply(
+                distance_hint + ugc_hint, is_follow_up=is_follow_up
+            ),
         },
     ]
     for turn in prior[-12:]:
