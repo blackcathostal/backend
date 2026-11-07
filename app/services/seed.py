@@ -120,19 +120,21 @@ DEFAULT_COMMON_ANSWERS = [
     },
     {
         "topic": "tarifas",
-        "keywords": "tarifa,precio,whatsapp,matrimonial,suite,twin,triple,dormitorio,compartida,cama,iva",
+        "keywords": "tarifa,precio,precios,matrimonial,suite,twin,triple,dormitorio,compartida,cama,noche,iva",
         "question": "¿Cuáles son las tarifas referenciales de las habitaciones?",
         "answer_guide": (
-            "Tarifas referenciales (pueden variar por temporada): "
-            "Matrimonial o Suite: $54.990 CLP/noche. "
-            "Twin: $54.990 CLP/noche. "
-            "Triple: $69.990 CLP/noche. "
-            "Compartidas (valor por cama): $19.990 CLP. "
-            "Desayuno continental incluido en las tarifas. "
-            "Para reservar o confirmar fechas y disponibilidad, escribir por WhatsApp; "
-            "este canal no ve el estado de WhatsApp ni de recepción."
+            "Tarifas referenciales por noche (pueden variar por temporada): "
+            "Matrimonial o Suite $54.990; Twin $54.990; Triple $69.990; "
+            "compartida por cama $19.990. Desayuno continental incluido."
         ),
         "sort_order": 3,
+    },
+    {
+        "topic": "mensual",
+        "keywords": "mensual,mes,mensualidad,por mes,long stay,estadía larga,estadia larga,1500000,1.500.000",
+        "question": "¿Cuánto cuesta la habitación mensual?",
+        "answer_guide": "La tarifa mensual de habitación es $1.500.000 CLP.",
+        "sort_order": 31,
     },
     {
         "topic": "fans",
@@ -361,7 +363,7 @@ def seed_database(db: Session) -> None:
     get_or_create_hostel_info(db)
 
     # Official price FAQ topics must stay in sync on every seed/startup.
-    FORCE_FAQ_TOPICS = {"tarifas", "dormitory"}
+    FORCE_FAQ_TOPICS = {"tarifas", "dormitory", "mensual"}
     if db.query(CommonAnswers).count() == 0:
         for item in DEFAULT_COMMON_ANSWERS:
             db.add(CommonAnswers(**item, is_active=True))

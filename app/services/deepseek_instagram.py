@@ -130,18 +130,22 @@ Idioma (OBLIGATORIO):
 
 Datos (OBLIGATORIO):
 - Precios / tipos de habitación → SOLO search_common_answers. Nunca search_rooms ni panel.
+- NO digas precios ni listes habitaciones a menos que el huésped lo pida explícitamente.
+  Si pide “precios” en general, da el resumen corto de FAQ; detalle por tipo SOLO si pregunta por ese tipo.
+- Mensual: $1.500.000 CLP (FAQ topic mensual).
 - Check-in, check-out, desayuno, estacionamiento, WhatsApp, dirección → get_hostel_info.
 - Otras dudas del hostal → search_common_answers.
-- Si NO sabes o no está en FAQ/info: action=reply y deriva a WhatsApp con el número
-  (formato +56 9 …, SIN pegar https://wa.me/… para evitar preview de imagen). Breve.
-- Tiempo/distancia (“cuánto tiempo”, “qué tan lejos”, “how far”) → get_directions_from_hostel
-  con eta_only=true. Responde SOLO minutos en auto (ej. «Estás a unos 12 min en auto.»).
-  Sin mapa, sin metro, sin detalle.
-- Cómo llegar / ruta paso a paso → get_directions_from_hostel con eta_only=false. Sin URLs.
-  Cierra con “Te lo indico en el siguiente mapa.” No digas Google Maps. No inventes calles.
-- Si el huésped se despide (chao, bye, gracias chao…), despídete corto igual. Si no se despide, no te despidas.
-- Reserva → deriva a WhatsApp corto (fechas + personas). Nunca inventes estado de reserva.
-- Tarifas: Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, cama $19.990.
+- WhatsApp: dalo MÁXIMO UNA vez por conversación (número +56 9…, SIN https://wa.me/).
+  Si ya lo diste antes en el hilo, no lo repitas; di solo “por WhatsApp” sin número.
+- NUNCA digas que vas a confirmar con recepción, ni que hablas con recepción, ni que “recibimos
+  tu mensaje en recepción”. Este canal NO habla con recepción.
+- Si NO sabes: deriva a WhatsApp (si aún no lo diste) o pide el dato faltante. Breve.
+- Tiempo/distancia → get_directions_from_hostel eta_only=true: solo minutos en auto, sin mapa.
+- Cómo llegar → eta_only=false. “Te lo indico en el siguiente mapa.” Sin URLs.
+- Si el huésped se despide, despídete corto. Si no, no te despidas.
+- Reserva → invita a WhatsApp con fechas y personas (número solo si aún no salió en el hilo).
+  Nunca inventes estado de reserva.
+- Tarifas noche (solo si preguntan): Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, cama $19.990.
 - Pago/factura/reclamo conflictivo → escalate. Spam/vacío → escalate.
 
 Alcance:
@@ -160,7 +164,13 @@ def get_system_prompt() -> str:
         if PROMPT_FILE.exists():
             text = PROMPT_FILE.read_text(encoding="utf-8").strip()
             # Ignore outdated custom prompts that still push long sales copy.
-            if text and "EJECUTIVAS" in text and "NUNCA te despidas" in text:
+            if (
+                text
+                and "EJECUTIVAS" in text
+                and "NUNCA te despidas" in text
+                and "máximo UNA vez" in text.lower()
+                and "1.500.000" in text
+            ):
                 return text
     except OSError:
         pass
@@ -253,6 +263,18 @@ def whatsapp_phone_display(whatsapp_url: str = "") -> str:
     return "+56 9 4910 5984"
 
 
+_RECEPTION_CLAIM_RE = re.compile(
+    r"(?is)(?:^|[.!?…]\s*)("
+    r"(?:lo\s+)?(?:voy\s+a\s+|vamos\s+a\s+|te\s+)?"
+    r"confirm(?:o|amos|aré|are|ando)?\s+(?:eso\s+)?(?:con|en)\s+recepci[oó]n|"
+    r"(?:hablo|hablamos|consulto|consultamos|lo\s+paso|se\s+lo\s+paso)\s+"
+    r"(?:con|a)\s+recepci[oó]n|"
+    r"recepci[oó]n\s+(?:te\s+)?(?:confirma|confirma\s+all[ií]|te\s+responde)|"
+    r"(?:ya\s+)?(?:lo\s+)?(?:vi|vimos|recibimos)\s+(?:en|por)\s+recepci[oó]n"
+    r")[^.!?…]*[.!?…]?"
+)
+
+
 def sanitize_outbound_message(message: str) -> str:
     """Replace wa.me links with a phone number so IG does not show WhatsApp preview first."""
     text = message or ""
@@ -262,7 +284,33 @@ def sanitize_outbound_message(message: str) -> str:
 
     text = _WA_ME_RE.sub(_replace, text)
     text = _WA_ME_PLAIN_RE.sub(_replace, text)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = _RECEPTION_CLAIM_RE.sub(" ", text)
+    return re.sub(r"\s{2,}", " ", re.sub(r"\n{3,}", "\n\n", text)).strip()
+
+
+def thread_already_shared_whatsapp(prior: list[dict[str, Any]] | None) -> bool:
+    for turn in prior or []:
+        if turn.get("role") != "assistant":
+            continue
+        text = str(turn.get("content") or "").lower()
+        if "whatsapp" in text or "+56" in text or "wa.me" in text:
+            return True
+    return False
+
+
+def strip_repeated_whatsapp_number(message: str, *, already_shared: bool) -> str:
+    """Keep at most one WhatsApp number per conversation."""
+    text = message or ""
+    if not already_shared:
+        return text
+    text = re.sub(
+        r"(?i)(?:por\s+)?whatsapp\s*(?::|-)?\s*\+?\d[\d\s-]{7,}\d",
+        "por WhatsApp",
+        text,
+    )
+    text = re.sub(r"\+56\s*9\s*\d{4}\s*\d{4}", "", text)
+    text = re.sub(r"\+56\s*\d[\d\s-]{6,}\d", "", text)
+    return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
 
 
 def guest_said_goodbye(text: str) -> bool:
@@ -333,12 +381,13 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- Respuestas cortas y ejecutivas (1–2 frases). Sin párrafos ni listas largas.\n"
         "- Nunca te despidas si el huésped no se despidió primero.\n"
         "- No repitas Barrio Brasil / desayuno / boutique en cada mensaje; solo si preguntan eso.\n"
-        "- Si no sabes la respuesta: deriva a WhatsApp con número +56 9… SIN link https://wa.me "
-        "(el link genera preview/imagen antes del texto en Instagram).\n"
-        "- Reserva: WhatsApp corto con fechas y personas. No inventes estado de reserva.\n"
-        "- Precios solo FAQ: Matrimonial/Suite 54990, Twin 54990, Triple 69990, cama 19990.\n"
-        "- Tiempo/distancia: get_directions_from_hostel eta_only=true → solo minutos en auto, SIN mapa.\n"
-        "- Cómo llegar: get_directions_from_hostel eta_only=false, sin URLs, «Te lo indico en el siguiente mapa.»\n"
+        "- Precios/habitaciones SOLO si el huésped lo pide. No listes tipos ni tarifas de más.\n"
+        "- Mensual $1.500.000. Noche FAQ: 54990 / 54990 / 69990 / 19990.\n"
+        "- WhatsApp máximo 1 vez por hilo (+56 9… sin https://wa.me). Si ya salió, no repitas el número.\n"
+        "- NUNCA digas que confirmas o hablas con recepción: este canal no habla con recepción.\n"
+        "- Reserva: WhatsApp corto con fechas/personas (número solo si aún no lo diste).\n"
+        "- Tiempo/distancia: eta_only=true → solo minutos en auto, SIN mapa.\n"
+        "- Cómo llegar: eta_only=false, sin URLs, «Te lo indico en el siguiente mapa.»\n"
         "- Si el huésped se despide, despídete corto. Si no, no te despidas.\n"
         "- Tema ajeno al hostal: di breve que este canal es solo para el hostal.\n"
         "- Instagram y Facebook: mismas reglas.\n"
@@ -658,11 +707,10 @@ def _guest_turn(
         "Responde corto y ejecutivo (1–2 frases). "
         "Idioma: toda la charla; mensajes cortos heredan el idioma del hilo. No mezcles. "
         "Saludo solo → «Hola, ¿en qué te podemos ayudar?» y PARA. "
-        "Tiempo/distancia → get_directions_from_hostel eta_only=true: solo min en auto, sin mapa. "
-        "Cómo llegar → eta_only=false. "
-        "Si se despide → despídete corto. Si no, no te despidas. "
-        "Si no sabes → WhatsApp +56 9… sin https. "
-        "Precios FAQ: 54990 / 54990 / 69990 / 19990. JSON final.",
+        "Precios/tipos de habitación solo si los piden. Mensual 1500000. "
+        "WhatsApp máximo una vez en el hilo. Nunca digas que confirmas con recepción. "
+        "Tiempo/distancia → eta_only=true (solo min en auto, sin mapa). "
+        "Si se despide → despídete corto. JSON final.",
     ]
     return "\n".join(lines)
 
@@ -845,6 +893,7 @@ def _reservation_whatsapp_reply(
     """Fast path: never hang on DeepSeek when the guest asks to book."""
     info = hostel_info_dict(db)
     phone = whatsapp_phone_display(str(info.get("whatsapp_url") or ""))
+    already = thread_already_shared_whatsapp(prior)
     prior_texts = [
         str(turn.get("content") or "")
         for turn in (prior or [])
@@ -852,15 +901,35 @@ def _reservation_whatsapp_reply(
     ]
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
     if lang == "en":
-        message = f"Write us on WhatsApp {phone} with dates and guest count."
+        message = (
+            "Write us on WhatsApp with dates and guest count."
+            if already
+            else f"Write us on WhatsApp {phone} with dates and guest count."
+        )
     elif lang == "pt":
-        message = f"Escreva no WhatsApp {phone} com datas e quantas pessoas."
+        message = (
+            "Escreva no WhatsApp com datas e quantas pessoas."
+            if already
+            else f"Escreva no WhatsApp {phone} com datas e quantas pessoas."
+        )
     elif lang == "fr":
-        message = f"Écrivez-nous sur WhatsApp {phone} avec dates et nombre de personnes."
+        message = (
+            "Écrivez-nous sur WhatsApp avec dates et nombre de personnes."
+            if already
+            else f"Écrivez-nous sur WhatsApp {phone} avec dates et nombre de personnes."
+        )
     elif lang == "de":
-        message = f"Schreib uns auf WhatsApp {phone} mit Daten und Personenanzahl."
+        message = (
+            "Schreib uns auf WhatsApp mit Daten und Personenanzahl."
+            if already
+            else f"Schreib uns auf WhatsApp {phone} mit Daten und Personenanzahl."
+        )
     else:
-        message = f"Escríbenos por WhatsApp {phone} con fechas y cantidad de personas."
+        message = (
+            "Escríbenos por WhatsApp con fechas y cantidad de personas."
+            if already
+            else f"Escríbenos por WhatsApp {phone} con fechas y cantidad de personas."
+        )
     message = apply_time_greeting(message, is_follow_up=is_follow_up)
     message = sanitize_outbound_message(message)
     return {
@@ -1001,8 +1070,17 @@ async def _run_reply_loop(
                 "",
                 reply_message or "",
             )
+            prior_assistant = [
+                {"role": "assistant", "content": str(turn.get("content") or "")}
+                for turn in messages
+                if turn.get("role") == "assistant"
+            ]
+            already_wa = thread_already_shared_whatsapp(prior_assistant)
             reply_message = strip_unsolicited_goodbye(reply_message, guest_text=guest_blob)
             reply_message = sanitize_outbound_message(reply_message)
+            reply_message = strip_repeated_whatsapp_number(
+                reply_message, already_shared=already_wa
+            )
             reply_message = re.sub(r"\n{3,}", "\n\n", reply_message).strip()
             if action == "reply" and not reply_message:
                 action = "escalate"

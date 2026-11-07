@@ -1,7 +1,7 @@
 {
-  "rates_version": 3,
+  "rates_version": 4,
   "currency": "CLP",
-  "note": "Tarifas referenciales desde. Pueden variar por temporada y ocupación. Confirmación solo por WhatsApp con recepción.",
+  "note": "Tarifas referenciales desde. Pueden variar por temporada y ocupación. Mensual: $1.500.000 CLP.",
   "includes": [
     "Baño privado (en privadas)",
     "Wi-Fi",

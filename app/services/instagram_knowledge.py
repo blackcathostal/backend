@@ -132,18 +132,11 @@ def _whatsapp_phone(whatsapp: str) -> str:
 
 
 def _prices_from_rooms(rooms: list[dict[str, Any]], whatsapp: str) -> str:
-    phone = _whatsapp_phone(whatsapp)
-    ordered = sorted(rooms, key=lambda room: int(room.get("id") or 0), reverse=True)
-    tariffs = [
-        f"{room.get('name')}: {room.get('price_label')} CLP"
-        for room in ordered
-        if room.get("name") and room.get("price_label")
-    ]
-    listed = ". ".join(tariffs)
-    extra = f" {listed}." if listed else ""
+    del rooms, whatsapp  # Keep signature; prefer FAQ text, not a room-by-room dump.
     return (
-        "Tarifas referenciales (pueden variar)."
-        f"{extra} Fecha exacta por WhatsApp {phone}."
+        "Tarifas referenciales por noche (pueden variar): "
+        "Matrimonial/Suite $54.990; Twin $54.990; Triple $69.990; cama $19.990. "
+        "Mensual $1.500.000."
     )
 
 
@@ -176,7 +169,7 @@ def _live_faq_answer(
     if key == "checkin":
         return f"Check-in a las {check_in}."
     if key == "checkout":
-        return f"Check-out a las {check_out}. Late check-out por WhatsApp {phone}."
+        return f"Check-out a las {check_out}."
     if key == "breakfast":
         hours = breakfast.replace("-", " a ", 1)
         return f"Desayuno incluido, de {hours}."
@@ -187,11 +180,13 @@ def _live_faq_answer(
     if key == "location":
         return f"Estamos en {address}."
     if key == "groups":
-        return f"Sí recibimos grupos. Cotiza por WhatsApp {phone} con fechas y personas."
+        return "Sí recibimos grupos. Indica fechas y personas para cotizar."
     if key == "cancellation":
-        return f"Depende de tu reserva. Escríbenos por WhatsApp {phone} o {email} con el código."
+        return f"Depende de tu reserva. Escríbenos a {email} con el código."
     if key == "availability":
-        return f"Para disponibilidad: WhatsApp {phone} con las fechas."
+        return "Indica las fechas y te orientamos."
+    if key == "mensual":
+        return "La tarifa mensual de habitación es $1.500.000 CLP."
     return stored
 
 
