@@ -685,7 +685,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-2h-tagged-v13",
+        "comment_poller": "reels-collab-v14",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1434,6 +1434,7 @@ def _ingest_comment_row(
     *,
     media: dict[str, Any],
     item_type: str = "comment",
+    collaborative: bool = False,
 ) -> dict[str, Any] | None:
     media_id = str(media.get("id") or "").strip()
     comment_id = c.get("id")
@@ -1486,6 +1487,7 @@ def _ingest_comment_row(
             "permalink": media.get("permalink"),
             "media_type": media.get("media_type") or media.get("media_product_type"),
             "foreign_media": kind == "mention",
+            "collaborative": bool(collaborative),
         }
     )
 
@@ -1820,6 +1822,130 @@ async def sync_tagged_media_comments(*, auto_reply: bool = False) -> list[dict[s
 sync_tagged_media_comments.last_debug = {}  # type: ignore[attr-defined]
 
 
+async def sync_collaborative_media_comments(
+    *,
+    auto_reply: bool = False,
+) -> list[dict[str, Any]]:
+    """Read comments on reels/posts where Black Cat is an accepted collaborator.
+
+    These show as «blackcathostal y N personas más». Meta exposes them on
+    GET /{ig-user-id}/collaborative_media (not always on /media alone).
+    """
+    conn = _require_connection()
+    ig_user_id = conn["ig_user_id"]
+    token = conn["page_access_token"]
+    try:
+        media_rows = await _graph_pages(
+            f"/{ig_user_id}/collaborative_media",
+            token,
+            {
+                "fields": (
+                    "id,caption,timestamp,permalink,media_type,media_product_type,"
+                    "comments_count,username,owner"
+                ),
+                "limit": 50,
+            },
+            max_pages=3,
+        )
+    except InstagramError as exc:
+        logger.warning("collaborative_media poll failed: %s", exc)
+        sync_collaborative_media_comments.last_debug = {  # type: ignore[attr-defined]
+            "error": str(exc),
+            "media": 0,
+            "synced": 0,
+        }
+        return []
+
+    prev_counts = _load_media_comment_counts()
+    next_counts = dict(prev_counts)
+    to_fetch: list[dict[str, Any]] = []
+    for index, media in enumerate(media_rows):
+        media_id = str(media.get("id") or "").strip()
+        if not media_id:
+            continue
+        watch_mention_media(media_id)
+        count = int(media.get("comments_count") or 0)
+        previous = int(prev_counts.get(media_id, -1))
+        if count <= 0:
+            next_counts[media_id] = 0
+            continue
+        # Always check newest collabs + any whose comment count grew.
+        if index < 20 or previous < 0 or count > previous:
+            to_fetch.append(media)
+        if len(to_fetch) >= 40:
+            break
+
+    synced: list[dict[str, Any]] = []
+    to_reply: list[str] = []
+    fresh_samples: list[str] = []
+
+    async def _load_one(
+        media: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        mid = str(media.get("id") or "")
+        rows = await _fetch_media_comments(mid, token)
+        if not rows:
+            rows = await _fetch_mentioned_media_comments(
+                ig_user_id=str(ig_user_id),
+                media_id=mid,
+                token=token,
+            )
+        return media, rows
+
+    for start in range(0, len(to_fetch), 8):
+        chunk = to_fetch[start : start + 8]
+        loaded = await asyncio.gather(*[_load_one(m) for m in chunk])
+        for media, rows in loaded:
+            mid = str(media.get("id") or "")
+            next_counts[mid] = int(media.get("comments_count") or 0)
+            for c in rows:
+                stamp = str(c.get("timestamp") or "")
+                text = str(c.get("text") or "")
+                who = c.get("username") or (c.get("from") or {}).get("username") or "?"
+                if _inbound_is_fresh(stamp) and len(fresh_samples) < 8:
+                    fresh_samples.append(f"@{who}: {text[:80]}")
+                # Treat as own-grid comment (collaborator), not foreign UGC mention.
+                item = _ingest_comment_row(
+                    c,
+                    media=media,
+                    item_type="comment",
+                    collaborative=True,
+                )
+                if not item:
+                    continue
+                synced.append(item)
+                if (
+                    auto_reply
+                    and auto_reply_enabled()
+                    and item.get("status") == "pending"
+                ):
+                    to_reply.append(str(item["id"]))
+
+    _save_media_comment_counts(next_counts)
+    for item_id in to_reply:
+        try:
+            await schedule_auto_reply(item_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not schedule collab-media reply %s", item_id)
+
+    sync_collaborative_media_comments.last_debug = {  # type: ignore[attr-defined]
+        "media": len(media_rows),
+        "fetched": len(to_fetch),
+        "synced": len(synced),
+        "fresh_samples": fresh_samples,
+    }
+    logger.info(
+        "IG collaborative_media sync media=%s fetched=%s synced=%s",
+        len(media_rows),
+        len(to_fetch),
+        len(synced),
+    )
+    return synced
+
+
+sync_collaborative_media_comments.last_debug = {}  # type: ignore[attr-defined]
+
+
 def silence_stale_pending_public(max_age_seconds: float = COMMENT_MAX_AGE_SECONDS) -> int:
     """Mark pending comments/mentions older than 2h as skipped."""
     fixed = 0
@@ -1899,7 +2025,9 @@ async def poll_instagram_comments_loop() -> None:
                     ),
                     rotate_offset=tick * 17,
                 )
-                # Others' reels that @mention / tag the hotel (the common UGC case).
+                # Collab reels («blackcathostal y N personas más»).
+                await sync_collaborative_media_comments(auto_reply=True)
+                # Others' reels that @mention / tag the hotel (UGC without collab).
                 await sync_tagged_media_comments(auto_reply=True)
                 await schedule_pending_public_replies()
         except asyncio.CancelledError:
@@ -2128,7 +2256,21 @@ async def send_inbox_reply(
             comment_id = item.get("meta_comment_id")
             if not comment_id:
                 raise InstagramError("Falta meta_comment_id")
-            meta_result = await reply_to_comment(comment_id, text)
+            try:
+                meta_result = await reply_to_comment(comment_id, text)
+            except InstagramError:
+                # Collaborative media: sometimes only Mentions API can publish the reply.
+                if item.get("collaborative"):
+                    media_id = str(item.get("media_id") or item.get("thread_id") or "")
+                    if not media_id:
+                        raise
+                    meta_result = await reply_to_mention(
+                        media_id=media_id,
+                        message=text,
+                        comment_id=str(comment_id),
+                    )
+                else:
+                    raise
         else:
             recipient_id = item.get("author_id") or item.get("peer_id")
             if not recipient_id:

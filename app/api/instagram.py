@@ -310,6 +310,7 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
             fetch_budget=ig.COMMENT_FETCH_BUDGET_SYNC,
             rotate_offset=0,
         )
+        collab = await ig.sync_collaborative_media_comments(auto_reply=True)
         tagged = await ig.sync_tagged_media_comments(auto_reply=True)
         await ig.schedule_pending_public_replies()
     except ig.InstagramConfigError as exc:
@@ -319,7 +320,7 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     subscription = await ig.subscribe_instagram_webhooks()
     if not subscription.get("ok"):
         warning = subscription.get("error")
-    all_new = list(comments) + list(tagged)
+    all_new = list(comments) + list(collab) + list(tagged)
     fresh_preview = [
         {
             "author": c.get("author_username"),
@@ -327,16 +328,20 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
             "created_at": c.get("created_at"),
             "status": c.get("status"),
             "type": c.get("type"),
+            "collaborative": bool(c.get("collaborative")),
         }
         for c in all_new[:10]
     ]
     debug = {
         "own": getattr(ig.sync_recent_comments, "last_debug", {}) or {},
+        "collaborative": getattr(ig.sync_collaborative_media_comments, "last_debug", {})
+        or {},
         "tagged": getattr(ig.sync_tagged_media_comments, "last_debug", {}) or {},
     }
     return {
         "synced": len(all_new),
         "comments": len(comments),
+        "collaborative": len(collab),
         "tagged_mentions": len(tagged),
         "messages": 0,
         "warning": warning,
