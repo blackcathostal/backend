@@ -301,6 +301,7 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     warning = None
     try:
         # Auto-reply on sync: Meta does not webhook comments on Reels.
+        # Keep this endpoint fast — do NOT pull full DM history here (that caused 502s).
         comments = await ig.sync_recent_comments(
             limit_media=ig.COMMENT_SYNC_MEDIA_LIMIT,
             auto_reply=True,
@@ -313,16 +314,12 @@ async def sync_comments(_: Users = Depends(get_current_user)) -> dict[str, Any]:
     subscription = await ig.subscribe_instagram_webhooks()
     if not subscription.get("ok"):
         warning = subscription.get("error")
-    try:
-        messages = await ig.sync_recent_messages()
-    except ig.InstagramError as exc:
-        messages = []
-        warning = str(exc)
     return {
-        "synced": len(comments) + len(messages),
+        "synced": len(comments),
         "comments": len(comments),
-        "messages": len(messages),
+        "messages": 0,
         "warning": warning,
+        "comment_poller": ig.connection_status().get("comment_poller"),
     }
 
 

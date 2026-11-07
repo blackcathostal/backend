@@ -27,6 +27,7 @@ from app.services.deepseek_instagram import (
 CONNECTION_FILE = settings.uploads_dir / "cache" / "instagram_connection.json"
 INBOX_FILE = settings.uploads_dir / "cache" / "instagram_inbox.json"
 AUTO_REPLY_FILE = settings.uploads_dir / "cache" / "deepseek_auto_reply.json"
+MEDIA_COMMENT_COUNTS_FILE = settings.uploads_dir / "cache" / "instagram_media_comment_counts.json"
 _inbox_lock = threading.Lock()
 _inbox_cache: dict[str, Any] | None = None
 # Guests type in bursts ("hola" / "si" / "estoy interesado"). Wait after the last
@@ -683,7 +684,7 @@ def connection_status() -> dict[str, Any]:
         "ig_username": (conn or {}).get("ig_username"),
         "connected_at": (conn or {}).get("connected_at"),
         # Bump when poller behavior changes — used to verify prod deploy.
-        "comment_poller": "reels-fallback-v2",
+        "comment_poller": "reels-count-cache-v3",
         "hint": None
         if meta_configured()
         else "Configura META_APP_ID y META_APP_SECRET en backend/.env",
@@ -1308,15 +1309,14 @@ async def send_dm_image(recipient_id: str, image_url: str, *, open_url: str = ""
 
 
 # Meta: comment webhooks do NOT fire for Reels. Poll Graph instead.
-COMMENT_POLL_INTERVAL_SECONDS = 60.0
-COMMENT_POLL_MEDIA_LIMIT = 30
-COMMENT_SYNC_MEDIA_LIMIT = 120
+COMMENT_POLL_INTERVAL_SECONDS = 45.0
+COMMENT_POLL_MEDIA_LIMIT = 80
+COMMENT_SYNC_MEDIA_LIMIT = 200
 # Only auto-answer comments this fresh (avoid re-replying days-old threads).
-COMMENT_AUTO_REPLY_MAX_AGE_SECONDS = 6 * 3600
-_MEDIA_COMMENT_FIELDS = (
-    "id,caption,timestamp,permalink,media_type,media_product_type,comments_count,"
-    "comments.limit(25){id,text,username,timestamp,from}"
-)
+COMMENT_AUTO_REPLY_MAX_AGE_SECONDS = 12 * 3600
+# Always open /comments for the newest N media; otherwise only when count grew.
+COMMENT_ALWAYS_CHECK_NEWEST = 15
+COMMENT_FETCH_BUDGET = 25
 
 
 def _inbound_is_fresh(
@@ -1331,6 +1331,31 @@ def _inbound_is_fresh(
         parsed = parsed.replace(tzinfo=timezone.utc)
     age = (datetime.now(timezone.utc) - parsed).total_seconds()
     return 0 <= age <= max_age_seconds
+
+
+def _load_media_comment_counts() -> dict[str, int]:
+    try:
+        if not MEDIA_COMMENT_COUNTS_FILE.exists():
+            return {}
+        raw = json.loads(MEDIA_COMMENT_COUNTS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k): int(v or 0) for k, v in raw.items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_media_comment_counts(counts: dict[str, int]) -> None:
+    try:
+        MEDIA_COMMENT_COUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # Keep file small: most recent media ids only.
+        items = list(counts.items())[-400:]
+        MEDIA_COMMENT_COUNTS_FILE.write_text(
+            json.dumps(dict(items), ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not persist Instagram media comment counts")
 
 
 def _ingest_comment_row(
@@ -1375,27 +1400,12 @@ def _ingest_comment_row(
     )
 
 
-async def _comments_for_media(
-    media: dict[str, Any],
-    token: str,
-) -> list[dict[str, Any]]:
-    """Nested comments often come empty on Reels — fall back to /comments."""
-    nested = list((media.get("comments") or {}).get("data") or [])
-    if nested:
-        return nested
-    media_id = str(media.get("id") or "").strip()
-    count = int(media.get("comments_count") or 0)
-    product = str(media.get("media_product_type") or media.get("media_type") or "").upper()
-    # Always hit /comments for reels/videos with activity; nested field is unreliable.
-    if not media_id or (count <= 0 and product not in {"REELS", "VIDEO"}):
-        return []
-    if count <= 0:
-        return []
+async def _fetch_media_comments(media_id: str, token: str) -> list[dict[str, Any]]:
     try:
         data = await _graph_get(
             f"/{media_id}/comments",
             token,
-            {"fields": "id,text,username,timestamp,from", "limit": 25},
+            {"fields": "id,text,username,timestamp,from", "limit": 30},
         )
     except InstagramError as exc:
         logger.warning("comments fetch failed for media %s: %s", media_id, exc)
@@ -1408,52 +1418,54 @@ async def sync_recent_comments(
     *,
     auto_reply: bool = False,
 ) -> list[dict[str, Any]]:
-    """Pull comments from recent posts/reels; Reels use /comments fallback."""
+    """Fast comment poll: list media counts, fetch /comments only when needed.
+
+    Detects new comments on OLD reels by comparing comments_count to a local cache
+    (Meta does not webhook Reel comments).
+    """
     conn = _require_connection()
     ig_user_id = conn["ig_user_id"]
     token = conn["page_access_token"]
     wanted = max(10, min(int(limit_media or COMMENT_POLL_MEDIA_LIMIT), COMMENT_SYNC_MEDIA_LIMIT))
-    per_page = 25
+    per_page = 50
     pages = max(1, (wanted + per_page - 1) // per_page)
-    # First pass: media list with comments_count (+ nested when Meta provides it).
+    # Lightweight list — no nested comments (those hang / come empty on Reels).
     media_rows = await _graph_pages(
         f"/{ig_user_id}/media",
         token,
         {
-            "fields": (
-                "id,caption,timestamp,permalink,media_type,media_product_type,"
-                "comments_count,comments.limit(15){id,text,username,timestamp,from}"
-            ),
+            "fields": "id,caption,timestamp,permalink,media_type,media_product_type,comments_count",
             "limit": per_page,
         },
-        max_pages=min(pages, 8),
+        max_pages=min(pages, 4),
     )
+    prev_counts = _load_media_comment_counts()
+    next_counts = dict(prev_counts)
+    priority: list[dict[str, Any]] = []
+    seed: list[dict[str, Any]] = []
+    for index, media in enumerate(media_rows):
+        media_id = str(media.get("id") or "").strip()
+        if not media_id:
+            continue
+        count = int(media.get("comments_count") or 0)
+        previous = int(prev_counts.get(media_id, -1))
+        next_counts[media_id] = count
+        if count <= 0:
+            continue
+        # Newest always; count grew = new comment on an older viral reel.
+        if index < COMMENT_ALWAYS_CHECK_NEWEST or (previous >= 0 and count > previous):
+            priority.append(media)
+        elif previous < 0:
+            # First time we see this media: seed once so existing fresh comments are not skipped.
+            seed.append(media)
+    to_fetch = (priority + seed)[:COMMENT_FETCH_BUDGET]
+
     synced: list[dict[str, Any]] = []
     to_reply: list[str] = []
-    # Prefer media that already have comments; check reels even if nested is empty.
-    candidates = [
-        m
-        for m in media_rows
-        if int(m.get("comments_count") or 0) > 0
-        or str(m.get("media_product_type") or "").upper() == "REELS"
-    ]
-    # Reels first: nested comments field is often empty for them.
-    candidates.sort(
-        key=lambda row: 0 if str(row.get("media_product_type") or "").upper() == "REELS" else 1
-    )
-    # Cap fallback /comments calls so sync never hangs for minutes.
-    fallback_budget = 40
-    for m in candidates:
-        nested = list((m.get("comments") or {}).get("data") or [])
-        if nested:
-            rows = nested
-        elif fallback_budget > 0:
-            fallback_budget -= 1
-            rows = await _comments_for_media(m, token)
-        else:
-            rows = []
-        for c in rows:
-            item = _ingest_comment_row(c, media=m)
+    for media in to_fetch:
+        media_id = str(media.get("id") or "")
+        for c in await _fetch_media_comments(media_id, token):
+            item = _ingest_comment_row(c, media=media)
             if not item:
                 continue
             synced.append(item)
@@ -1464,6 +1476,8 @@ async def sync_recent_comments(
                 and _inbound_is_fresh(str(item.get("created_at") or ""))
             ):
                 to_reply.append(str(item["id"]))
+
+    _save_media_comment_counts(next_counts)
     for item_id in to_reply:
         try:
             await schedule_auto_reply(item_id)
@@ -1501,10 +1515,9 @@ async def poll_instagram_comments_loop() -> None:
         try:
             if load_connection() and auto_reply_enabled():
                 tick += 1
-                # Most cycles: last ~30. Every 5th: deeper sweep for older viral reels.
                 limit = (
                     COMMENT_SYNC_MEDIA_LIMIT
-                    if tick % 5 == 0
+                    if tick % 4 == 0
                     else COMMENT_POLL_MEDIA_LIMIT
                 )
                 await sync_recent_comments(limit_media=limit, auto_reply=True)
