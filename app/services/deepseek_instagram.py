@@ -384,11 +384,13 @@ def thread_already_shared_whatsapp(prior: list[dict[str, Any]] | None) -> bool:
     return False
 
 
-_TRAILING_WHATSAPP_FLUFF_RE = re.compile(
-    r"(?is)(?:^|[.!?…,;:\s]+)"
+_WHATSAPP_PHRASE_RE = re.compile(
+    r"(?is)"
+    r"(?:^|[.!?…,;:\s]+)"
     r"(?:(?:escr[ií]benos|escribe|cont[aá]ctanos|contin[uú]a|sigue|confirma(?:lo)?|"
     r"resuelve|cotiza|reserva)\s+)?"
-    r"(?:por|en|via|vía|on|pelo|pelo\s+o)?\s*whatsapp\.?\s*$"
+    r"(?:por|en|via|vía|on|pelo)\s+whatsapp"
+    r"|(?:^|[.!?…,;:\s]+)whatsapp\.?"
 )
 
 
@@ -396,8 +398,12 @@ def strip_repeated_whatsapp_number(message: str, *, already_shared: bool) -> str
     """If WhatsApp was already shared, strip links/mentions — never append «por WhatsApp»."""
     text = message or ""
     if not already_shared:
-        # Still drop empty trailing «por WhatsApp» tacked on by the model for no reason.
-        text = _TRAILING_WHATSAPP_FLUFF_RE.sub("", text)
+        # Drop empty trailing «por WhatsApp» tacked on by the model for no reason.
+        text = re.sub(
+            r"(?is)(?:[.!?…,;:\s]+)?(?:por|en|via|vía|on|pelo)\s+whatsapp\.?\s*$",
+            "",
+            text,
+        )
         return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
     text = _ANY_WA_TOKEN_RE.sub("", text)
     text = _WA_ME_RE.sub("", text)
@@ -405,9 +411,10 @@ def strip_repeated_whatsapp_number(message: str, *, already_shared: bool) -> str
     text = _SHARE_WA_RE.sub("", text)
     text = re.sub(r"\+56\s*9\s*\d{4}\s*\d{4}", "", text)
     text = re.sub(r"\+56\s*\d[\d\s-]{6,}\d", "", text)
+    text = _WHATSAPP_PHRASE_RE.sub("", text)
     text = re.sub(r"(?i)\bwhatsapp\b", "", text)
-    text = _TRAILING_WHATSAPP_FLUFF_RE.sub("", text)
-    return re.sub(r"\s{2,}", " ", text).strip(" ,;-")
+    text = re.sub(r"(?is)(?:^|[.!?…])\s*(?:por|en|via|vía)\s*$", "", text)
+    return re.sub(r"\s{2,}", " ", text).strip(" ,;-.")
 
 
 def enforce_single_short_reply(message: str, *, max_chars: int = MAX_REPLY_CHARS) -> str:
