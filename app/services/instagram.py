@@ -1348,11 +1348,19 @@ async def send_inbox_reply(
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
-    text = _strip_maps_urls(message or "")
+    from app.services.deepseek_instagram import sanitize_outbound_message
+
+    text = sanitize_outbound_message(_strip_maps_urls(message or ""))
     if not text:
         raise InstagramError("Mensaje vacío")
-    image = str(map_image_url or item.get("pending_map_image") or "").strip()
-    open_url = str(maps_url or item.get("pending_maps_url") or "").strip()
+    # Only attach a map when this turn asked for one. Never reuse a stale pending image
+    # on WhatsApp/price replies (that made IG look “confused”: image first, then text).
+    image = str(map_image_url or "").strip()
+    if not image and source == "human":
+        image = str(item.get("pending_map_image") or "").strip()
+    open_url = str(maps_url or "").strip()
+    if not open_url and source == "human":
+        open_url = str(item.get("pending_maps_url") or "").strip()
     # Tap target for the map card only (never shown as plain text in the first bubble).
     if open_url and not (
         "google.com/maps" in open_url

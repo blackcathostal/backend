@@ -125,7 +125,14 @@ def _is_price_faq(topic: str, question: str) -> bool:
     return "cuesta una habitación" in sample or "cuesta una habitacion" in sample
 
 
+def _whatsapp_phone(whatsapp: str) -> str:
+    from app.services.deepseek_instagram import whatsapp_phone_display
+
+    return whatsapp_phone_display(whatsapp)
+
+
 def _prices_from_rooms(rooms: list[dict[str, Any]], whatsapp: str) -> str:
+    phone = _whatsapp_phone(whatsapp)
     ordered = sorted(rooms, key=lambda room: int(room.get("id") or 0), reverse=True)
     tariffs = [
         f"{room.get('name')}: {room.get('price_label')} CLP"
@@ -135,8 +142,8 @@ def _prices_from_rooms(rooms: list[dict[str, Any]], whatsapp: str) -> str:
     listed = ". ".join(tariffs)
     extra = f" {listed}." if listed else ""
     return (
-        "Las tarifas son referenciales y pueden variar por temporada."
-        f"{extra} Para una fecha exacta escríbenos por WhatsApp {whatsapp}."
+        "Tarifas referenciales (pueden variar)."
+        f"{extra} Fecha exacta por WhatsApp {phone}."
     )
 
 
@@ -150,10 +157,13 @@ def _live_faq_answer(
     """Turn an internal instruction into the real hostel values."""
     stored = (guide or "").strip()
     whatsapp = str(info.get("whatsapp_url") or "").strip()
+    phone = _whatsapp_phone(whatsapp)
     if _is_price_faq(topic, question):
         return _prices_from_rooms(rooms, whatsapp)
     if stored and not _is_instruction(stored):
-        return stored
+        from app.services.deepseek_instagram import sanitize_outbound_message
+
+        return sanitize_outbound_message(stored)
     email = str(info.get("email") or "").strip()
     address = str(info.get("address") or "").strip()
     check_in = str(info.get("check_in_time") or "").strip()
@@ -162,44 +172,26 @@ def _live_faq_answer(
     parking_notes = str(info.get("parking_notes") or "").strip()
     key = (topic or "").strip().lower()
     if key == "whatsapp":
-        return f"Puedes escribirnos por WhatsApp {whatsapp} o al correo {email}."
+        return f"WhatsApp {phone} o correo {email}."
     if key == "checkin":
-        return (
-            f"El check-in es a las {check_in}. "
-            "Te enviamos las instrucciones de llegada antes de tu entrada."
-        )
+        return f"Check-in a las {check_in}."
     if key == "checkout":
-        return (
-            f"El check-out es a las {check_out}. "
-            f"Si necesitas salida más tarde, escríbenos por WhatsApp {whatsapp} para ver disponibilidad."
-        )
+        return f"Check-out a las {check_out}. Late check-out por WhatsApp {phone}."
     if key == "breakfast":
         hours = breakfast.replace("-", " a ", 1)
-        return f"Sí, el desayuno continental está incluido. Se sirve de {hours}."
+        return f"Desayuno incluido, de {hours}."
     if key == "parking":
         if info.get("has_parking"):
             return f"Sí, hay estacionamiento. {parking_notes}".strip()
         return parking_notes or "No hay estacionamiento en el hostal."
     if key == "location":
-        return (
-            f"Estamos en {address}. "
-            f"Si necesitas ayuda para llegar, escríbenos por WhatsApp {whatsapp}."
-        )
+        return f"Estamos en {address}."
     if key == "groups":
-        return (
-            "Sí, recibimos grupos y estadías corporativas. "
-            f"Escríbenos por WhatsApp {whatsapp} con las fechas y la cantidad de personas para cotizar."
-        )
+        return f"Sí recibimos grupos. Cotiza por WhatsApp {phone} con fechas y personas."
     if key == "cancellation":
-        return (
-            "La cancelación depende de las condiciones de tu reserva. "
-            f"Escríbenos por WhatsApp {whatsapp} o al correo {email} con el código de reserva."
-        )
+        return f"Depende de tu reserva. Escríbenos por WhatsApp {phone} o {email} con el código."
     if key == "availability":
-        return (
-            "Para confirmar disponibilidad necesitamos las fechas. "
-            f"Escríbenos por WhatsApp {whatsapp}."
-        )
+        return f"Para disponibilidad: WhatsApp {phone} con las fechas."
     return stored
 
 

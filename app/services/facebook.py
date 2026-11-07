@@ -823,7 +823,9 @@ def get_inbox_detail(item_id: str) -> dict[str, Any]:
 
 
 async def reply_inbox(item_id: str, message: str, *, source: str = "human") -> dict[str, Any]:
-    text = (message or "").strip()
+    from app.services.deepseek_instagram import sanitize_outbound_message
+
+    text = sanitize_outbound_message(message or "")
     if not text:
         raise InstagramError("El mensaje no puede estar vacío")
     comment = _comment_by_id(item_id)

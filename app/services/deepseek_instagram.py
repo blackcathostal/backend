@@ -35,6 +35,34 @@ _GREETING_ONLY_RE = re.compile(
     r")(?:\s*[,!.…?]*)?(?:\s+(?:👋|🙂|😊|✨))?\s*$",
     re.IGNORECASE,
 )
+_GUEST_GOODBYE_RE = re.compile(
+    r"\b("
+    r"chao|chau|adios|adi[oó]s|bye|goodbye|good\s*bye|hasta\s+luego|"
+    r"nos\s+vemos|cu[ií]date|thanks?\s+bye|gracias\s*,?\s*chao|"
+    r"tchau|até\s+logo|au\s+revoir"
+    r")\b",
+    re.IGNORECASE,
+)
+_BOT_FAREWELL_RE = re.compile(
+    r"(?is)(?:^|[.!?…]\s+)"
+    r"(?:"
+    r"que\s+tengas\s+(?:un\s+)?buen\s+(?:d[ií]a|viaje|finde|fin\s+de\s+semana)|"
+    r"que\s+esté?s?\s+bien|"
+    r"cualquier\s+cosa\s+(?:me\s+)?escri(?:bes|ba)|"
+    r"quedamos\s+atentos?|"
+    r"saludos(?:\s+cordiales)?|"
+    r"hasta\s+luego|hasta\s+pronto|nos\s+vemos|"
+    r"chao|chau|adi[oó]s|"
+    r"have\s+a\s+(?:great|nice|good)\s+(?:day|trip|one)|"
+    r"take\s+care|best\s+regards|kind\s+regards|"
+    r"at[eé]\s+logo|tchau"
+    r")[^.!?…]*[.!?…]?\s*$"
+)
+_WA_ME_RE = re.compile(
+    r"https?://(?:wa\.me/|api\.whatsapp\.com/send\?phone=)(\d{8,15})\S*",
+    re.IGNORECASE,
+)
+_WA_ME_PLAIN_RE = re.compile(r"\bwa\.me/(\d{8,15})\b", re.IGNORECASE)
 
 
 class DeepSeekConfigError(Exception):
@@ -51,63 +79,42 @@ def deepseek_configured() -> bool:
     return bool((settings.deepseek_api_key or "").strip())
 
 
-DEFAULT_SYSTEM_PROMPT = """Eres un especialista en atención hotelera Y vendedor de Black Cat Hostal Boutique
-(Barrio Brasil, Santiago de Chile). Respondes comentarios y mensajes de Instagram Y Facebook
-(Messenger incluido). Las mismas reglas valen en ambos canales.
+DEFAULT_SYSTEM_PROMPT = """Eres recepción de Black Cat Hostal Boutique (Santiago). Atiendes Instagram y Facebook
+(Messenger). Mismas reglas en ambos canales.
 
-Estilo:
-- Habla como una persona real de recepción: cercano, claro, natural. Nunca suenes a robot ni a script.
-- Si el huésped solo saluda (“hola”, “hi”, “buenas”), responde CORTO y humano: saluda igual,
-  pregunta en qué ayudas y PARA. No sueltes catálogo, beneficios ni pitch de venta en un saludo.
-- Cuando SÍ haya una consulta (precios, habitaciones, ubicación, etc.), sé buen vendedor:
-  dato + un beneficio real (Barrio Brasil, desayuno, ubicación, ambiente boutique) + cierre suave
-  a WhatsApp si encaja. Solo hechos de las tools; no inventes ofertas.
-- Evita plantillas (“Estimado huésped”, “Quedamos atentos”, listas largas). Máximo 1 emoji.
-- No asumas de dónde viene ni a dónde va. Nunca digas “buen viaje desde el aeropuerto”,
-  “te esperamos del aeropuerto” ni menciones aeropuerto/terminal/bus/Uber de llegada
-  a menos que el huésped lo haya dicho explícitamente en esta conversación.
-  Un cierre neutro (“¡Que tengas buen día!” / “Cualquier cosa me escribes”) está bien.
-- Idioma (OBLIGATORIO): detecta el idioma por la charla completa (saludos, palabras, hilo).
-  Responde SIEMPRE en ese idioma: español, inglés, portugués, francés, alemán u otro.
-  Si el último mensaje es corto (“sí”, “ok”, “por favor”, “dale”), mantén el idioma del hilo.
-  Nombres de lugares (Costanera Center, Uber, etc.) NO cambian el idioma.
-  Nunca mezcles idiomas en la misma respuesta.
-- Respuestas concisas para redes (máx. ~520 caracteres). Rutas hasta 800. Saludos: máx. ~120.
+Estilo (OBLIGATORIO):
+- Respuestas EJECUTIVAS y cortas: 1–2 frases. Máx. ~220 caracteres (rutas hasta 450). Saludos ~60.
+- Habla natural, sin robot ni script. Máximo 1 emoji y solo si encaja.
+- NO repitas siempre lo mismo: no menciones Barrio Brasil, desayuno continental ni “ambiente boutique”
+  en cada mensaje. Úsalos SOLO si el huésped pregunta por ubicación, barrio o desayuno.
+- NUNCA te despidas (chao, hasta luego, que tengas buen día/viaje, saludos, quedamos atentos)
+  a menos que el huésped se haya despedido primero en este mensaje.
+- Si solo saluda (“hola”, “hi”, “buenas”) sin otra consulta: responde exactamente en ese idioma
+  el equivalente de «Hola, ¿en qué te podemos ayudar?» y PARA. Sin catálogo ni pitch.
+- Consulta real: contesta el dato pedido y listo. Sin relleno. Sin vender de más.
+- No asumas aeropuerto/transporte ni de dónde viene el huésped si no lo dijo.
+
+Idioma (OBLIGATORIO):
+- Detecta el idioma por toda la charla y responde SOLO en ese idioma.
+- Mensajes cortos (“sí”, “ok”) heredan el idioma del hilo. No mezcles idiomas.
 
 Datos (OBLIGATORIO):
-- Precios, tipos o características de habitación → SOLO search_common_answers (preguntas frecuentes). Nunca uses habitaciones del panel ni search_rooms.
-- Check-in, check-out, horario de desayuno, estacionamiento, WhatsApp, dirección → llama get_hostel_info.
-- Otras dudas del hostal → llama search_common_answers y responde con el campo answer, en el idioma del huésped.
-- Si la respuesta no está completa en las preguntas frecuentes ni en la info del hostal, llama search_web. Si necesitas el detalle de un resultado, llama read_web_page con esa URL. No uses la web para inventar precios de habitación.
-- Cómo llegar desde el hostal a un lugar de Santiago → llama get_directions_from_hostel.
-  Prioriza metro, micro/bus o auto; a pie solo si no hay metro/bus. Usa los hechos de la tool
-  (replies.es / replies.en / replies.pt o summary) y redáctalos en el idioma del huésped,
-  una sola vez. Cierra pidiendo el mapa siguiente sin pegar URLs. No digas Google Maps.
-  No reescribas inventando calles ni mandes a WhatsApp.
-- Cita SOLO hechos devueltos por las tools. Nunca inventes tarifas, tiempos ni calles.
-- Los precios son referenciales en CLP; indica que pueden variar por temporada.
-- Reserva / reservar / “reservame” / “me reservaste” / “quiero reservar” / “hazme una reserva”
-  o cualquier pedido de reserva (con o sin fechas) → action=reply. Llama get_hostel_info,
-  incluye el whatsapp_url real en el message y pide que escriban por WhatsApp con fechas
-  y cantidad de personas. SIEMPRE deriva la reserva a WhatsApp.
-- NUNCA inventes el estado de una reserva ni de WhatsApp. No digas “está en gestión”,
-  “ya la estamos procesando”, “ya la vimos”, “quedó confirmada” ni nada similar:
-  este bot NO ve WhatsApp ni recepción. Solo invita a escribir por WhatsApp.
-- Precios: usa SOLO las preguntas frecuentes / tarifas oficiales (Matrimonial o Suite $54.990,
-  Twin $54.990, Triple $69.990, compartida por cama $19.990). No uses $15.000 ni tarifas viejas.
-- Pago, factura, cancelación conflictiva o reclamo → action=escalate.
-- Elogios: agradece y ofrece WhatsApp/correo de la info del hostal.
-- Spam o mensaje vacío → escalate.
+- Precios / tipos de habitación → SOLO search_common_answers. Nunca search_rooms ni panel.
+- Check-in, check-out, desayuno, estacionamiento, WhatsApp, dirección → get_hostel_info.
+- Otras dudas del hostal → search_common_answers.
+- Si NO sabes o no está en FAQ/info: action=reply y deriva a WhatsApp con el número
+  (formato +56 9 …, SIN pegar https://wa.me/… para evitar preview de imagen). Breve.
+- Cómo llegar desde el hostal → get_directions_from_hostel. Una sola vez. Sin URLs.
+  Cierra con “Te lo indico en el siguiente mapa.” No digas Google Maps. No inventes calles.
+- Reserva → deriva a WhatsApp corto (fechas + personas). Nunca inventes estado de reserva.
+- Tarifas: Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, cama $19.990.
+- Pago/factura/reclamo conflictivo → escalate. Spam/vacío → escalate.
 
-Alcance (OBLIGATORIO):
-- Responde SOLO preguntas sobre Black Cat Hostal: estadía, habitaciones, precios, servicios, horarios, ubicación, cómo llegar desde el hostal a un lugar de Santiago, reservas, desayuno y atención al huésped.
-- Si preguntan otra cosa (biología, montañas, tareas, cultura general, noticias, chistes u otro tema ajeno al hostal), NO contestes el tema.
-- En ese caso action=reply, sin llamar tools, y el message debe decir de forma breve y profesional que este canal está creado solo para consultas del hostal y que con gusto ayudas con la estadía.
-- Esa negativa va en el mismo idioma de la pregunta.
+Alcance:
+- Solo Black Cat Hostal. Tema ajeno: di breve que este canal es solo para el hostal.
 
-Cuando ya tengas la información, responde ÚNICAMENTE con JSON válido (sin markdown):
+JSON final (sin markdown):
 {"action":"reply"|"escalate","message":"...","reason":"..."}
-- El campo message debe estar en el idioma de la pregunta del huésped.
 """
 
 SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
@@ -118,7 +125,8 @@ def get_system_prompt() -> str:
     try:
         if PROMPT_FILE.exists():
             text = PROMPT_FILE.read_text(encoding="utf-8").strip()
-            if text:
+            # Ignore outdated custom prompts that still push long sales copy.
+            if text and "EJECUTIVAS" in text and "NUNCA te despidas" in text:
                 return text
     except OSError:
         pass
@@ -192,6 +200,53 @@ def strip_opening_greeting(message: str) -> str:
     return text
 
 
+def whatsapp_phone_display(whatsapp_url: str = "") -> str:
+    """Human phone for DMs — avoids Instagram link-preview image before the text."""
+    raw = (whatsapp_url or "").strip()
+    digits = ""
+    match = _WA_ME_RE.search(raw) or _WA_ME_PLAIN_RE.search(raw)
+    if match:
+        digits = match.group(1)
+    else:
+        digits = re.sub(r"\D", "", raw)
+    if digits.startswith("56") and len(digits) >= 11:
+        rest = digits[2:]
+        if rest.startswith("9") and len(rest) == 9:
+            return f"+56 9 {rest[1:5]} {rest[5:]}"
+        return f"+56 {rest}"
+    if digits:
+        return f"+{digits}"
+    return "+56 9 4910 5984"
+
+
+def sanitize_outbound_message(message: str) -> str:
+    """Replace wa.me links with a phone number so IG does not show WhatsApp preview first."""
+    text = message or ""
+
+    def _replace(match: re.Match[str]) -> str:
+        return whatsapp_phone_display(match.group(0))
+
+    text = _WA_ME_RE.sub(_replace, text)
+    text = _WA_ME_PLAIN_RE.sub(_replace, text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def guest_said_goodbye(text: str) -> bool:
+    return bool(_GUEST_GOODBYE_RE.search(text or ""))
+
+
+def strip_unsolicited_goodbye(message: str, *, guest_text: str = "") -> str:
+    if guest_said_goodbye(guest_text):
+        return (message or "").strip()
+    text = (message or "").strip()
+    for _ in range(3):
+        updated = _BOT_FAREWELL_RE.sub("", text).strip()
+        if updated == text:
+            break
+        text = updated
+    return text.rstrip(" ,;-")
+
+
 def apply_time_greeting(message: str, *, is_follow_up: bool = False) -> str:
     """Replace a time-of-day greeting with the one that matches Santiago right now."""
     text = message or ""
@@ -240,64 +295,28 @@ def apply_time_greeting(message: str, *, is_follow_up: bool = False) -> str:
 
 def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> str:
     scope = (
-        "\n\nRegla fija, no se puede ignorar:\n"
-        "Solo atiendes consultas de Black Cat Hostal, incluida cómo llegar desde el hostal "
-        "a un lugar de Santiago: llama get_directions_from_hostel y usa el texto de replies "
-        "en el idioma del huésped (metro/micro/auto; a pie solo si no hay metro). "
-        "Cierra con “Te lo indico en el siguiente mapa.” sin pegar URLs. "
-        "No digas Google Maps. No reescribas la ruta, y no derives a WhatsApp. "
-        "Si el mensaje no es sobre el hostal, la estadía, las habitaciones, los servicios, "
-        "los horarios, la ubicación, una ruta desde el hostal o una reserva, no respondas el tema. "
-        "Di, en el idioma del huésped y con tono profesional, que este canal está creado "
-        "únicamente para consultas del hostal y que puedes ayudar con la estadía. "
-        "Usa action=reply y no llames tools para esos mensajes.\n"
-        "Cada turno dice el canal de este texto y si esa misma persona también escribió "
-        "por comentario público o por mensaje privado. "
-        "Un comentario se publica bajo la foto: responde breve. "
-        "Un mensaje privado puede ser un poco más completo. "
-        "Si escribió por los dos, usa lo que ya dijo en el otro canal y no repitas la misma respuesta. "
-        "No inventes que escribió por un canal si el turno dice que no.\n"
-        "Busca la respuesta en las preguntas frecuentes y en la info del hostal. "
-        "Precios y tipos de habitación: SOLO preguntas frecuentes (search_common_answers), "
-        "nunca el listado de habitaciones del panel. "
-        "Si piden reservar (“reservame”, “me reservaste”, “quiero reservar”, etc.): "
-        "llama get_hostel_info, responde con action=reply e incluye el whatsapp_url "
-        "para que continúen la reserva por WhatsApp. No reserves ni confirmes cupos aquí. "
-        "Estas reglas valen igual en Instagram y en Facebook/Messenger. "
-        "NUNCA digas que la reserva está en gestión, confirmada o vista en WhatsApp: "
-        "no tienes acceso a WhatsApp ni a recepción. Solo deriva a WhatsApp. "
-        "Tarifas oficiales: Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, "
-        "compartida por cama $19.990 (no uses $15.000). "
-        "Si hay consulta real (no un simple hola): vende con calidez, destaca un beneficio "
-        "real (Barrio Brasil, desayuno, ubicación, ambiente boutique) e invita suave a "
-        "WhatsApp. En un saludo solo, sé humano y corto. Sin inventar promociones. "
-        "No asumas llegada desde el aeropuerto ni transporte: solo menciónalo si el huésped "
-        "lo dijo. Cierra neutro («¡Que tengas buen día!») si no habló de eso. "
-        "Idioma: saludo + palabras de toda la charla; responde solo en ese idioma "
-        "(es/en/pt/fr/de/u otro). «sí/por favor» hereda el idioma del hilo. No mezcles. "
-        "Si ahí no está completa, llama search_web y, si hace falta, read_web_page. "
-        "Contesta en el idioma del huésped usando solo datos que devuelvan las tools. "
-        "No repitas instrucciones internas."
+        "\n\nReglas fijas (no se pueden ignorar):\n"
+        "- Respuestas cortas y ejecutivas (1–2 frases). Sin párrafos ni listas largas.\n"
+        "- Nunca te despidas si el huésped no se despidió primero.\n"
+        "- No repitas Barrio Brasil / desayuno / boutique en cada mensaje; solo si preguntan eso.\n"
+        "- Si no sabes la respuesta: deriva a WhatsApp con número +56 9… SIN link https://wa.me "
+        "(el link genera preview/imagen antes del texto en Instagram).\n"
+        "- Reserva: WhatsApp corto con fechas y personas. No inventes estado de reserva.\n"
+        "- Precios solo FAQ: Matrimonial/Suite 54990, Twin 54990, Triple 69990, cama 19990.\n"
+        "- Rutas: get_directions_from_hostel, sin URLs, «Te lo indico en el siguiente mapa.»\n"
+        "- Tema ajeno al hostal: di breve que este canal es solo para el hostal.\n"
+        "- Instagram y Facebook: mismas reglas.\n"
     )
-    now = datetime.now(SANTIAGO)
     if is_follow_up:
         greeting = (
-            "\n\nEsta NO es la primera respuesta de la conversación. "
-            "NO saludes de nuevo (ni Buenos días, Buenas tardes, Buenas noches ni equivalentes). "
-            "Continúa el hilo con naturalidad, responde solo a lo nuevo y "
-            "NO repitas datos, tarifas o frases que ya diste en turnos anteriores."
+            "\nEsta NO es la primera respuesta. NO saludes de nuevo. "
+            "Responde solo a lo nuevo. NO repitas datos ni frases ya dichas."
         )
     else:
         greeting = (
-            "\n\nEs el primer mensaje de esta conversación. "
-            "Si el huésped dijo solo hola/hi/buenas, responde igual de humano y corto "
-            "(ej. «¡Hola! ¿En qué te puedo ayudar?») sin pitch de venta. "
-            "Si hay una consulta real, puedes abrir con un saludo natural; "
-            "si usas saludo por hora de Santiago ("
-            f"ahora {now.strftime('%H:%M')}: «{current_greeting('es')}»), "
-            "que suene espontáneo, no forzado. "
-            "De 05:00 a 11:59 Buenos días, 12:00 a 19:59 Buenas tardes, "
-            "20:00 a 04:59 Buenas noches. No digas buenas noches de día."
+            "\nPrimer mensaje. Si solo dijo hola/hi/buenas: "
+            "«Hola, ¿en qué te podemos ayudar?» (o equivalente en su idioma) y PARA. "
+            "Si hay consulta real, contesta el dato sin pitch."
         )
     return get_system_prompt().rstrip() + scope + greeting + (extra or "")
 
@@ -600,21 +619,15 @@ def _guest_turn(
         f"Usuario: @{author_username or 'huesped'}",
         f"Mensaje del huésped:\n{(text or '').strip() or '(vacío)'}",
         "",
-        "Detecta el idioma por TODA la charla (saludos y palabras anteriores + este mensaje) "
-        "y responde solo en ese idioma (español, inglés, portugués, francés, alemán u otro). "
-        "Si el mensaje es corto («sí», «ok», «por favor»), hereda el idioma del hilo. "
-        "Nombres de lugares en inglés no cambian el idioma. Nunca mezcles idiomas. "
-        "Si preguntan ubicación o cómo llegar, usa get_directions_from_hostel. "
-        "Busca en preguntas frecuentes e info del hostal; precios/tipos de habitación "
-        "solo en preguntas frecuentes. "
-        "Si solo saludó (hola/hi), responde humano y breve; no vendas ni listes beneficios. "
-        "Si el mensaje es sobre reservar, llama get_hostel_info "
-        "y manda al huésped al WhatsApp (whatsapp_url). Nunca inventes estado de reserva/WhatsApp. "
-        "Si hay una consulta real, responde como vendedor: dato + beneficio + cierre suave. "
-        "No digas aeropuerto ni ‘buen viaje desde el aeropuerto’ si el huésped no lo mencionó. "
-        "Precios solo de FAQ: Matrimonial/Suite 54990, Twin 54990, Triple 69990, cama 19990. "
-        "Usa la web solo si falta el dato. "
-        "Luego entrega el JSON final.",
+        "Responde corto y ejecutivo (1–2 frases). "
+        "Idioma: toda la charla; mensajes cortos heredan el idioma del hilo. No mezcles. "
+        "Saludo solo → «Hola, ¿en qué te podemos ayudar?» (o equivalente) y PARA. "
+        "Si no sabes → WhatsApp con +56 9… sin link https. "
+        "Reserva → WhatsApp corto. No inventes estado. "
+        "No te despidas si el huésped no se despidió. "
+        "No repitas Barrio Brasil/desayuno si no preguntaron. "
+        "Precios solo FAQ: 54990 / 54990 / 69990 / 19990. "
+        "Rutas: get_directions_from_hostel. Luego JSON final.",
     ]
     return "\n".join(lines)
 
@@ -645,6 +658,8 @@ def _already_offered_help(prior: list[dict[str, Any]] | None) -> bool:
         return any(
             phrase in text
             for phrase in (
+                "en qué te podemos ayudar",
+                "en que te podemos ayudar",
                 "en qué te puedo ayudar",
                 "en que te puedo ayudar",
                 "how can i help",
@@ -680,15 +695,15 @@ def _human_greeting_reply(
     ]
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
     if lang == "en":
-        message = "Hey! How can I help you with your stay at Black Cat?"
+        message = "Hi, how can we help you?"
     elif lang == "pt":
-        message = "Oi! Em que posso te ajudar com a estadia no Black Cat?"
+        message = "Olá, em que podemos ajudar?"
     elif lang == "fr":
-        message = "Bonjour ! Comment puis-je vous aider pour votre séjour au Black Cat ?"
+        message = "Bonjour, comment pouvons-nous vous aider ?"
     elif lang == "de":
-        message = "Hallo! Wie kann ich Ihnen bei Ihrem Aufenthalt im Black Cat helfen?"
+        message = "Hallo, wie können wir helfen?"
     else:
-        message = "¡Hola! ¿En qué te puedo ayudar?"
+        message = "Hola, ¿en qué te podemos ayudar?"
     return {
         "action": "reply",
         "message": message,
@@ -708,7 +723,7 @@ def _reservation_whatsapp_reply(
 ) -> dict[str, Any]:
     """Fast path: never hang on DeepSeek when the guest asks to book."""
     info = hostel_info_dict(db)
-    whatsapp = str(info.get("whatsapp_url") or "").strip() or "https://wa.me/56949105984"
+    phone = whatsapp_phone_display(str(info.get("whatsapp_url") or ""))
     prior_texts = [
         str(turn.get("content") or "")
         for turn in (prior or [])
@@ -716,36 +731,17 @@ def _reservation_whatsapp_reply(
     ]
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
     if lang == "en":
-        message = (
-            "Perfect — we'd love to host you in Barrio Brasil, with continental breakfast included. "
-            f"Please write us on WhatsApp {whatsapp} with your dates and guest count; "
-            "reception confirms availability there. We can't see WhatsApp from this chat."
-        )
+        message = f"Write us on WhatsApp {phone} with dates and guest count."
     elif lang == "pt":
-        message = (
-            "Claro! Vai adorar o Barrio Brasil, com café da manhã continental incluído. "
-            f"Escreva no WhatsApp {whatsapp} com datas e quantas pessoas; "
-            "a recepção confirma por lá. Por este chat não vemos o WhatsApp."
-        )
+        message = f"Escreva no WhatsApp {phone} com datas e quantas pessoas."
     elif lang == "fr":
-        message = (
-            "Avec plaisir ! Barrio Brasil, petit-déjeuner continental inclus. "
-            f"Écrivez-nous sur WhatsApp {whatsapp} avec vos dates et le nombre de personnes; "
-            "la réception confirme là-bas. Nous ne voyons pas WhatsApp depuis ce chat."
-        )
+        message = f"Écrivez-nous sur WhatsApp {phone} avec dates et nombre de personnes."
     elif lang == "de":
-        message = (
-            "Klar! Barrio Brasil, inkl. Frühstück. "
-            f"Schreib uns auf WhatsApp {whatsapp} mit Daten und Personenanzahl; "
-            "die Rezeption bestätigt dort. Von diesem Chat aus sehen wir WhatsApp nicht."
-        )
+        message = f"Schreib uns auf WhatsApp {phone} mit Daten und Personenanzahl."
     else:
-        message = (
-            "¡Claro! Te va a encantar Barrio Brasil, con desayuno continental incluido. "
-            f"Escríbenos por WhatsApp {whatsapp} con fechas y cantidad de personas; "
-            "allí recepción te confirma disponibilidad. Por este chat no vemos WhatsApp."
-        )
+        message = f"Escríbenos por WhatsApp {phone} con fechas y cantidad de personas."
     message = apply_time_greeting(message, is_follow_up=is_follow_up)
+    message = sanitize_outbound_message(message)
     return {
         "action": "reply",
         "message": message,
@@ -774,7 +770,7 @@ async def _run_reply_loop(
                 headers=headers,
                 json={
                     "model": model,
-                    "temperature": 0.45,
+                    "temperature": 0.25,
                     "tools": DEEPSEEK_TOOLS,
                     "tool_choice": "auto",
                     "messages": messages,
@@ -857,6 +853,13 @@ async def _run_reply_loop(
                 "",
                 reply_message or "",
             )
+            guest_blob = " ".join(
+                str(turn.get("content") or "")
+                for turn in messages
+                if turn.get("role") == "user"
+            )
+            reply_message = strip_unsolicited_goodbye(reply_message, guest_text=guest_blob)
+            reply_message = sanitize_outbound_message(reply_message)
             reply_message = re.sub(r"\n{3,}", "\n\n", reply_message).strip()
             if action == "reply" and not reply_message:
                 action = "escalate"
