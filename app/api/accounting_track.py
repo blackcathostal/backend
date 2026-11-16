@@ -32,8 +32,14 @@ def _parse_bound(value: str | None, *, fallback: date) -> date:
 
 
 def _default_range() -> tuple[date, date]:
+    """Default window: from the 1st day two months ago through today."""
     today = date.today()
-    start = date(today.year, today.month, 1)
+    year = today.year
+    month = today.month - 2
+    while month <= 0:
+        month += 12
+        year -= 1
+    start = date(year, month, 1)
     return start, today
 
 
