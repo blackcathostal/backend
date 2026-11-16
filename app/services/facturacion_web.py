@@ -184,23 +184,34 @@ class FacturacionWebClient:
             )
         return html, self._extract_fields(html)
 
-    def _search_month(self, *, year: int, month: int, base_fields: dict[str, str]) -> str:
+    def _search_month(
+        self,
+        *,
+        year: int,
+        month: int,
+        base_fields: dict[str, str],
+        page: int = 1,
+        folio: str = "",
+        rut: str = "",
+        page_size: int = 100,
+    ) -> str:
         client = self._ensure_client()
+        size = str(max(30, min(int(page_size or 100), 500)))
         payload = {
             **base_fields,
             "indice": "2",
             "anno": str(year),
             "mes": f"{month:02d}",
             "tipoinformacion": base_fields.get("tipoinformacion") or "1",
-            "GRID_NumReg": "500",
-            "GRID_NumRegAux": "500",
+            "GRID_NumReg": size,
+            "GRID_NumRegAux": size,
             "GRID_segundaCarga": "true",
-            "GRID_Page": "1",
+            "GRID_Page": str(max(1, int(page or 1))),
             "GRID_Action": "",
             "GRID_OrderBy": "",
             "GRID_OrderType": "",
-            "rut": "",
-            "folio": "",
+            "rut": (rut or "").strip(),
+            "folio": (folio or "").strip(),
             "razonsocial": "",
         }
         response = client.post(
@@ -208,6 +219,44 @@ class FacturacionWebClient:
             data=payload,
         )
         return response.text or ""
+
+    def _iter_month_rows(
+        self,
+        *,
+        year: int,
+        month: int,
+        base_fields: dict[str, str],
+        folio: str = "",
+        rut: str = "",
+    ) -> list[dict[str, Any]]:
+        """Fetch all grid pages for a month (portal often caps ~30/page)."""
+        rows: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        page_size = 100
+        for page in range(1, 21):
+            html = self._search_month(
+                year=year,
+                month=month,
+                base_fields=base_fields,
+                page=page,
+                folio=folio,
+                rut=rut,
+                page_size=page_size,
+            )
+            batch = self._parse_grid_html(html)
+            if not batch:
+                break
+            new_count = 0
+            for item in batch:
+                key = (str(item.get("folio") or ""), str(item.get("rut") or ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(item)
+                new_count += 1
+            if new_count == 0 or len(batch) < 30:
+                break
+        return rows
 
     def _download_excel(self, *, year: int, month: int, fields: dict[str, str]) -> bytes | None:
         client = self._ensure_client()
@@ -374,6 +423,64 @@ class FacturacionWebClient:
             )
         return body
 
+    @staticmethod
+    def _norm_key(value: str) -> str:
+        return re.sub(r"[^0-9A-Za-z]", "", str(value or "")).upper()
+
+    def find_pdf_data(
+        self,
+        *,
+        folio: str,
+        rut: str = "",
+        issued_at: date | None = None,
+    ) -> str:
+        """Locate vistaprevia token for a recibida by folio (and optional RUT/month)."""
+        folio_key = self._norm_key(folio)
+        if not folio_key:
+            return ""
+        rut_key = self._norm_key(rut)
+        self.login()
+        _, base_fields = self._load_compras_form()
+
+        months: list[tuple[int, int]] = []
+        if issued_at:
+            months.append((issued_at.year, issued_at.month))
+        else:
+            today = date.today()
+            cursor = date(today.year, today.month, 1)
+            for _ in range(4):
+                months.append((cursor.year, cursor.month))
+                if cursor.month == 1:
+                    cursor = date(cursor.year - 1, 12, 1)
+                else:
+                    cursor = date(cursor.year, cursor.month - 1, 1)
+
+        for year, month in months:
+            rows = self._iter_month_rows(
+                year=year,
+                month=month,
+                base_fields=base_fields,
+                folio=str(folio or "").strip(),
+                rut=str(rut or "").strip(),
+            )
+            if not rows and folio_key:
+                # Folio filter sometimes fails; fall back to full month pages.
+                rows = self._iter_month_rows(
+                    year=year, month=month, base_fields=base_fields
+                )
+            for row in rows:
+                if self._norm_key(str(row.get("folio") or "")) != folio_key:
+                    continue
+                if rut_key and self._norm_key(str(row.get("rut") or "")) not in {
+                    "",
+                    rut_key,
+                }:
+                    continue
+                token = str(row.get("pdf_data") or "").strip()
+                if token:
+                    return token
+        return ""
+
     def fetch_recibidas(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """Pull Libro de Compras month-by-month from company web UI."""
         if date_to < date_from:
@@ -387,11 +494,10 @@ class FacturacionWebClient:
 
         cursor = date(date_from.year, date_from.month, 1)
         while cursor <= date_to:
-            html = self._search_month(
+            batch_raw = self._iter_month_rows(
                 year=cursor.year, month=cursor.month, base_fields=base_fields
             )
-            month_fields = self._extract_fields(html) or base_fields
-            batch_raw = self._parse_grid_html(html)
+            month_fields = base_fields
 
             month_docs: list[dict[str, Any]] = []
             for raw in batch_raw:
@@ -413,6 +519,11 @@ class FacturacionWebClient:
                 month_docs.append(doc)
 
             if not month_docs:
+                # Probe one page to refresh fields for excel export.
+                html = self._search_month(
+                    year=cursor.year, month=cursor.month, base_fields=base_fields
+                )
+                month_fields = self._extract_fields(html) or base_fields
                 excel = self._download_excel(
                     year=cursor.year, month=cursor.month, fields=month_fields
                 )

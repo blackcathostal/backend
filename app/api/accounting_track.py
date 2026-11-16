@@ -219,6 +219,26 @@ def list_recibidas(
     )
 
 
+def _persist_pdf_token(db: Session, row: AccountingTrackDocuments, token: str) -> None:
+    token = (token or "").strip()
+    if not token:
+        return
+    payload: dict[str, object] = {}
+    raw = row.raw_json or ""
+    if raw:
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                payload = loaded
+        except json.JSONDecodeError:
+            payload = {}
+    payload["pdf_data"] = token
+    row.raw_json = json.dumps(payload, ensure_ascii=False, default=str)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+
 @router.get("/documents/{doc_id}/pdf")
 def download_document_pdf(
     doc_id: int,
@@ -229,14 +249,24 @@ def download_document_pdf(
     if row is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     token = _pdf_token(row)
-    if not token:
-        raise HTTPException(
-            status_code=404,
-            detail="Este documento no tiene PDF. Actualizá Recibidas para refrescar los links.",
-        )
     try:
         with FacturacionWebClient() as web:
+            if not token:
+                token = web.find_pdf_data(
+                    folio=row.folio or "",
+                    rut=row.counterpart_rut or "",
+                    issued_at=row.issued_at,
+                )
+                if token:
+                    _persist_pdf_token(db, row, token)
+            if not token:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No encontré el PDF en facturacion.cl para este folio.",
+                )
             pdf_bytes = web.download_pdf(token)
+    except HTTPException:
+        raise
     except FacturacionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
