@@ -39,6 +39,9 @@ def _parse_amount(value: Any) -> float:
             text = text.replace(",", "")
     elif "," in text:
         text = text.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", text):
+        # Chilean thousands separators: 153.205 → 153205
+        text = text.replace(".", "")
     try:
         return float(text)
     except ValueError:

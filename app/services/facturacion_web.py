@@ -1,7 +1,7 @@
-"""Scrape facturacion.cl Plano web UI for Libro de Compras (recibidas).
+"""Scrape facturacion.cl web Libro de Compras (recibidas).
 
-SOAP ObtenerCompra / Panel DTE require add-on modules not contracted.
-The Plano Contabilidad → Libro Compras screen remains available with web login.
+Uses the real company portal (e.g. /blackcat), not Plano test (/plano/).
+SOAP ObtenerCompra requires an uncontracted add-on.
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import re
 from datetime import date
 from html import unescape
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 import httpx
 
@@ -21,38 +21,45 @@ class FacturacionWebClient:
     def __init__(
         self,
         *,
-        base_url: str | None = None,
+        empresa: str | None = None,
         usuario: str | None = None,
         clave: str | None = None,
         timeout: float = 90.0,
     ) -> None:
-        self.base_url = (
-            base_url or settings.facturacion_web_test_url or "https://www.facturacion.cl/plano/"
-        ).rstrip("/") + "/"
+        self.empresa = (
+            empresa
+            if empresa is not None
+            else (
+                settings.facturacion_web_empresa
+                or settings.facturacion_prod_rut
+                or ""
+            )
+        ).strip()
         self.usuario = (
             usuario
             if usuario is not None
-            else (settings.facturacion_web_test_user or settings.facturacion_user or "")
+            else (settings.facturacion_web_user or "")
         ).strip()
         self.clave = (
-            clave if clave is not None else (settings.facturacion_web_test_clave or "")
+            clave if clave is not None else (settings.facturacion_web_clave or "")
         ).strip()
         self.timeout = timeout
         self._client: httpx.Client | None = None
+        self.base_url = "https://www.facturacion.cl/"
 
     def require_credentials(self) -> None:
         missing = [
             name
             for name, value in (
-                ("FACTURACION_WEB_TEST_URL", self.base_url),
-                ("FACTURACION_WEB_TEST_USER", self.usuario),
-                ("FACTURACION_WEB_TEST_CLAVE", self.clave),
+                ("FACTURACION_WEB_EMPRESA", self.empresa),
+                ("FACTURACION_WEB_USER", self.usuario),
+                ("FACTURACION_WEB_CLAVE", self.clave),
             )
             if not value
         ]
         if missing:
             raise FacturacionError(
-                "Faltan credenciales web de facturacion.cl (Plano): " + ", ".join(missing)
+                "Faltan credenciales web de facturacion.cl: " + ", ".join(missing)
             )
 
     def _ensure_client(self) -> httpx.Client:
@@ -79,31 +86,53 @@ class FacturacionWebClient:
     def __exit__(self, *args: object) -> None:
         self.close()
 
+    def _acceso_send(self, parameter: str) -> str:
+        client = self._ensure_client()
+        response = client.post(
+            "https://www.facturacion.cl/desis/accesoFE3.php",
+            content=(parameter + "&commandfile=").encode("latin-1", errors="ignore"),
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded;charset=ISO-8859-1",
+                "AXJAGENT": "LOGIN",
+            },
+        )
+        return response.text or ""
+
     def login(self) -> None:
         self.require_credentials()
         client = self._ensure_client()
-        page = client.get(self.base_url)
-        action_match = re.search(
-            r'<form[^>]+action=(["\'])([^"\']*)\1',
-            page.text or "",
-            re.I,
+        client.get("https://www.facturacion.cl/")
+
+        empresa = self.empresa.upper()
+        usuario = self.usuario.upper()
+        text = self._acceso_send(
+            f"&cmd=post&empresa=+{empresa}&usuario={usuario}&password={self.clave}"
         )
-        action = urljoin(str(page.url), action_match.group(2) if action_match else "index.php")
+        fault = re.search(r'error="([^"]*)"', text, re.I)
+        if fault and fault.group(1).strip():
+            raise FacturacionError(
+                f"Login web facturacion.cl falló: {fault.group(1).strip()}"
+            )
+        web_match = re.search(r"<web[^>]*>([^<]*)</web>", text, re.I)
+        if not web_match or not web_match.group(1).strip():
+            raise FacturacionError(
+                "Login web facturacion.cl no devolvió el host del sistema. "
+                "Revisá FACTURACION_WEB_EMPRESA / USER / CLAVE."
+            )
+        host = unquote(web_match.group(1).strip()).rstrip("/")
+        self.base_url = f"https://{host}/"
         response = client.post(
-            action,
+            urljoin(self.base_url, "index.php"),
             data={
-                "user": self.usuario,
+                "empresa": empresa,
+                "user": usuario,
                 "pass": self.clave,
-                "Submit": "Ingresar",
-                "href": "",
-                "urlRedirect": "",
             },
         )
         text = response.text or ""
-        if "Libro Compras" not in text and "libro" not in text.lower():
+        if "Libro" not in text and "contabilidad" not in text.lower():
             raise FacturacionError(
-                "Login web facturacion.cl (Plano) falló. "
-                "Revisá FACTURACION_WEB_TEST_USER / FACTURACION_WEB_TEST_CLAVE."
+                "Login web facturacion.cl no abrió el sistema de la empresa."
             )
 
     @staticmethod
@@ -150,7 +179,9 @@ class FacturacionWebClient:
         )
         html = response.text or ""
         if "Libro de Compras" not in html and "indice" not in html.lower():
-            raise FacturacionError("No se pudo abrir Libro de Compras en facturacion.cl Plano")
+            raise FacturacionError(
+                "No se pudo abrir Libro de Compras en facturacion.cl"
+            )
         return html, self._extract_fields(html)
 
     def _search_month(self, *, year: int, month: int, base_fields: dict[str, str]) -> str:
@@ -214,73 +245,103 @@ class FacturacionWebClient:
             return body
         return None
 
+    @staticmethod
+    def _parse_spanish_date(value: str) -> str | None:
+        text = " ".join(str(value or "").split())
+        if not text:
+            return None
+        months = {
+            "enero": 1,
+            "febrero": 2,
+            "marzo": 3,
+            "abril": 4,
+            "mayo": 5,
+            "junio": 6,
+            "julio": 7,
+            "agosto": 8,
+            "septiembre": 9,
+            "setiembre": 9,
+            "octubre": 10,
+            "noviembre": 11,
+            "diciembre": 12,
+        }
+        match = re.search(
+            r"(\d{1,2})\s+de\s+([A-Za-zÁÉÍÓÚáéíóú]+)\s+de\s+(\d{4})",
+            text,
+            re.I,
+        )
+        if not match:
+            return None
+        day = int(match.group(1))
+        month = months.get(match.group(2).lower())
+        year = int(match.group(3))
+        if not month:
+            return None
+        try:
+            return date(year, month, day).isoformat()
+        except ValueError:
+            return None
+
     def _parse_grid_html(self, html: str) -> list[dict[str, Any]]:
         if "No se encontraron resultados" in html:
             return []
 
-        grid_match = re.search(
-            r'class=(["\'])LIBROS_GRID\1[\s\S]*?<table[^>]*>([\s\S]*?)</table>',
+        rows: list[dict[str, Any]] = []
+        # Real portal uses tr_lista_fila11 / tr_lista_fila22 (not tr_lista_fila).
+        for row_html in re.findall(
+            r"<tr[^>]*class=['\"]tr_lista_fila\d*['\"][^>]*>([\s\S]*?)</tr>",
             html,
             re.I,
-        )
-        if not grid_match:
-            return []
-        table = grid_match.group(2)
-        header_row = re.search(r"<tr[^>]*id=['\"]GRID_Header['\"][^>]*>([\s\S]*?)</tr>", table, re.I)
-        if not header_row:
-            return []
-        headers = [
-            self._strip_html(th).lower()
-            for th in re.findall(r"<th[^>]*>([\s\S]*?)</th>", header_row.group(1), re.I)
-        ]
-        if not headers:
-            return []
+        ):
+            cells: dict[str, str] = {}
+            for td in re.findall(r"<td([^>]*)>([\s\S]*?)</td>", row_html, re.I):
+                attrs, body = td
+                name_match = re.search(r'name=["\']([^"\']+)["\']', attrs, re.I)
+                if not name_match:
+                    continue
+                name = name_match.group(1).upper()
+                if name == "FOLIO":
+                    value_match = re.search(
+                        r'<input[^>]+value=["\']([^"\']+)["\']',
+                        body,
+                        re.I,
+                    )
+                    cells[name] = (
+                        value_match.group(1).strip()
+                        if value_match
+                        else self._strip_html(body)
+                    )
+                elif name == "RAZONSOCIAL":
+                    rut_match = re.search(
+                        r"seenopago\(['\"]([^'\"]+)['\"]\)",
+                        body,
+                        re.I,
+                    )
+                    if rut_match:
+                        cells["RUT"] = rut_match.group(1).strip()
+                    cells[name] = self._strip_html(body)
+                else:
+                    cells[name] = self._strip_html(body)
 
-        def col(*names: str) -> int | None:
-            for name in names:
-                for idx, header in enumerate(headers):
-                    if name in header:
-                        return idx
-            return None
-
-        idx_folio = col("folio")
-        idx_doc = col("documento")
-        idx_fecha = col("fecha documento", "fecha")
-        idx_razon = col("razón social", "razon social", "raz&oacute;n social")
-        idx_total = col("monto total", "total")
-        idx_rut = col("rut")
-
-        rows: list[dict[str, Any]] = []
-        for row_html in re.findall(r"<tr[^>]*class=['\"]tr_lista_fila[^'\"]*['\"][^>]*>([\s\S]*?)</tr>", table, re.I):
-            cells = [
-                self._strip_html(td)
-                for td in re.findall(r"<td[^>]*>([\s\S]*?)</td>", row_html, re.I)
-            ]
-            if not cells:
+            folio = cells.get("FOLIO") or ""
+            rut = cells.get("RUT") or ""
+            if not folio and not rut:
                 continue
-            if any("no se encontraron" in c.lower() for c in cells):
-                continue
-
-            def pick(index: int | None) -> str:
-                if index is None or index >= len(cells):
-                    return ""
-                return cells[index]
-
-            raw = {
-                "folio": pick(idx_folio),
-                "tipo": pick(idx_doc),
-                "fecha": pick(idx_fecha),
-                "razonsocial": pick(idx_razon),
-                "montototal": pick(idx_total),
-                "rut": pick(idx_rut),
-            }
-            if not raw["folio"] and not raw["rut"]:
-                continue
-            rows.append(raw)
+            fecha = self._parse_spanish_date(cells.get("FECHA") or "") or cells.get("FECHA")
+            rows.append(
+                {
+                    "folio": folio,
+                    "tipo": cells.get("DOCUMENTO") or "",
+                    "fecha": fecha,
+                    "razonsocial": cells.get("RAZONSOCIAL") or "",
+                    "montototal": cells.get("TOTAL") or "",
+                    "rut": rut,
+                }
+            )
         return rows
 
     def fetch_recibidas(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        """Pull Libro de Compras month-by-month from Plano web UI."""
+        """Pull Libro de Compras month-by-month from company web UI."""
         if date_to < date_from:
             raise FacturacionError("Rango de fechas inválido")
 
@@ -292,7 +353,9 @@ class FacturacionWebClient:
 
         cursor = date(date_from.year, date_from.month, 1)
         while cursor <= date_to:
-            html = self._search_month(year=cursor.year, month=cursor.month, base_fields=base_fields)
+            html = self._search_month(
+                year=cursor.year, month=cursor.month, base_fields=base_fields
+            )
             month_fields = self._extract_fields(html) or base_fields
             batch_raw = self._parse_grid_html(html)
 
@@ -321,7 +384,9 @@ class FacturacionWebClient:
                     year=cursor.year, month=cursor.month, fields=month_fields
                 )
                 if excel:
-                    filename = "libro_compras.xlsx" if excel[:2] == b"PK" else "libro_compras.xls"
+                    filename = (
+                        "libro_compras.xlsx" if excel[:2] == b"PK" else "libro_compras.xls"
+                    )
                     try:
                         month_docs = normalizer.parse_libro_file(
                             excel, direction="recibida", filename=filename

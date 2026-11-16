@@ -169,6 +169,10 @@ class Settings(BaseSettings):
     facturacion_web_test_url: str = "https://www.facturacion.cl/plano/"
     facturacion_web_test_user: str = ""
     facturacion_web_test_clave: str = ""
+    # Portal web real (Libro de Compras / Track recibidas)
+    facturacion_web_empresa: str = ""
+    facturacion_web_user: str = ""
+    facturacion_web_clave: str = ""
 
     @property
     def facturacion_is_prod(self) -> bool:
