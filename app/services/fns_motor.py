@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import threading
 import uuid
-from datetime import datetime, timezone
+from copy import deepcopy
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -12,6 +16,9 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+_BOOKINGS_LOCK = threading.Lock()
+_BOOKINGS_FILE = settings.uploads_dir / "cache" / "fns_channel_bookings.json"
 
 
 class FnsMotorError(Exception):
@@ -353,6 +360,25 @@ def _now_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def normalize_document(value: str | None) -> str:
+    """Normalize RUT/passport for exact matching (strip dots, dashes, spaces)."""
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return ""
+    return "".join(ch for ch in raw if ch.isalnum())
+
+
+def infer_document_type(document: str, document_type: str = "") -> str:
+    explicit = str(document_type or "").strip().upper()
+    if explicit in {"RUT", "PASAPORTE", "PASSPORT", "DNI", "CI"}:
+        return "RUT" if explicit == "CI" else ("PASAPORTE" if explicit == "PASSPORT" else explicit)
+    doc = normalize_document(document)
+    # Chilean RUT typically ends with digit or K and is 8–9 chars without punctuation.
+    if doc and len(doc) <= 9 and doc[:-1].isdigit() and (doc[-1].isdigit() or doc[-1] == "K"):
+        return "RUT"
+    return "PASAPORTE" if doc else ""
+
+
 async def create_booking(
     *,
     start_date: str,
@@ -366,6 +392,8 @@ async def create_booking(
     children: int = 0,
     guest_first_name: str,
     guest_last_name: str,
+    guest_document: str = "",
+    guest_document_type: str = "",
     guest_email: str = "",
     guest_phone: str = "",
     remarks: str = "",
@@ -381,9 +409,11 @@ async def create_booking(
     rate_code = str(rate_plan_code or "").strip()
     first = str(guest_first_name or "").strip()
     last = str(guest_last_name or "").strip()
-    if not all([start, end, room_code, rate_code, first, last]):
+    document = str(guest_document or "").strip()
+    doc_type = infer_document_type(document, guest_document_type)
+    if not all([start, end, room_code, rate_code, first, last, document]):
         raise FnsMotorError(
-            "Faltan datos: fechas, habitación, tarifa, nombre y apellido del huésped"
+            "Faltan datos: fechas, habitación, tarifa, nombre, apellido y RUT/pasaporte"
         )
 
     total = str(amount_after_tax).strip()
@@ -414,7 +444,10 @@ async def create_booking(
         "PersonName": {
             "GivenName": first,
             "Surname": last,
-        }
+        },
+        # FNS listbooking exposes these as DocumentType + NIF.
+        "DocumentType": doc_type,
+        "NIF": document,
     }
     if guest_email.strip():
         customer["Email"] = guest_email.strip()
@@ -488,9 +521,11 @@ async def create_booking(
         payload = {"raw": text[:800]}
 
     logger.info("FNS booking created external_id=%s status=%s", booking_id, response.status_code)
-    return {
+    fns_id = _extract_fns_id(payload)
+    result = {
         "ok": True,
         "booking_id": booking_id,
+        "fns_id": fns_id,
         "hotel_id": str(settings.fns_hotel_id),
         "start_date": start,
         "end_date": end,
@@ -498,6 +533,490 @@ async def create_booking(
         "rate_plan_code": rate_code,
         "amount_after_tax": total,
         "currency": cur,
+        "guest_first_name": first,
+        "guest_last_name": last,
+        "guest_document": document,
+        "guest_document_type": doc_type,
+        "guest_document_normalized": normalize_document(document),
+        "guest": f"{first} {last}".strip(),
+        "status": "Book",
+        "motor_response": payload,
+    }
+    return result
+
+
+def _bookings_path() -> Path:
+    path = _BOOKINGS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _load_booking_index() -> dict[str, Any]:
+    path = _bookings_path()
+    if not path.exists():
+        return {"bookings": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"bookings": []}
+    if not isinstance(data, dict):
+        return {"bookings": []}
+    rows = data.get("bookings")
+    if not isinstance(rows, list):
+        data["bookings"] = []
+    return data
+
+
+def _save_booking_index(data: dict[str, Any]) -> None:
+    path = _bookings_path()
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _extract_fns_id(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    # Common shapes from Motor responses.
+    for key in ("IDFNS", "idFNS", "fns_id", "reservation_id"):
+        if payload.get(key):
+            return str(payload.get(key))
+    hotel = payload.get("HotelReservations") or {}
+    reservation = hotel.get("HotelReservation")
+    if isinstance(reservation, list) and reservation:
+        reservation = reservation[0]
+    if isinstance(reservation, dict):
+        unique = reservation.get("UniqueID") or {}
+        if isinstance(unique, dict) and unique.get("IDFNS"):
+            return str(unique.get("IDFNS"))
+    return ""
+
+
+def remember_channel_booking(
+    *,
+    booking: dict[str, Any],
+    username: str | None,
+    channel: str | None,
+) -> dict[str, Any]:
+    """Persist IG/FB handle ↔ FNS booking so the agent can detect duplicates."""
+    handle = str(username or "").strip().lower().lstrip("@")
+    ch = str(channel or "instagram").strip().lower() or "instagram"
+    document = str(booking.get("guest_document") or "").strip()
+    doc_type = str(booking.get("guest_document_type") or infer_document_type(document))
+    row = {
+        "booking_id": str(booking.get("booking_id") or ""),
+        "fns_id": str(booking.get("fns_id") or ""),
+        "channel": ch,
+        "username": handle,
+        "guest_first_name": str(booking.get("guest_first_name") or ""),
+        "guest_last_name": str(booking.get("guest_last_name") or ""),
+        "guest_document": document,
+        "guest_document_type": doc_type,
+        "guest_document_normalized": normalize_document(
+            booking.get("guest_document_normalized") or document
+        ),
+        "start_date": str(booking.get("start_date") or ""),
+        "end_date": str(booking.get("end_date") or ""),
+        "room_type_code": str(booking.get("room_type_code") or ""),
+        "amount_after_tax": str(booking.get("amount_after_tax") or ""),
+        "currency": str(booking.get("currency") or "CLP"),
+        "status": str(booking.get("status") or "Book"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "cancelled_at": None,
+    }
+    if not row["booking_id"]:
+        return row
+    with _BOOKINGS_LOCK:
+        data = _load_booking_index()
+        rows = [r for r in (data.get("bookings") or []) if isinstance(r, dict)]
+        rows = [r for r in rows if str(r.get("booking_id") or "") != row["booking_id"]]
+        rows.append(row)
+        data["bookings"] = rows[-500:]
+        _save_booking_index(data)
+    return row
+
+
+def _mark_local_booking_cancelled(booking_id: str) -> None:
+    bid = str(booking_id or "").strip()
+    if not bid:
+        return
+    with _BOOKINGS_LOCK:
+        data = _load_booking_index()
+        changed = False
+        for row in data.get("bookings") or []:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("booking_id") or "") != bid:
+                continue
+            row["status"] = "Cancel"
+            row["cancelled_at"] = datetime.now(timezone.utc).isoformat()
+            changed = True
+        if changed:
+            _save_booking_index(data)
+
+
+def _as_reservation_list(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    hotel = payload.get("HotelReservations") or {}
+    if not isinstance(hotel, dict):
+        return []
+    raw = hotel.get("HotelReservation")
+    if isinstance(raw, list):
+        return [row for row in raw if isinstance(row, dict)]
+    if isinstance(raw, dict):
+        return [raw]
+    return []
+
+
+def _reservation_customer(reservation: dict[str, Any]) -> dict[str, Any]:
+    try:
+        stays = reservation.get("RoomStays") or {}
+        stay = stays.get("RoomStay")
+        if isinstance(stay, list):
+            stay = stay[0] if stay else {}
+        guests = ((stay or {}).get("ResGuests") or {}).get("ResGuest") or {}
+        profiles = ((guests.get("Profiles") or {}).get("ProfileInfo") or [])
+        profile = profiles[0] if isinstance(profiles, list) and profiles else profiles
+        customer = (((profile or {}).get("Profile") or {}).get("Customer") or {})
+        return customer if isinstance(customer, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _reservation_guest_name(reservation: dict[str, Any]) -> tuple[str, str]:
+    customer = _reservation_customer(reservation)
+    person = customer.get("PersonName") or {}
+    return (
+        str(person.get("GivenName") or "").strip(),
+        str(person.get("Surname") or "").strip(),
+    )
+
+
+def _reservation_document(reservation: dict[str, Any]) -> tuple[str, str]:
+    customer = _reservation_customer(reservation)
+    document = str(customer.get("NIF") or customer.get("Document") or "").strip()
+    doc_type = str(customer.get("DocumentType") or "").strip()
+    return document, infer_document_type(document, doc_type)
+
+
+def _reservation_dates(reservation: dict[str, Any]) -> tuple[str, str]:
+    info = reservation.get("ResGlobalInfo") or {}
+    span = info.get("TimeSpan") or {}
+    return str(span.get("Start") or "")[:10], str(span.get("End") or "")[:10]
+
+
+def _normalize_booking_row(reservation: dict[str, Any]) -> dict[str, Any]:
+    unique = reservation.get("UniqueID") or {}
+    if not isinstance(unique, dict):
+        unique = {}
+    first, last = _reservation_guest_name(reservation)
+    document, doc_type = _reservation_document(reservation)
+    start, end = _reservation_dates(reservation)
+    total = ((reservation.get("ResGlobalInfo") or {}).get("Total") or {})
+    status = str(reservation.get("ResStatus") or "").strip() or "Book"
+    return {
+        "booking_id": str(unique.get("ID") or ""),
+        "fns_id": str(unique.get("IDFNS") or ""),
+        "status": status,
+        "start_date": start,
+        "end_date": end,
+        "guest_first_name": first,
+        "guest_last_name": last,
+        "guest_document": document,
+        "guest_document_type": doc_type,
+        "guest_document_normalized": normalize_document(document),
+        "guest": f"{first} {last}".strip(),
+        "amount_after_tax": str(total.get("AmountAfterTax") or ""),
+        "currency": str(total.get("CurrencyCode") or ""),
+        "create_date_time": str(reservation.get("CreateDateTime") or ""),
+    }
+
+
+def _is_active_unused(row: dict[str, Any], *, today: date) -> bool:
+    status = str(row.get("status") or "").strip().lower()
+    if status in {"cancel", "cancelled", "canceled"}:
+        return False
+    end_raw = str(row.get("end_date") or row.get("start_date") or "")[:10]
+    try:
+        end = datetime.strptime(end_raw, "%Y-%m-%d").date()
+    except ValueError:
+        return status in {"book", "pending", "modified", ""}
+    # Still usable if checkout is today or in the future.
+    return end >= today
+
+
+async def list_bookings(
+    *,
+    start_date: str,
+    end_date: str,
+    estado_id: str = "",
+) -> dict[str, Any]:
+    if not _motor_configured():
+        raise FnsMotorError("FNS Motor no está configurado en .env")
+    start = str(start_date or "").strip()[:10]
+    end = str(end_date or "").strip()[:10]
+    if not start or not end:
+        raise FnsMotorError("Faltan start_date / end_date")
+    params: dict[str, Any] = {
+        "lang": "es",
+        "hotel_id": str(settings.fns_hotel_id),
+        "start_date": start,
+        "end_date": end,
+    }
+    if str(estado_id or "").strip():
+        params["estado_id"] = str(estado_id).strip()
+    body = {"auth": {"channel_id": str(settings.fns_channel_id)}, "params": params}
+    url = _motor_url("/get_listbooking_json.php")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(url, json=body, auth=_auth())
+    if response.status_code >= 400:
+        raise FnsMotorError(
+            f"Motor list bookings HTTP {response.status_code}",
+            details=response.text[:500],
+        )
+    try:
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001
+        raise FnsMotorError("List bookings JSON inválido", details=response.text[:500]) from exc
+    rows = [_normalize_booking_row(item) for item in _as_reservation_list(payload)]
+    return {"ok": True, "start_date": start, "end_date": end, "bookings": rows, "raw": payload}
+
+
+async def list_guest_active_bookings(
+    *,
+    username: str | None = None,
+    channel: str | None = None,
+    guest_first_name: str = "",
+    guest_last_name: str = "",
+    guest_document: str = "",
+    days_ahead: int = 120,
+) -> dict[str, Any]:
+    """Active/upcoming bookings for this IG/FB guest (document + local + Motor)."""
+    today = datetime.now(timezone.utc).date()
+    handle = str(username or "").strip().lower().lstrip("@")
+    ch = str(channel or "instagram").strip().lower() or "instagram"
+    first = str(guest_first_name or "").strip().lower()
+    last = str(guest_last_name or "").strip().lower()
+    doc_norm = normalize_document(guest_document)
+
+    local_rows: list[dict[str, Any]] = []
+    with _BOOKINGS_LOCK:
+        data = deepcopy(_load_booking_index())
+    for row in data.get("bookings") or []:
+        if not isinstance(row, dict):
+            continue
+        if not _is_active_unused(row, today=today):
+            continue
+        row_doc = normalize_document(
+            row.get("guest_document_normalized") or row.get("guest_document")
+        )
+        matched = False
+        if doc_norm and row_doc and row_doc == doc_norm:
+            matched = True
+        elif handle and str(row.get("username") or "").lower().lstrip("@") == handle:
+            # Fallback for older rows without document.
+            matched = True
+        if not matched:
+            continue
+        if ch and str(row.get("channel") or "").lower() not in {ch, ""}:
+            if str(row.get("channel") or "").strip() and not (
+                doc_norm and row_doc and row_doc == doc_norm
+            ):
+                continue
+        local_rows.append(row)
+
+    # Motor scan: prefer NIF/document match; name only as weak fallback.
+    motor_rows: list[dict[str, Any]] = []
+    docs_to_match: set[str] = set()
+    if doc_norm:
+        docs_to_match.add(doc_norm)
+    for row in local_rows:
+        nd = normalize_document(row.get("guest_document_normalized") or row.get("guest_document"))
+        if nd:
+            docs_to_match.add(nd)
+    names_to_match: set[tuple[str, str]] = set()
+    if first and last and not docs_to_match:
+        names_to_match.add((first, last))
+
+    if docs_to_match or names_to_match:
+        start = today.isoformat()
+        end = (today + timedelta(days=max(1, int(days_ahead or 120)))).isoformat()
+        listed = await list_bookings(start_date=start, end_date=end)
+        for row in listed.get("bookings") or []:
+            if not _is_active_unused(row, today=today):
+                continue
+            row_doc = normalize_document(row.get("guest_document_normalized") or row.get("guest_document"))
+            if docs_to_match and row_doc and row_doc in docs_to_match:
+                motor_rows.append(row)
+                continue
+            if names_to_match:
+                rf = str(row.get("guest_first_name") or "").strip().lower()
+                rl = str(row.get("guest_last_name") or "").strip().lower()
+                if (rf, rl) in names_to_match:
+                    motor_rows.append(row)
+
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in [*motor_rows, *local_rows]:
+        bid = str(row.get("booking_id") or "").strip()
+        if not bid:
+            continue
+        by_id[bid] = row
+    active = sorted(by_id.values(), key=lambda r: str(r.get("start_date") or ""))
+    return {
+        "ok": True,
+        "username": handle,
+        "channel": ch,
+        "guest_document_normalized": doc_norm,
+        "matched_by": "document" if doc_norm else ("username" if handle else "name"),
+        "active_count": len(active),
+        "has_active_booking": bool(active),
+        "bookings": active,
+        "message": (
+            "Este huésped ya tiene reserva(s) activa(s). "
+            "Pregunta si quiere otra o cancelar la anterior con cancel_room_booking."
+            if active
+            else "No hay reservas activas pendientes para este huésped."
+        ),
+    }
+
+
+async def cancel_booking(*, booking_id: str) -> dict[str, Any]:
+    """Cancel an existing Motor booking (ResStatus=Cancel)."""
+    if not _motor_configured():
+        raise FnsMotorError("FNS Motor no está configurado en .env")
+    bid = str(booking_id or "").strip()
+    if not bid:
+        raise FnsMotorError("Falta booking_id")
+
+    # Prefer details from local index; Motor list as fallback.
+    local: dict[str, Any] | None = None
+    with _BOOKINGS_LOCK:
+        for row in _load_booking_index().get("bookings") or []:
+            if isinstance(row, dict) and str(row.get("booking_id") or "") == bid:
+                local = deepcopy(row)
+                break
+
+    start = str((local or {}).get("start_date") or "")[:10]
+    end = str((local or {}).get("end_date") or "")[:10]
+    room_code = str((local or {}).get("room_type_code") or "").strip() or "0"
+    rate_code = "0"
+    total = str((local or {}).get("amount_after_tax") or "0")
+    cur = str((local or {}).get("currency") or "CLP")
+    first = str((local or {}).get("guest_first_name") or "Guest")
+    last = str((local or {}).get("guest_last_name") or "Guest")
+
+    if not start or not end:
+        # Look up near-term list for this UniqueID.
+        today = datetime.now(timezone.utc).date()
+        listed = await list_bookings(
+            start_date=(today - timedelta(days=7)).isoformat(),
+            end_date=(today + timedelta(days=180)).isoformat(),
+        )
+        match = next(
+            (
+                row
+                for row in listed.get("bookings") or []
+                if str(row.get("booking_id") or "") == bid
+            ),
+            None,
+        )
+        if not match:
+            raise FnsMotorError("No encontré esa reserva para cancelar", details=bid)
+        start = str(match.get("start_date") or "")[:10]
+        end = str(match.get("end_date") or "")[:10]
+        total = str(match.get("amount_after_tax") or total)
+        cur = str(match.get("currency") or cur)
+        first = str(match.get("guest_first_name") or first)
+        last = str(match.get("guest_last_name") or last)
+
+    stamp = _now_stamp()
+    body = {
+        "auth": {"channel_id": str(settings.fns_channel_id)},
+        "reserva": {
+            "TimeStamp": stamp,
+            "ResStatus": "Cancel",
+            "HotelReservations": {
+                "HotelReservation": {
+                    "CreateDateTime": stamp,
+                    "CancellationDateTime": stamp,
+                    "UniqueID": {"Type": "14", "ID": bid},
+                    "RoomStays": {
+                        "RoomStay": [
+                            {
+                                "RoomTypes": {
+                                    "RoomType": {
+                                        "NumberOfUnits": "1",
+                                        "RoomTypeCode": room_code,
+                                    }
+                                },
+                                "RatePlans": {"RatePlan": {"RatePlanCode": rate_code}},
+                                "GuestCounts": {
+                                    "GuestCount": [
+                                        {"Count": "1", "AgeQualifyingCode": "10"}
+                                    ]
+                                },
+                                "ResGuests": {
+                                    "ResGuest": {
+                                        "Profiles": {
+                                            "ProfileInfo": [
+                                                {
+                                                    "Profile": {
+                                                        "Customer": {
+                                                            "PersonName": {
+                                                                "GivenName": first,
+                                                                "Surname": last,
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                "Total": {
+                                    "AmountAfterTax": total,
+                                    "CurrencyCode": cur,
+                                },
+                            }
+                        ]
+                    },
+                    "ResGlobalInfo": {
+                        "TimeSpan": {"Start": start, "End": end},
+                        "Total": {
+                            "AmountAfterTax": total,
+                            "CurrencyCode": cur,
+                        },
+                        "BasicPropertyInfo": {
+                            "HotelCode": str(settings.fns_hotel_id),
+                        },
+                        "Remarks": "Cancelación solicitada por huésped Instagram/Facebook",
+                    },
+                }
+            },
+        },
+    }
+    url = _motor_url("/booking_json.php")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(url, json=body, auth=_auth())
+    text = response.text
+    if response.status_code >= 400:
+        raise FnsMotorError(
+            f"Motor cancel HTTP {response.status_code}",
+            details=text[:800],
+        )
+    try:
+        payload = response.json() if text.strip() else {}
+    except Exception:
+        payload = {"raw": text[:800]}
+
+    _mark_local_booking_cancelled(bid)
+    logger.info("FNS booking cancelled external_id=%s", bid)
+    return {
+        "ok": True,
+        "booking_id": bid,
+        "status": "Cancel",
+        "start_date": start,
+        "end_date": end,
         "guest": f"{first} {last}".strip(),
         "motor_response": payload,
+        "message": f"Reserva {bid} cancelada ({start} al {end}).",
     }

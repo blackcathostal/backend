@@ -325,13 +325,60 @@ DEEPSEEK_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "check_guest_bookings",
+            "description": (
+                "Check if this guest already has an active unused booking. "
+                "ALWAYS ask for RUT or passport and pass guest_document. "
+                "Call before create_room_booking. If has_active_booking, tell the "
+                "dates and ask: another booking or cancel that one?"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "guest_document": {
+                        "type": "string",
+                        "description": "RUT (Chile) or passport number",
+                    },
+                    "guest_first_name": {"type": "string"},
+                    "guest_last_name": {"type": "string"},
+                },
+                "required": ["guest_document"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_room_booking",
+            "description": (
+                "Cancel an existing FNSrooms booking after the guest confirms. "
+                "Use booking_id from check_guest_bookings."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_id": {
+                        "type": "string",
+                        "description": "Unique booking ID e.g. BC-XXXXXXXXXXXX",
+                    },
+                },
+                "required": ["booking_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_room_booking",
             "description": (
                 "Create a real FNSrooms booking. Only for authorized guests. "
-                "Call search_room_availability first. Need guest first/last name, "
-                "dates, room_type_code, rate_plan_code, and CLP amount_after_tax + "
-                "day_rates_json from booking_* fields. currency must be CLP. "
-                "Confirm the guest with CLP total only (no USD)."
+                "Ask for first/last name AND RUT or passport. "
+                "Call check_guest_bookings then search_room_availability first. "
+                "Need guest_document, dates, room_type_code, rate_plan_code, and "
+                "CLP amount_after_tax + day_rates_json from booking_* fields. "
+                "currency must be CLP. Confirm CLP total only (no USD). "
+                "If already_has_active_booking, ask before creating another; "
+                "use confirm_extra_booking=true only if guest insists."
             ),
             "parameters": {
                 "type": "object",
@@ -343,6 +390,14 @@ DEEPSEEK_TOOLS = [
                     "amount_after_tax": {"type": "string"},
                     "guest_first_name": {"type": "string"},
                     "guest_last_name": {"type": "string"},
+                    "guest_document": {
+                        "type": "string",
+                        "description": "RUT (Chile) or passport number (required)",
+                    },
+                    "guest_document_type": {
+                        "type": "string",
+                        "description": "RUT or PASAPORTE (optional; inferred if empty)",
+                    },
                     "currency": {
                         "type": "string",
                         "description": "Must be CLP to persist hostel prices in pesos",
@@ -353,6 +408,13 @@ DEEPSEEK_TOOLS = [
                     "guest_email": {"type": "string"},
                     "guest_phone": {"type": "string"},
                     "remarks": {"type": "string"},
+                    "confirm_extra_booking": {
+                        "type": "boolean",
+                        "description": (
+                            "true only if guest already has a booking and confirmed "
+                            "they want another one"
+                        ),
+                    },
                     "day_rates_json": {
                         "type": "string",
                         "description": (
@@ -369,6 +431,7 @@ DEEPSEEK_TOOLS = [
                     "amount_after_tax",
                     "guest_first_name",
                     "guest_last_name",
+                    "guest_document",
                 ],
             },
         },

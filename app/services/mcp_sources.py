@@ -21,7 +21,10 @@ from app.services.ai_api_sources import collect_external_api_materials
 from app.services.fns_motor import (
     FnsMotorError,
     booking_allowed,
+    cancel_booking,
     create_booking,
+    list_guest_active_bookings,
+    remember_channel_booking,
     search_availability,
 )
 from app.services.hostel_directions import directions_from_hostel
@@ -36,7 +39,9 @@ mcp = FastMCP(
         "Responde con datos del hostal y las preguntas frecuentes. "
         "Para precios y tipos de habitación usa solo preguntas frecuentes. "
         "Si el huésped está autorizado a reservar por API, usa "
-        "search_room_availability y create_room_booking. "
+        "check_guest_bookings, search_room_availability, create_room_booking "
+        "y cancel_room_booking. Si ya tiene reserva activa, avisa y pregunta "
+        "si quiere otra o cancelar la anterior. "
         "Si no, usa get_hostel_info y envíalos al WhatsApp. "
         "Sé vendedor: combina el dato con un beneficio real e invita a quedarse. "
         "Si falta algo, busca en la web. No inventes datos ni promociones."
@@ -430,14 +435,77 @@ async def search_room_availability_tool(
 
 
 @mcp.tool(
+    name="check_guest_bookings",
+    description=(
+        "Revisa si este huésped ya tiene una reserva activa (aún no usada). "
+        "Pide RUT o pasaporte y pásalo en guest_document para un match exacto. "
+        "Úsala ANTES de create_room_booking. Si has_active_booking=true, "
+        "dile las fechas y pregunta: ¿quieres otra o cancelar esa? "
+        "Para cancelar usa cancel_room_booking."
+    ),
+    structured_output=True,
+)
+async def check_guest_bookings_tool(
+    guest_document: str = "",
+    guest_first_name: str = "",
+    guest_last_name: str = "",
+) -> dict[str, Any]:
+    blocked = _booking_gate()
+    if blocked:
+        return blocked
+    if not str(guest_document or "").strip():
+        return {
+            "ok": False,
+            "needs_document": True,
+            "error": "missing_guest_document",
+            "message": (
+                "Pide RUT (Chile) o número de pasaporte antes de revisar/crear reservas. "
+                "Luego vuelve a llamar check_guest_bookings con guest_document."
+            ),
+        }
+    try:
+        return await list_guest_active_bookings(
+            username=get_reply_username(),
+            channel=get_reply_channel(),
+            guest_first_name=guest_first_name,
+            guest_last_name=guest_last_name,
+            guest_document=guest_document,
+        )
+    except FnsMotorError as exc:
+        return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
+
+
+@mcp.tool(
+    name="cancel_room_booking",
+    description=(
+        "Cancela una reserva FNSrooms del huésped (ResStatus=Cancel). "
+        "Usa el booking_id de check_guest_bookings. "
+        "Solo si el huésped confirma que quiere eliminar esa reserva."
+    ),
+    structured_output=True,
+)
+async def cancel_room_booking_tool(booking_id: str) -> dict[str, Any]:
+    blocked = _booking_gate()
+    if blocked:
+        return blocked
+    try:
+        return await cancel_booking(booking_id=booking_id)
+    except FnsMotorError as exc:
+        return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
+
+
+@mcp.tool(
     name="create_room_booking",
     description=(
         "Crea una reserva real en FNSrooms Motor. Solo para huéspedes autorizados. "
-        "Antes llama search_room_availability. Guarda la reserva en CLP: "
-        "currency=CLP, amount_after_tax=booking_amount_after_tax, "
-        "day_rates_json=booking_day_rates_json (tarifas del hostal en pesos). "
-        "Al huésped confirma solo el total en CLP. "
-        "Pide nombre, apellido y fechas si faltan."
+        "Antes: pide RUT/pasaporte, check_guest_bookings y search_room_availability. "
+        "guest_document es obligatorio (RUT o pasaporte). "
+        "Si ya tiene reserva activa y el huésped no confirmó otra, NO crees: "
+        "avisa fechas y pregunta si quiere otra o cancelar. "
+        "Si el huésped insiste en otra reserva, pasa confirm_extra_booking=true. "
+        "Guarda en CLP: currency=CLP, amount_after_tax=booking_amount_after_tax, "
+        "day_rates_json=booking_day_rates_json. Confirma solo total CLP. "
+        "Pide nombre, apellido, RUT/pasaporte y fechas si faltan."
     ),
     structured_output=True,
 )
@@ -449,7 +517,9 @@ async def create_room_booking_tool(
     amount_after_tax: str,
     guest_first_name: str,
     guest_last_name: str,
+    guest_document: str,
     currency: str = "CLP",
+    guest_document_type: str = "",
     adults: int = 2,
     children: int = 0,
     units: int = 1,
@@ -457,10 +527,50 @@ async def create_room_booking_tool(
     guest_phone: str = "",
     remarks: str = "",
     day_rates_json: str = "[]",
+    confirm_extra_booking: bool = False,
 ) -> dict[str, Any]:
     blocked = _booking_gate()
     if blocked:
         return blocked
+    if not str(guest_document or "").strip():
+        return {
+            "ok": False,
+            "needs_document": True,
+            "error": "missing_guest_document",
+            "message": "Pide RUT o pasaporte y vuelve a llamar create_room_booking.",
+        }
+    # Soft gate: warn if this guest already has an unused booking.
+    if not confirm_extra_booking:
+        try:
+            existing = await list_guest_active_bookings(
+                username=get_reply_username(),
+                channel=get_reply_channel(),
+                guest_first_name=guest_first_name,
+                guest_last_name=guest_last_name,
+                guest_document=guest_document,
+            )
+        except FnsMotorError:
+            existing = {"has_active_booking": False, "bookings": []}
+        if existing.get("has_active_booking"):
+            first = (existing.get("bookings") or [{}])[0]
+            return {
+                "ok": False,
+                "needs_confirmation": True,
+                "error": "already_has_active_booking",
+                "message": (
+                    "Este huésped ya tiene una reserva activa. "
+                    "Dile las fechas y pregunta si quiere hacer otra "
+                    "o cancelar esa con cancel_room_booking. "
+                    "Si insiste en otra, vuelve a llamar create_room_booking "
+                    "con confirm_extra_booking=true."
+                ),
+                "active_bookings": existing.get("bookings") or [],
+                "example_booking_id": first.get("booking_id"),
+                "example_dates": {
+                    "start_date": first.get("start_date"),
+                    "end_date": first.get("end_date"),
+                },
+            }
     # Force CLP persistence for IG/FB bookings.
     cur = (currency or "CLP").strip().upper() or "CLP"
     if cur != "CLP":
@@ -484,7 +594,7 @@ async def create_room_booking_tool(
         per_night = int(total / nights) if nights else total
         day_rates = _clp_day_rates(start_date, end_date, per_night)
     try:
-        return await create_booking(
+        created = await create_booking(
             start_date=start_date,
             end_date=end_date,
             room_type_code=room_type_code,
@@ -496,11 +606,19 @@ async def create_room_booking_tool(
             units=units,
             guest_first_name=guest_first_name,
             guest_last_name=guest_last_name,
+            guest_document=guest_document,
+            guest_document_type=guest_document_type,
             guest_email=guest_email,
             guest_phone=guest_phone,
             remarks=remarks or "Reserva Instagram/Facebook Black Cat (CLP)",
             day_rates=day_rates,
         )
+        remember_channel_booking(
+            booking=created,
+            username=get_reply_username(),
+            channel=get_reply_channel(),
+        )
+        return created
     except FnsMotorError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
 
