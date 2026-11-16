@@ -929,11 +929,12 @@ async def change_room_booking_tool(
         return {"ok": False, "error": "missing_old_booking_id"}
 
     # Verify new-date availability BEFORE cancelling the old booking.
+    # Prefer shared dorm codes when changing a compartida stay.
     try:
         avail = await search_availability(
             start_date=start_date,
             end_date=end_date,
-            adults=adults,
+            adults=max(1, int(adults or 1)),
             children=children,
             currency="USD",
         )

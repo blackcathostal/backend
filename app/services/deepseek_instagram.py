@@ -20,7 +20,17 @@ from app.services.reply_context import set_reply_context
 from app.services.room_rates import load_room_rates
 
 SANTIAGO = ZoneInfo("America/Santiago")
-REPLY_LOOP_TIMEOUT_SECONDS = 70.0
+# Booking tools hit FNS several times (list/search/cancel/create); 70s left threads stuck.
+REPLY_LOOP_TIMEOUT_SECONDS = 140.0
+BOOKING_TOOL_TIMEOUT_SECONDS = 95.0
+DEFAULT_TOOL_TIMEOUT_SECONDS = 35.0
+_BOOKING_TOOL_NAMES = {
+    "search_room_availability",
+    "check_guest_bookings",
+    "create_room_booking",
+    "cancel_room_booking",
+    "change_room_booking",
+}
 _RESERVATION_RE = re.compile(
     r"("
     r"reserv(?:a|ar|ame|arme|anos|arte|aste|astes|ó|o|amos|aron)?"
@@ -1378,15 +1388,26 @@ async def _run_reply_loop(
                     fn = call.get("function") or {}
                     name = fn.get("name") or ""
                     args = _parse_tool_args(fn.get("arguments"))
+                    tool_timeout = (
+                        BOOKING_TOOL_TIMEOUT_SECONDS
+                        if name in _BOOKING_TOOL_NAMES
+                        else DEFAULT_TOOL_TIMEOUT_SECONDS
+                    )
                     try:
                         result = await asyncio.wait_for(
                             call_reply_tool(name, args),
-                            timeout=35.0,
+                            timeout=tool_timeout,
                         )
                     except asyncio.TimeoutError:
                         result = {
                             "ok": False,
-                            "error": f"La tool {name} tardó demasiado.",
+                            "error": (
+                                f"La tool {name} tardó demasiado "
+                                f"(>{int(tool_timeout)}s). "
+                                "Di al huésped que reintente en un momento; "
+                                "no inventes 'sin cupo'."
+                            ),
+                            "timeout": True,
                         }
                     if (
                         name == "get_directions_from_hostel"

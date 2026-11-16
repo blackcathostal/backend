@@ -2763,9 +2763,31 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
         finally:
             db.close()
     except (DeepSeekConfigError, DeepSeekError) as exc:
+        err_text = str(exc)
+        timed_out = "tardó demasiado" in err_text.lower() or "timeout" in err_text.lower()
+        # DMs: never leave the guest hanging with zero reply after a booking timeout.
+        if timed_out and str(latest.get("type") or item.get("type") or "") == "message":
+            for row in burst[:-1]:
+                row["status"] = "batched"
+                row["escalation_reason"] = "merged_burst"
+                row["updated_at"] = _now_iso()
+                upsert_inbox_item(row)
+            try:
+                return await send_inbox_reply(
+                    str(latest.get("id") or item_id),
+                    (
+                        "Se me complicó un segundo al revisar tu reserva/cupo. "
+                        "Escríbeme de nuevo y lo retomo al tiro."
+                    ),
+                    source="deepseek",
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to send timeout recovery reply for %s", item_id
+                )
         for row in burst:
             row["status"] = "failed"
-            row["escalation_reason"] = str(exc)
+            row["escalation_reason"] = err_text
             row["updated_at"] = _now_iso()
             upsert_inbox_item(row)
         raise
