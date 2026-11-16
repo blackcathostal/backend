@@ -124,9 +124,17 @@ _VOLUNTEER_RE = re.compile(
 _SHORT_ACK_RE = re.compile(
     r"^\s*(?:[¡!]?\s*)?(?:"
     r"ok|okay|vale|listo|perfecto|exacto|claro|dale|ya|s[ií]|sip|sep|"
-    r"gracias|thanks|thank\s+you|merci|obrigad[oa]|"
     r"super|súper|genial|buenísimo|buenisimo|entendido|de\s+acuerdo|"
     r"ah\s+ok|ah\s+ya|mm+|aha+|aja+"
+    r")(?:\s*[,!.…?]*)?(?:\s+(?:👋|🙂|😊|✨|👍|🙏))?\s*$",
+    re.IGNORECASE,
+)
+# "Gracias!" alone is a soft closing — answer with a short goodbye, don't skip.
+_THANKS_ONLY_RE = re.compile(
+    r"^\s*(?:[¡!]?\s*)?(?:"
+    r"gracias(?:\s+mil|\s+totales?)?|thanks(?:\s+a\s+lot|\s+so\s+much)?|"
+    r"thank\s+you(?:\s+so\s+much)?|merci(?:\s+beaucoup)?|"
+    r"obrigad[oa](?:\s+mesmo)?"
     r")(?:\s*[,!.…?]*)?(?:\s+(?:👋|🙂|😊|✨|👍|🙏))?\s*$",
     re.IGNORECASE,
 )
@@ -1029,6 +1037,16 @@ def _price_summary_reply(
     }
 
 
+def _looks_like_thanks_only(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample or len(sample) > 80:
+        return False
+    lines = [line.strip() for line in sample.splitlines() if line.strip()]
+    if not lines:
+        return False
+    return all(bool(_THANKS_ONLY_RE.match(line)) for line in lines)
+
+
 def _looks_like_goodbye_only(text: str) -> bool:
     sample = (text or "").strip()
     if not sample or len(sample) > 120:
@@ -1036,7 +1054,10 @@ def _looks_like_goodbye_only(text: str) -> bool:
     lines = [line.strip() for line in sample.splitlines() if line.strip()]
     if not lines:
         return False
-    return all(bool(_GOODBYE_ONLY_RE.match(line)) for line in lines)
+    if all(bool(_GOODBYE_ONLY_RE.match(line)) for line in lines):
+        return True
+    # Closing thanks after a resolved booking/help should get a short farewell.
+    return _looks_like_thanks_only(sample)
 
 
 def _looks_like_distance_question(text: str) -> bool:
