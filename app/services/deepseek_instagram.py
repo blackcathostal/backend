@@ -1585,6 +1585,8 @@ async def generate_instagram_reply(
         "search_room_availability → create_room_booking. "
         "Eliminar → cancel_room_booking. "
         "Cambiar → change_room_booking (OBLIGATORIO: cancela vieja + crea nueva). "
+        "NUNCA digas 'no hay cupo' si search_room_availability devolvió rooms; "
+        "en compartida usa room_type_code 22851 o 22853 del resultado. "
         "NUNCA para 'cambiar' uses create_room_booking con confirm_extra_booking; "
         "eso deja la vieja viva. Si usas create para cambiar: replace_existing=true. "
         "Otra adicional (mantener la vieja) → confirm_extra_booking=true solo si insiste. "

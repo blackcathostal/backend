@@ -949,26 +949,94 @@ async def change_room_booking_tool(
         }
 
     room_code = str(room_type_code or "").strip()
+    rooms = [room for room in (priced.get("rooms") or []) if isinstance(room, dict)]
     match = next(
         (
             room
-            for room in (priced.get("rooms") or [])
-            if isinstance(room, dict)
-            and str(room.get("room_type_code") or "") == room_code
+            for room in rooms
+            if str(room.get("room_type_code") or "") == room_code
         ),
         None,
     )
+    # If the model passed a stale/wrong code but shared dorms (or same label) exist, use those.
+    if not match and rooms:
+        shared = [
+            room
+            for room in rooms
+            if "compart" in str(room.get("room_name") or "").lower()
+            or "compart" in str(room.get("guest_room_label") or "").lower()
+            or str(room.get("room_type_code") or "") in {"22851", "22853"}
+        ]
+        if shared and (
+            room_code in {"22851", "22853", ""}
+            or "compart" in str(old_row.get("room_type_code") or "")
+            or str(old_row.get("room_type_code") or "") in {"22851", "22853", "", "None", "null"}
+        ):
+            match = shared[0]
+            room_code = str(match.get("room_type_code") or room_code)
+            rate_plan_code = str(
+                ((match.get("rate_plans") or [{}])[0] or {}).get("rate_plan_code")
+                or rate_plan_code
+                or "0"
+            )
+            if not amount_after_tax:
+                amount_after_tax = str(match.get("booking_amount_after_tax") or amount_after_tax)
+            if not str(day_rates_json or "").strip() or day_rates_json == "[]":
+                day_rates_json = str(match.get("booking_day_rates_json") or day_rates_json)
     if not match:
+        # Distinguish "no rooms at all" vs "wrong room code while others exist".
+        if rooms:
+            summary = [
+                {
+                    "room_type_code": room.get("room_type_code"),
+                    "room_name": room.get("room_name"),
+                    "guest_room_label": room.get("guest_room_label"),
+                    "inventory": room.get("inventory"),
+                    "guest_total_clp": room.get("guest_total_clp"),
+                }
+                for room in rooms
+            ]
+            return {
+                "ok": False,
+                "error": "room_code_not_in_availability",
+                "message": (
+                    f"Sí hay cupo en esas fechas ({len(rooms)} tipos), "
+                    f"pero no con room_type_code={room_code or '(vacío)'}. "
+                    "Usa un room_type_code de availability (p.ej. compartida 22851/22853) "
+                    "y reintenta. No cancelé la reserva anterior."
+                ),
+                "old_booking": old_row,
+                "available_rooms": summary,
+            }
         return {
             "ok": False,
             "error": "no_availability_new_dates",
             "message": (
-                "No hay cupo para esas fechas/habitación. "
+                "No hay cupo para esas fechas. "
                 "No cancelé la reserva anterior. Ofrece otras fechas."
             ),
             "old_booking": old_row,
             "availability": priced,
         }
+    # Prefer Motor rate code from the matched room if model sent a stale one.
+    plans = match.get("rate_plans") or []
+    if plans and isinstance(plans[0], dict):
+        live_rate = str(plans[0].get("rate_plan_code") or "").strip()
+        if live_rate and str(rate_plan_code or "").strip() not in {live_rate, ""}:
+            # Keep model value if equal after normalize; else use live.
+            if str(rate_plan_code or "").strip() in {"fns0", "0"} and live_rate in {"fns0", "0"}:
+                rate_plan_code = live_rate
+            elif str(rate_plan_code or "").strip() not in {p.get("rate_plan_code") for p in plans if isinstance(p, dict)}:
+                rate_plan_code = live_rate
+    if match.get("booking_amount_after_tax") and (
+        not str(amount_after_tax or "").strip()
+        or str(amount_after_tax).strip() in {"0", "0.00"}
+    ):
+        amount_after_tax = str(match.get("booking_amount_after_tax"))
+    if match.get("booking_day_rates_json") and (
+        not str(day_rates_json or "").strip() or day_rates_json == "[]"
+    ):
+        day_rates_json = str(match.get("booking_day_rates_json"))
 
     try:
         cancelled = await cancel_booking(booking_id=old_id)
