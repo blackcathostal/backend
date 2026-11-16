@@ -297,6 +297,28 @@ def _client_username(group: list[dict[str, Any]], own_ids: set[str], ig_username
     return ""
 
 
+def _guest_handle_for_reply(*items: dict[str, Any] | None) -> str | None:
+    """Resolve the guest @handle for booking allowlist / history.
+
+    DMs often keep the handle in peer_username while author_username is empty
+    (especially on outbound echoes or when Graph omits username on the bubble).
+    """
+    own_ids = _own_instagram_ids()
+    ig_username = str((load_connection() or {}).get("ig_username") or "").strip().lower()
+    for item in items:
+        if not item:
+            continue
+        for key in ("author_username", "peer_username"):
+            handle = _clean_handle(item.get(key))
+            if handle and handle.lower() != ig_username:
+                return handle
+        related = _related_dm_items(item) if item.get("type") == "message" else [item]
+        handle = _client_username(related, own_ids, ig_username)
+        if handle:
+            return handle
+    return None
+
+
 def _page_row(item: dict[str, Any], *, message_count: int = 1, peer_username: str | None = None) -> dict[str, Any]:
     text = str(item.get("text") or "").strip()
     if len(text) > 180:
@@ -3155,8 +3177,14 @@ async def _store_dm_event(event: dict[str, Any]) -> dict[str, Any] | None:
         peer_id=sender,
         direction="in",
     )
+    changed = False
     if username and not item.get("author_username"):
         item["author_username"] = username
+        changed = True
+    if username and not item.get("peer_username"):
+        item["peer_username"] = username
+        changed = True
+    if changed:
         item = upsert_inbox_item(item)
     if auto_reply_enabled() and item.get("status") == "pending":
         # Do not reply on every bubble; wait for the guest to finish typing.
