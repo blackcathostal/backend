@@ -328,22 +328,32 @@ DEEPSEEK_TOOLS = [
             "name": "check_guest_bookings",
             "description": (
                 "REQUIRED before create_room_booking whenever the guest gave "
-                "RUT/passport OR first+last name while wanting to book. "
-                "Finds unused active bookings. Prefer guest_document; else "
-                "guest_first_name + guest_last_name. When matched_by=name, "
-                "show booking_summaries and ask «¿es esa tu reserva?». "
-                "If has_active_booking, ask: another, cancel, or change — "
-                "do not silently create another."
+                "identity while wanting to book. Finds unused active bookings. "
+                "RUT alone OK. Passport = passport NUMBER + full name "
+                "(first + last). If no document: full name only, then verify. "
+                "When matched_by=name, show booking_summaries and ask "
+                "«¿es esa tu reserva?». If has_active_booking, ask: another, "
+                "cancel, or change — do not silently create another."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "guest_document": {
                         "type": "string",
-                        "description": "RUT (Chile) or passport number",
+                        "description": "RUT or passport number (not the word passport)",
                     },
-                    "guest_first_name": {"type": "string"},
-                    "guest_last_name": {"type": "string"},
+                    "guest_document_type": {
+                        "type": "string",
+                        "description": "RUT or PASAPORTE",
+                    },
+                    "guest_first_name": {
+                        "type": "string",
+                        "description": "Required with passport number; also for name-only lookup",
+                    },
+                    "guest_last_name": {
+                        "type": "string",
+                        "description": "Required with passport number; also for name-only lookup",
+                    },
                 },
                 "required": [],
             },
@@ -444,9 +454,10 @@ DEEPSEEK_TOOLS = [
                 "Need guest_document, dates, room_type_code, rate_plan_code, and "
                 "CLP amount_after_tax + day_rates_json from booking_* fields. "
                 "currency must be CLP. Confirm CLP total only (no USD). "
-                "If already_has_active_booking, ask: another, cancel, or change "
-                "(change_room_booking). confirm_extra_booking=true only if insists "
-                "on an additional booking."
+                "If already_has_active_booking: for CHANGE use change_room_booking "
+                "or replace_existing=true (cancels old then creates). "
+                "NEVER use confirm_extra_booking for a change. "
+                "confirm_extra_booking=true ONLY to keep the old and add another."
             ),
             "parameters": {
                 "type": "object",
@@ -460,7 +471,10 @@ DEEPSEEK_TOOLS = [
                     "guest_last_name": {"type": "string"},
                     "guest_document": {
                         "type": "string",
-                        "description": "RUT (Chile) or passport number (required)",
+                        "description": (
+                            "RUT or passport NUMBER. With passport also require "
+                            "guest_first_name + guest_last_name"
+                        ),
                     },
                     "guest_document_type": {
                         "type": "string",
@@ -476,11 +490,22 @@ DEEPSEEK_TOOLS = [
                     "guest_email": {"type": "string"},
                     "guest_phone": {"type": "string"},
                     "remarks": {"type": "string"},
+                    "replace_existing": {
+                        "type": "boolean",
+                        "description": (
+                            "true to CHANGE: cancel active booking(s) then create. "
+                            "Prefer change_room_booking; use this if needed."
+                        ),
+                    },
+                    "old_booking_id": {
+                        "type": "string",
+                        "description": "Optional booking to replace when several actives",
+                    },
                     "confirm_extra_booking": {
                         "type": "boolean",
                         "description": (
-                            "true only if guest already has a booking and confirmed "
-                            "they want another one"
+                            "true ONLY to keep the old booking and add another. "
+                            "Never for 'cambiar'."
                         ),
                     },
                     "day_rates_json": {
@@ -499,7 +524,6 @@ DEEPSEEK_TOOLS = [
                     "amount_after_tax",
                     "guest_first_name",
                     "guest_last_name",
-                    "guest_document",
                 ],
             },
         },

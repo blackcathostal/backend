@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import unicodedata
 import uuid
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
@@ -377,6 +378,12 @@ def infer_document_type(document: str, document_type: str = "") -> str:
     if doc and len(doc) <= 9 and doc[:-1].isdigit() and (doc[-1].isdigit() or doc[-1] == "K"):
         return "RUT"
     return "PASAPORTE" if doc else ""
+
+
+def document_requires_full_name(document: str, document_type: str = "") -> bool:
+    """Passport (and non-RUT IDs) must be paired with full name for safer match."""
+    kind = infer_document_type(document, document_type)
+    return kind == "PASAPORTE"
 
 
 async def create_booking(
@@ -781,13 +788,17 @@ async def list_bookings(
     return {"ok": True, "start_date": start, "end_date": end, "bookings": rows, "raw": payload}
 
 
+def _fold_name(value: str) -> str:
+    """Lowercase + strip accents so Jesús ≈ Jesus."""
+    text = str(value or "").strip().lower()
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
 def _names_match(a_first: str, a_last: str, b_first: str, b_last: str) -> bool:
-    return (
-        str(a_first or "").strip().lower() == str(b_first or "").strip().lower()
-        and str(a_last or "").strip().lower() == str(b_last or "").strip().lower()
-        and bool(str(a_first or "").strip())
-        and bool(str(a_last or "").strip())
-    )
+    af, al = _fold_name(a_first), _fold_name(a_last)
+    bf, bl = _fold_name(b_first), _fold_name(b_last)
+    return bool(af and al and af == bf and al == bl)
 
 
 def _booking_identity_summary(row: dict[str, Any]) -> str:
@@ -889,6 +900,12 @@ async def list_guest_active_bookings(
                 row.get("guest_document_normalized") or row.get("guest_document")
             )
             if docs_to_match and row_doc and row_doc in docs_to_match:
+                # Passport matches also require full name when provided.
+                if doc_norm and document_requires_full_name(guest_document) and first_l and last_l:
+                    rf = str(row.get("guest_first_name") or "").strip().lower()
+                    rl = str(row.get("guest_last_name") or "").strip().lower()
+                    if not _names_match(first_l, last_l, rf, rl):
+                        continue
                 motor_rows.append(row)
                 continue
             if names_to_match:
