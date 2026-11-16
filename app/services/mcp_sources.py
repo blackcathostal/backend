@@ -432,7 +432,55 @@ async def search_room_availability_tool(
         )
         if not payload.get("ok"):
             return payload
-        return await _attach_guest_pricing(payload, start_date=start_date, end_date=end_date)
+        priced = await _attach_guest_pricing(
+            payload, start_date=start_date, end_date=end_date
+        )
+        rooms = [row for row in (priced.get("rooms") or []) if isinstance(row, dict)]
+        shared = [
+            row
+            for row in rooms
+            if "compart" in str(row.get("room_name") or "").lower()
+            or "compart" in str(row.get("guest_room_label") or "").lower()
+            or str(row.get("room_type_code") or "") in {"22851", "22853"}
+        ]
+        priced["shared_available"] = bool(shared)
+        priced["shared_rooms"] = [
+            {
+                "room_type_code": row.get("room_type_code"),
+                "room_name": row.get("room_name"),
+                "inventory": row.get("inventory"),
+                "guest_price_per_night_clp": row.get("guest_price_per_night_clp"),
+                "guest_total_clp": row.get("guest_total_clp"),
+                "booking_amount_after_tax": row.get("booking_amount_after_tax"),
+                "booking_day_rates_json": row.get("booking_day_rates_json"),
+                "rate_plan_code": ((row.get("rate_plans") or [{}])[0] or {}).get(
+                    "rate_plan_code"
+                ),
+            }
+            for row in shared
+        ]
+        if shared:
+            bits = [
+                f"{row.get('room_type_code')} inv={row.get('inventory')} "
+                f"${row.get('guest_total_clp')} CLP"
+                for row in shared
+            ]
+            priced["availability_summary"] = (
+                f"HAY CUPO en compartida {start_date}→{end_date}: "
+                + "; ".join(bits)
+                + ". NUNCA digas que no hay cupo."
+            )
+        elif rooms:
+            priced["availability_summary"] = (
+                f"Hay cupo en otras habitaciones ({len(rooms)}), "
+                "pero no en compartida para esas fechas."
+            )
+        else:
+            priced["availability_summary"] = (
+                f"No hay cupo Motor para {start_date}→{end_date}."
+            )
+        priced["message"] = priced["availability_summary"]
+        return priced
     except FnsMotorError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
 
