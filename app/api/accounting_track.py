@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -186,24 +186,14 @@ async def refresh_track(
     warning = ""
     docs: list[dict] = []
     if direction == "recibida":
-        warning = (
-            "La API de facturacion.cl no expone libro de compras. "
-            "Usá Importar Excel (export desde facturacion.cl) para Recibidas."
-        )
+        warning = "La API de facturacion.cl no expone libro de compras (recibidas)."
     else:
         client = FacturacionClient()
         try:
             client.login()
             docs = client.fetch_emitidas(date_from, date_to)
         except FacturacionError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"{exc} "
-                    "Si ConsultaLibroVentas no está contratado, exportá el libro "
-                    "desde facturacion.cl y usá Importar Excel en Track."
-                ),
-            ) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     pms_rows = await fetch_pms_production(date_from, date_to)
     upserted, classified = _upsert_docs(db, docs, source="api", pms_rows=pms_rows)
@@ -213,56 +203,4 @@ async def refresh_track(
         upserted=upserted,
         classified=classified,
         warning=warning,
-    )
-
-
-@router.post("/import-excel", response_model=AccountingTrackRefreshResult)
-async def import_track_excel(
-    direction: str = Form("emitida"),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    _: Users = Depends(get_current_user),
-) -> AccountingTrackRefreshResult:
-    direction = (direction or "emitida").strip().lower()
-    if direction not in {"emitida", "recibida"}:
-        raise HTTPException(status_code=400, detail="direction debe ser emitida o recibida")
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Archivo vacío")
-
-    client = FacturacionClient()
-    try:
-        docs = client.parse_libro_file(
-            content,
-            direction=direction,
-            filename=file.filename or "",
-        )
-    except FacturacionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    if not docs:
-        raise HTTPException(status_code=400, detail="No se encontraron filas en el archivo")
-
-    dates = [d.get("issued_at") for d in docs if d.get("issued_at")]
-    parsed_dates = []
-    for value in dates:
-        try:
-            parsed_dates.append(datetime.strptime(str(value)[:10], "%Y-%m-%d").date())
-        except ValueError:
-            continue
-    if parsed_dates:
-        date_from = min(parsed_dates)
-        date_to = max(parsed_dates)
-    else:
-        date_from, date_to = _default_range()
-
-    pms_rows = await fetch_pms_production(date_from, date_to)
-    upserted, classified = _upsert_docs(db, docs, source="excel", pms_rows=pms_rows)
-    return AccountingTrackRefreshResult(
-        direction=direction,
-        fetched=len(docs),
-        upserted=upserted,
-        classified=classified,
-        warning="",
     )
