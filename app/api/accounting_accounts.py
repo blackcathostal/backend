@@ -14,8 +14,6 @@ from app.schemas.accounting_accounts import (
     AccountingAccountsOut,
     AccountingAccountsUpdate,
 )
-from app.services.facturacion_client import FacturacionClient, FacturacionError
-
 router = APIRouter(prefix="/accounting-accounts", tags=["accounting-accounts"])
 
 COA_FILE = Path(__file__).resolve().parents[1] / "data" / "blackcat_eerr_coa.json"
@@ -117,12 +115,7 @@ def import_accounting_accounts_from_facturacion(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> AccountingAccountsImportResult:
-    client = FacturacionClient()
-    try:
-        client.login()
-    except FacturacionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
+    """Import EERR BlackCat chart into admin only (no push to facturacion.cl)."""
     catalog = _load_coa_catalog()
     existing = {
         row.code: row
