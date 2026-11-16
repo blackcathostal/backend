@@ -623,9 +623,20 @@ def _extract_json(text: str) -> dict[str, Any]:
         pass
     match = re.search(r"\{[\s\S]*\}", raw)
     if match:
-        data = json.loads(match.group(0))
-        if isinstance(data, dict):
-            return data
+        try:
+            data = json.loads(match.group(0))
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+    # Model sometimes replies in plain text after tools — don't leave the DM stuck.
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE).strip()
+    if cleaned and not cleaned.startswith("{"):
+        return {
+            "action": "reply",
+            "message": cleaned,
+            "reason": "plain_text_fallback",
+        }
     raise DeepSeekError("DeepSeek no devolvió JSON válido", details=raw[:500])
 
 

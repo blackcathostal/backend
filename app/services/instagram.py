@@ -2764,9 +2764,18 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
             db.close()
     except (DeepSeekConfigError, DeepSeekError) as exc:
         err_text = str(exc)
-        timed_out = "tardó demasiado" in err_text.lower() or "timeout" in err_text.lower()
-        # DMs: never leave the guest hanging with zero reply after a booking timeout.
-        if timed_out and str(latest.get("type") or item.get("type") or "") == "message":
+        soft_fail = any(
+            part in err_text.lower()
+            for part in (
+                "tardó demasiado",
+                "timeout",
+                "json válido",
+                "respuesta vacía",
+                "agotó el límite",
+            )
+        )
+        # DMs: never leave the guest hanging with zero reply after a soft failure.
+        if soft_fail and str(latest.get("type") or item.get("type") or "") == "message":
             for row in burst[:-1]:
                 row["status"] = "batched"
                 row["escalation_reason"] = "merged_burst"
@@ -2783,7 +2792,7 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
                 )
             except Exception:  # noqa: BLE001
                 logger.exception(
-                    "Failed to send timeout recovery reply for %s", item_id
+                    "Failed to send soft-fail recovery reply for %s", item_id
                 )
         for row in burst:
             row["status"] = "failed"
