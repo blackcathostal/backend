@@ -1,0 +1,12 @@
+---
+description: English-only for code/filenames; Spanish only in visible UI
+alwaysApply: true
+---
+
+# English identifiers (mandatory)
+
+Before creating or editing any file in this project, follow `.cursor/skills/english-code-identifiers/SKILL.md`.
+
+- **English only**: filenames, folders, variables, functions, classes, modules, API paths/keys, DB names, env keys, code comments, commits.
+- **Spanish allowed only** in user-visible UI / guest-facing copy.
+- **Never commit** probe/debug test scripts under `scripts/probe_*` or `scripts/debug_*`.

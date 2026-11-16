@@ -5,3 +5,9 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# Local probe / debug scripts — do not commit or deploy
+scripts/probe_*.py
+scripts/debug_*.py
+scripts/probe_*.*
+scripts/debug_*.*
