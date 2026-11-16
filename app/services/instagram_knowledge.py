@@ -328,9 +328,11 @@ DEEPSEEK_TOOLS = [
             "name": "check_guest_bookings",
             "description": (
                 "Check if this guest already has an active unused booking. "
-                "ALWAYS ask for RUT or passport and pass guest_document. "
-                "Call before create_room_booking. If has_active_booking, tell the "
-                "dates and ask: another booking or cancel that one?"
+                "Prefer RUT/passport (guest_document). If they don't remember it, "
+                "use guest_first_name + guest_last_name. When matched_by=name, "
+                "show booking_summaries (name · dates · code) and ask "
+                "«¿es esa tu reserva?». Only after they say yes, cancel/change "
+                "with guest_confirmed=true."
             ),
             "parameters": {
                 "type": "object",
@@ -342,7 +344,7 @@ DEEPSEEK_TOOLS = [
                     "guest_first_name": {"type": "string"},
                     "guest_last_name": {"type": "string"},
                 },
-                "required": ["guest_document"],
+                "required": [],
             },
         },
     },
@@ -352,7 +354,10 @@ DEEPSEEK_TOOLS = [
             "name": "cancel_room_booking",
             "description": (
                 "Cancel an existing FNSrooms booking after the guest confirms. "
-                "Use booking_id from check_guest_bookings."
+                "Use booking_id from check_guest_bookings. "
+                "If found by name only (no RUT), require guest said yes that "
+                "the shown reservation is theirs → guest_confirmed=true. "
+                "For changing dates/room prefer change_room_booking."
             ),
             "parameters": {
                 "type": "object",
@@ -361,8 +366,69 @@ DEEPSEEK_TOOLS = [
                         "type": "string",
                         "description": "Unique booking ID e.g. BC-XXXXXXXXXXXX",
                     },
+                    "guest_confirmed": {
+                        "type": "boolean",
+                        "description": "true if guest confirmed the name-matched booking is theirs",
+                    },
+                    "guest_document": {"type": "string"},
+                    "guest_first_name": {"type": "string"},
+                    "guest_last_name": {"type": "string"},
                 },
                 "required": ["booking_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "change_room_booking",
+            "description": (
+                "Change an existing booking: find old by RUT/passport OR by "
+                "first+last name, check NEW dates availability, cancel old, "
+                "create new. If no document and matched by name, guest must "
+                "confirm «sí, esa es mi reserva» → guest_confirmed=true. "
+                "Call search_room_availability for new dates first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string"},
+                    "end_date": {"type": "string"},
+                    "room_type_code": {"type": "string"},
+                    "rate_plan_code": {"type": "string"},
+                    "amount_after_tax": {"type": "string"},
+                    "guest_first_name": {"type": "string"},
+                    "guest_last_name": {"type": "string"},
+                    "guest_document": {
+                        "type": "string",
+                        "description": "RUT or passport if known",
+                    },
+                    "guest_confirmed": {
+                        "type": "boolean",
+                        "description": "Required true when changing without document after name verification",
+                    },
+                    "old_booking_id": {
+                        "type": "string",
+                        "description": "Optional; required if guest has several actives",
+                    },
+                    "guest_document_type": {"type": "string"},
+                    "adults": {"type": "integer"},
+                    "children": {"type": "integer"},
+                    "units": {"type": "integer"},
+                    "guest_email": {"type": "string"},
+                    "guest_phone": {"type": "string"},
+                    "remarks": {"type": "string"},
+                    "day_rates_json": {"type": "string"},
+                },
+                "required": [
+                    "start_date",
+                    "end_date",
+                    "room_type_code",
+                    "rate_plan_code",
+                    "amount_after_tax",
+                    "guest_first_name",
+                    "guest_last_name",
+                ],
             },
         },
     },
@@ -377,8 +443,9 @@ DEEPSEEK_TOOLS = [
                 "Need guest_document, dates, room_type_code, rate_plan_code, and "
                 "CLP amount_after_tax + day_rates_json from booking_* fields. "
                 "currency must be CLP. Confirm CLP total only (no USD). "
-                "If already_has_active_booking, ask before creating another; "
-                "use confirm_extra_booking=true only if guest insists."
+                "If already_has_active_booking, ask: another, cancel, or change "
+                "(change_room_booking). confirm_extra_booking=true only if insists "
+                "on an additional booking."
             ),
             "parameters": {
                 "type": "object",

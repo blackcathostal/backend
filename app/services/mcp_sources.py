@@ -39,9 +39,10 @@ mcp = FastMCP(
         "Responde con datos del hostal y las preguntas frecuentes. "
         "Para precios y tipos de habitación usa solo preguntas frecuentes. "
         "Si el huésped está autorizado a reservar por API, usa "
-        "check_guest_bookings, search_room_availability, create_room_booking "
-        "y cancel_room_booking. Si ya tiene reserva activa, avisa y pregunta "
-        "si quiere otra o cancelar la anterior. "
+        "check_guest_bookings, search_room_availability, create_room_booking, "
+        "cancel_room_booking y change_room_booking. Siempre pide RUT/pasaporte. "
+        "Para cambiar reserva: documento → cupo nuevas fechas → change_room_booking "
+        "(cancela la vieja y crea la nueva). "
         "Si no, usa get_hostel_info y envíalos al WhatsApp. "
         "Sé vendedor: combina el dato con un beneficio real e invita a quedarse. "
         "Si falta algo, busca en la web. No inventes datos ni promociones."
@@ -438,10 +439,13 @@ async def search_room_availability_tool(
     name="check_guest_bookings",
     description=(
         "Revisa si este huésped ya tiene una reserva activa (aún no usada). "
-        "Pide RUT o pasaporte y pásalo en guest_document para un match exacto. "
-        "Úsala ANTES de create_room_booking. Si has_active_booking=true, "
-        "dile las fechas y pregunta: ¿quieres otra o cancelar esa? "
-        "Para cancelar usa cancel_room_booking."
+        "Ideal: RUT/pasaporte (guest_document). "
+        "Si NO recuerda el documento: pide nombre y apellido "
+        "(guest_first_name + guest_last_name). "
+        "Si matched_by=name, muéstrale booking_summaries "
+        "(nombre · fechas · código) y pregunta «¿es esa tu reserva?». "
+        "Solo si dice que sí → cancel/change con guest_confirmed=true. "
+        "Úsala ANTES de create/change/cancel."
     ),
     structured_output=True,
 )
@@ -453,14 +457,16 @@ async def check_guest_bookings_tool(
     blocked = _booking_gate()
     if blocked:
         return blocked
-    if not str(guest_document or "").strip():
+    has_doc = bool(str(guest_document or "").strip())
+    has_name = bool(str(guest_first_name or "").strip() and str(guest_last_name or "").strip())
+    if not has_doc and not has_name:
         return {
             "ok": False,
-            "needs_document": True,
-            "error": "missing_guest_document",
+            "needs_identity": True,
+            "error": "missing_identity",
             "message": (
-                "Pide RUT (Chile) o número de pasaporte antes de revisar/crear reservas. "
-                "Luego vuelve a llamar check_guest_bookings con guest_document."
+                "Pide RUT/pasaporte. Si no lo recuerda, pide nombre y apellido "
+                "para buscar la reserva y verificarla con él."
             ),
         }
     try:
@@ -479,19 +485,123 @@ async def check_guest_bookings_tool(
     name="cancel_room_booking",
     description=(
         "Cancela una reserva FNSrooms del huésped (ResStatus=Cancel). "
-        "Usa el booking_id de check_guest_bookings. "
-        "Solo si el huésped confirma que quiere eliminar esa reserva."
+        "Usa booking_id de check_guest_bookings. "
+        "Si la encontró solo por nombre (sin RUT), exige que el huésped "
+        "haya confirmado «sí, esa es mi reserva» y pasa guest_confirmed=true "
+        "+ nombre/apellido."
     ),
     structured_output=True,
 )
-async def cancel_room_booking_tool(booking_id: str) -> dict[str, Any]:
+async def cancel_room_booking_tool(
+    booking_id: str,
+    guest_confirmed: bool = False,
+    guest_document: str = "",
+    guest_first_name: str = "",
+    guest_last_name: str = "",
+) -> dict[str, Any]:
     blocked = _booking_gate()
     if blocked:
         return blocked
+    has_doc = bool(str(guest_document or "").strip())
+    if not has_doc and not guest_confirmed:
+        return {
+            "ok": False,
+            "needs_confirmation": True,
+            "error": "identity_not_confirmed",
+            "message": (
+                "Sin documento: primero muéstrale la reserva encontrada "
+                "(nombre y fechas) y espera que diga que sí. "
+                "Luego llama cancel_room_booking con guest_confirmed=true."
+            ),
+        }
     try:
         return await cancel_booking(booking_id=booking_id)
     except FnsMotorError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
+
+
+def _parse_day_rates_json(
+    day_rates_json: str,
+    *,
+    start_date: str,
+    end_date: str,
+    amount_after_tax: str,
+) -> tuple[list[dict[str, str]] | None, dict[str, Any] | None]:
+    day_rates: list[dict[str, str]] = []
+    raw = str(day_rates_json or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                day_rates = [row for row in parsed if isinstance(row, dict)]
+        except json.JSONDecodeError:
+            return None, {
+                "ok": False,
+                "error": "day_rates_json inválido; envía un JSON array.",
+            }
+    if not day_rates:
+        nights = _nights_between(start_date, end_date)
+        try:
+            total = int(float(str(amount_after_tax).replace(",", ".")))
+        except ValueError:
+            total = 0
+        per_night = int(total / nights) if nights else total
+        day_rates = _clp_day_rates(start_date, end_date, per_night)
+    return day_rates, None
+
+
+async def _create_and_remember_booking(
+    *,
+    start_date: str,
+    end_date: str,
+    room_type_code: str,
+    rate_plan_code: str,
+    amount_after_tax: str,
+    guest_first_name: str,
+    guest_last_name: str,
+    guest_document: str,
+    guest_document_type: str = "",
+    adults: int = 2,
+    children: int = 0,
+    units: int = 1,
+    guest_email: str = "",
+    guest_phone: str = "",
+    remarks: str = "",
+    day_rates_json: str = "[]",
+) -> dict[str, Any]:
+    day_rates, err = _parse_day_rates_json(
+        day_rates_json,
+        start_date=start_date,
+        end_date=end_date,
+        amount_after_tax=amount_after_tax,
+    )
+    if err:
+        return err
+    created = await create_booking(
+        start_date=start_date,
+        end_date=end_date,
+        room_type_code=room_type_code,
+        rate_plan_code=rate_plan_code,
+        amount_after_tax=amount_after_tax,
+        currency="CLP",
+        adults=adults,
+        children=children,
+        units=units,
+        guest_first_name=guest_first_name,
+        guest_last_name=guest_last_name,
+        guest_document=guest_document,
+        guest_document_type=guest_document_type,
+        guest_email=guest_email,
+        guest_phone=guest_phone,
+        remarks=remarks or "Reserva Instagram/Facebook Black Cat (CLP)",
+        day_rates=day_rates or [],
+    )
+    remember_channel_booking(
+        booking=created,
+        username=get_reply_username(),
+        channel=get_reply_channel(),
+    )
+    return created
 
 
 @mcp.tool(
@@ -501,11 +611,10 @@ async def cancel_room_booking_tool(booking_id: str) -> dict[str, Any]:
         "Antes: pide RUT/pasaporte, check_guest_bookings y search_room_availability. "
         "guest_document es obligatorio (RUT o pasaporte). "
         "Si ya tiene reserva activa y el huésped no confirmó otra, NO crees: "
-        "avisa fechas y pregunta si quiere otra o cancelar. "
-        "Si el huésped insiste en otra reserva, pasa confirm_extra_booking=true. "
-        "Guarda en CLP: currency=CLP, amount_after_tax=booking_amount_after_tax, "
-        "day_rates_json=booking_day_rates_json. Confirma solo total CLP. "
-        "Pide nombre, apellido, RUT/pasaporte y fechas si faltan."
+        "avisa fechas y pregunta si quiere otra, cancelar, o CAMBIAR "
+        "(change_room_booking). "
+        "Si insiste en otra reserva adicional, confirm_extra_booking=true. "
+        "Guarda en CLP. Confirma solo total CLP."
     ),
     structured_output=True,
 )
@@ -532,12 +641,17 @@ async def create_room_booking_tool(
     blocked = _booking_gate()
     if blocked:
         return blocked
-    if not str(guest_document or "").strip():
+    has_doc = bool(str(guest_document or "").strip())
+    has_name = bool(str(guest_first_name or "").strip() and str(guest_last_name or "").strip())
+    if not has_doc and not has_name:
         return {
             "ok": False,
-            "needs_document": True,
-            "error": "missing_guest_document",
-            "message": "Pide RUT o pasaporte y vuelve a llamar create_room_booking.",
+            "needs_identity": True,
+            "error": "missing_identity",
+            "message": (
+                "Pide RUT/pasaporte. Si no lo recuerda, nombre y apellido "
+                "(y confirma la reserva encontrada antes de seguir)."
+            ),
         }
     # Soft gate: warn if this guest already has an unused booking.
     if not confirm_extra_booking:
@@ -559,9 +673,11 @@ async def create_room_booking_tool(
                 "error": "already_has_active_booking",
                 "message": (
                     "Este huésped ya tiene una reserva activa. "
-                    "Dile las fechas y pregunta si quiere hacer otra "
-                    "o cancelar esa con cancel_room_booking. "
-                    "Si insiste en otra, vuelve a llamar create_room_booking "
+                    "Dile las fechas y pregunta: ¿otra, cancelar esa, o cambiarla? "
+                    "Para cambiar fechas usa change_room_booking "
+                    "(cancela la vieja y crea la nueva). "
+                    "Para solo cancelar: cancel_room_booking. "
+                    "Si insiste en otra adicional: create_room_booking "
                     "con confirm_extra_booking=true."
                 ),
                 "active_bookings": existing.get("bookings") or [],
@@ -571,56 +687,241 @@ async def create_room_booking_tool(
                     "end_date": first.get("end_date"),
                 },
             }
-    # Force CLP persistence for IG/FB bookings.
-    cur = (currency or "CLP").strip().upper() or "CLP"
-    if cur != "CLP":
-        cur = "CLP"
-    day_rates: list[dict[str, str]] = []
-    raw = str(day_rates_json or "").strip()
-    if raw:
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                day_rates = [row for row in parsed if isinstance(row, dict)]
-        except json.JSONDecodeError:
-            return {"ok": False, "error": "day_rates_json inválido; envía un JSON array."}
-    if not day_rates:
-        # Fallback: rebuild CLP night rates from amount/nights if the model omitted them.
-        nights = _nights_between(start_date, end_date)
-        try:
-            total = int(float(str(amount_after_tax).replace(",", ".")))
-        except ValueError:
-            total = 0
-        per_night = int(total / nights) if nights else total
-        day_rates = _clp_day_rates(start_date, end_date, per_night)
     try:
-        created = await create_booking(
+        return await _create_and_remember_booking(
             start_date=start_date,
             end_date=end_date,
             room_type_code=room_type_code,
             rate_plan_code=rate_plan_code,
             amount_after_tax=amount_after_tax,
-            currency=cur,
-            adults=adults,
-            children=children,
-            units=units,
             guest_first_name=guest_first_name,
             guest_last_name=guest_last_name,
             guest_document=guest_document,
             guest_document_type=guest_document_type,
+            adults=adults,
+            children=children,
+            units=units,
             guest_email=guest_email,
             guest_phone=guest_phone,
-            remarks=remarks or "Reserva Instagram/Facebook Black Cat (CLP)",
-            day_rates=day_rates,
+            remarks=remarks,
+            day_rates_json=day_rates_json,
         )
-        remember_channel_booking(
-            booking=created,
-            username=get_reply_username(),
-            channel=get_reply_channel(),
-        )
-        return created
     except FnsMotorError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
+
+
+@mcp.tool(
+    name="change_room_booking",
+    description=(
+        "Cambia una reserva: busca la vieja (RUT/pasaporte o nombre+apellido), "
+        "verifica cupo en fechas NUEVAS, cancela la anterior y crea la nueva. "
+        "Si no hay documento y se buscó por nombre, el huésped debió confirmar "
+        "«sí, esa es mi reserva» → guest_confirmed=true. "
+        "Antes: search_room_availability y pasar códigos/montos CLP."
+    ),
+    structured_output=True,
+)
+async def change_room_booking_tool(
+    start_date: str,
+    end_date: str,
+    room_type_code: str,
+    rate_plan_code: str,
+    amount_after_tax: str,
+    guest_first_name: str,
+    guest_last_name: str,
+    guest_document: str = "",
+    old_booking_id: str = "",
+    guest_document_type: str = "",
+    guest_confirmed: bool = False,
+    adults: int = 2,
+    children: int = 0,
+    units: int = 1,
+    guest_email: str = "",
+    guest_phone: str = "",
+    remarks: str = "",
+    day_rates_json: str = "[]",
+) -> dict[str, Any]:
+    blocked = _booking_gate()
+    if blocked:
+        return blocked
+    document = str(guest_document or "").strip()
+    has_name = bool(str(guest_first_name or "").strip() and str(guest_last_name or "").strip())
+    if not document and not has_name:
+        return {
+            "ok": False,
+            "needs_identity": True,
+            "error": "missing_identity",
+            "message": (
+                "Pide RUT/pasaporte. Si no lo recuerda, nombre y apellido, "
+                "verifica la reserva con él y si confirma usa guest_confirmed=true."
+            ),
+        }
+    if not document and not guest_confirmed:
+        return {
+            "ok": False,
+            "needs_confirmation": True,
+            "error": "identity_not_confirmed",
+            "message": (
+                "Sin documento: muéstrale la reserva (nombre y fechas) y espera "
+                "que diga que sí. Luego change_room_booking con guest_confirmed=true."
+            ),
+        }
+
+    try:
+        existing = await list_guest_active_bookings(
+            username=get_reply_username(),
+            channel=get_reply_channel(),
+            guest_first_name=guest_first_name,
+            guest_last_name=guest_last_name,
+            guest_document=document,
+        )
+    except FnsMotorError as exc:
+        return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
+
+    active = [row for row in (existing.get("bookings") or []) if isinstance(row, dict)]
+    if not active:
+        return {
+            "ok": False,
+            "error": "no_active_booking",
+            "message": (
+                "No encontré reserva activa con esos datos. "
+                "Pide RUT/pasaporte o nombre y apellido de nuevo."
+            ),
+        }
+
+    wanted_old = str(old_booking_id or "").strip()
+    old_row = None
+    if wanted_old:
+        old_row = next(
+            (row for row in active if str(row.get("booking_id") or "") == wanted_old),
+            None,
+        )
+        if not old_row:
+            return {
+                "ok": False,
+                "error": "old_booking_not_found",
+                "message": "Ese booking_id no coincide con una reserva activa de este documento.",
+                "active_bookings": active,
+            }
+    else:
+        if len(active) > 1:
+            return {
+                "ok": False,
+                "needs_booking_id": True,
+                "error": "multiple_active_bookings",
+                "message": (
+                    "Hay varias reservas activas. Pregunta cuál cambiar "
+                    "y pasa old_booking_id."
+                ),
+                "active_bookings": active,
+            }
+        old_row = active[0]
+
+    old_id = str(old_row.get("booking_id") or "").strip()
+    if not old_id:
+        return {"ok": False, "error": "missing_old_booking_id"}
+
+    # Verify new-date availability BEFORE cancelling the old booking.
+    try:
+        avail = await search_availability(
+            start_date=start_date,
+            end_date=end_date,
+            adults=adults,
+            children=children,
+            currency="USD",
+        )
+        priced = await _attach_guest_pricing(
+            avail, start_date=start_date, end_date=end_date
+        )
+    except FnsMotorError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "details": getattr(exc, "details", None),
+            "message": "No pude verificar disponibilidad de las fechas nuevas; no cancelé la reserva vieja.",
+        }
+
+    room_code = str(room_type_code or "").strip()
+    match = next(
+        (
+            room
+            for room in (priced.get("rooms") or [])
+            if isinstance(room, dict)
+            and str(room.get("room_type_code") or "") == room_code
+        ),
+        None,
+    )
+    if not match:
+        return {
+            "ok": False,
+            "error": "no_availability_new_dates",
+            "message": (
+                "No hay cupo para esas fechas/habitación. "
+                "No cancelé la reserva anterior. Ofrece otras fechas."
+            ),
+            "old_booking": old_row,
+            "availability": priced,
+        }
+
+    try:
+        cancelled = await cancel_booking(booking_id=old_id)
+    except FnsMotorError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "details": getattr(exc, "details", None),
+            "message": "No pude cancelar la reserva anterior; no creé la nueva.",
+            "old_booking": old_row,
+        }
+
+    create_document = document or str(old_row.get("guest_document") or "").strip()
+    create_doc_type = guest_document_type or str(old_row.get("guest_document_type") or "")
+    try:
+        created = await _create_and_remember_booking(
+            start_date=start_date,
+            end_date=end_date,
+            room_type_code=room_type_code,
+            rate_plan_code=rate_plan_code,
+            amount_after_tax=amount_after_tax,
+            guest_first_name=guest_first_name,
+            guest_last_name=guest_last_name,
+            guest_document=create_document,
+            guest_document_type=create_doc_type,
+            adults=adults,
+            children=children,
+            units=units,
+            guest_email=guest_email,
+            guest_phone=guest_phone,
+            remarks=remarks
+            or f"Cambio de reserva (reemplaza {old_id}) Instagram/Facebook Black Cat",
+            day_rates_json=day_rates_json,
+        )
+    except FnsMotorError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "details": getattr(exc, "details", None),
+            "cancelled_old": True,
+            "cancelled_booking_id": old_id,
+            "message": (
+                f"Cancelé la reserva anterior ({old_id}) pero falló crear la nueva. "
+                "Pide disculpas y ofrece reintentar create_room_booking "
+                "con confirm_extra_booking=true."
+            ),
+        }
+
+    return {
+        "ok": True,
+        "changed": True,
+        "cancelled_booking": cancelled,
+        "new_booking": created,
+        "message": (
+            f"Reserva cambiada: cancelé {old_id} "
+            f"({old_row.get('start_date')} al {old_row.get('end_date')}) "
+            f"y creé {created.get('booking_id')} "
+            f"({created.get('start_date')} al {created.get('end_date')})."
+        ),
+    }
 
 
 @mcp.tool(

@@ -411,9 +411,9 @@ async def create_booking(
     last = str(guest_last_name or "").strip()
     document = str(guest_document or "").strip()
     doc_type = infer_document_type(document, guest_document_type)
-    if not all([start, end, room_code, rate_code, first, last, document]):
+    if not all([start, end, room_code, rate_code, first, last]):
         raise FnsMotorError(
-            "Faltan datos: fechas, habitación, tarifa, nombre, apellido y RUT/pasaporte"
+            "Faltan datos: fechas, habitación, tarifa, nombre y apellido del huésped"
         )
 
     total = str(amount_after_tax).strip()
@@ -781,6 +781,25 @@ async def list_bookings(
     return {"ok": True, "start_date": start, "end_date": end, "bookings": rows, "raw": payload}
 
 
+def _names_match(a_first: str, a_last: str, b_first: str, b_last: str) -> bool:
+    return (
+        str(a_first or "").strip().lower() == str(b_first or "").strip().lower()
+        and str(a_last or "").strip().lower() == str(b_last or "").strip().lower()
+        and bool(str(a_first or "").strip())
+        and bool(str(a_last or "").strip())
+    )
+
+
+def _booking_identity_summary(row: dict[str, Any]) -> str:
+    guest = str(row.get("guest") or "").strip() or (
+        f"{row.get('guest_first_name') or ''} {row.get('guest_last_name') or ''}".strip()
+    )
+    start = str(row.get("start_date") or "")[:10]
+    end = str(row.get("end_date") or "")[:10]
+    bid = str(row.get("booking_id") or "")
+    return f"{guest} · {start} al {end} · {bid}".strip(" ·")
+
+
 async def list_guest_active_bookings(
     *,
     username: str | None = None,
@@ -790,12 +809,14 @@ async def list_guest_active_bookings(
     guest_document: str = "",
     days_ahead: int = 120,
 ) -> dict[str, Any]:
-    """Active/upcoming bookings for this IG/FB guest (document + local + Motor)."""
+    """Active/upcoming bookings (document preferred; name fallback with confirmation)."""
     today = datetime.now(timezone.utc).date()
     handle = str(username or "").strip().lower().lstrip("@")
     ch = str(channel or "instagram").strip().lower() or "instagram"
-    first = str(guest_first_name or "").strip().lower()
-    last = str(guest_last_name or "").strip().lower()
+    first = str(guest_first_name or "").strip()
+    last = str(guest_last_name or "").strip()
+    first_l = first.lower()
+    last_l = last.lower()
     doc_norm = normalize_document(guest_document)
 
     local_rows: list[dict[str, Any]] = []
@@ -812,19 +833,32 @@ async def list_guest_active_bookings(
         matched = False
         if doc_norm and row_doc and row_doc == doc_norm:
             matched = True
-        elif handle and str(row.get("username") or "").lower().lstrip("@") == handle:
-            # Fallback for older rows without document.
+        elif first_l and last_l and _names_match(
+            first_l,
+            last_l,
+            str(row.get("guest_first_name") or ""),
+            str(row.get("guest_last_name") or ""),
+        ):
+            matched = True
+        elif (
+            not doc_norm
+            and not (first_l and last_l)
+            and handle
+            and str(row.get("username") or "").lower().lstrip("@") == handle
+        ):
+            # Weak fallback only when neither document nor name was provided.
             matched = True
         if not matched:
             continue
         if ch and str(row.get("channel") or "").lower() not in {ch, ""}:
             if str(row.get("channel") or "").strip() and not (
-                doc_norm and row_doc and row_doc == doc_norm
+                (doc_norm and row_doc and row_doc == doc_norm)
+                or (first_l and last_l)
             ):
                 continue
         local_rows.append(row)
 
-    # Motor scan: prefer NIF/document match; name only as weak fallback.
+    # Motor scan: document first; name as fallback when no document.
     motor_rows: list[dict[str, Any]] = []
     docs_to_match: set[str] = set()
     if doc_norm:
@@ -834,8 +868,15 @@ async def list_guest_active_bookings(
         if nd:
             docs_to_match.add(nd)
     names_to_match: set[tuple[str, str]] = set()
-    if first and last and not docs_to_match:
-        names_to_match.add((first, last))
+    if first_l and last_l and not doc_norm:
+        names_to_match.add((first_l, last_l))
+    for row in local_rows:
+        if doc_norm:
+            break
+        rf = str(row.get("guest_first_name") or "").strip().lower()
+        rl = str(row.get("guest_last_name") or "").strip().lower()
+        if rf and rl:
+            names_to_match.add((rf, rl))
 
     if docs_to_match or names_to_match:
         start = today.isoformat()
@@ -844,7 +885,9 @@ async def list_guest_active_bookings(
         for row in listed.get("bookings") or []:
             if not _is_active_unused(row, today=today):
                 continue
-            row_doc = normalize_document(row.get("guest_document_normalized") or row.get("guest_document"))
+            row_doc = normalize_document(
+                row.get("guest_document_normalized") or row.get("guest_document")
+            )
             if docs_to_match and row_doc and row_doc in docs_to_match:
                 motor_rows.append(row)
                 continue
@@ -861,21 +904,44 @@ async def list_guest_active_bookings(
             continue
         by_id[bid] = row
     active = sorted(by_id.values(), key=lambda r: str(r.get("start_date") or ""))
+    if doc_norm:
+        matched_by = "document"
+    elif first_l and last_l:
+        matched_by = "name"
+    elif handle:
+        matched_by = "username"
+    else:
+        matched_by = "unknown"
+    needs_identity_confirmation = matched_by in {"name", "username"} and bool(active)
+    summaries = [_booking_identity_summary(row) for row in active]
+    if active and needs_identity_confirmation:
+        message = (
+            "Encontré reserva(s) por nombre (sin documento). "
+            "Muéstrale al huésped: "
+            + "; ".join(summaries)
+            + ". Pregunta: «¿es esa tu reserva?» "
+            "Solo si dice que sí, usa cancel_room_booking o change_room_booking "
+            "con guest_confirmed=true."
+        )
+    elif active:
+        message = (
+            "Este huésped ya tiene reserva(s) activa(s). "
+            "Pregunta si quiere otra, cancelar o cambiar."
+        )
+    else:
+        message = "No hay reservas activas pendientes para este huésped."
     return {
         "ok": True,
         "username": handle,
         "channel": ch,
         "guest_document_normalized": doc_norm,
-        "matched_by": "document" if doc_norm else ("username" if handle else "name"),
+        "matched_by": matched_by,
+        "needs_identity_confirmation": needs_identity_confirmation,
+        "booking_summaries": summaries,
         "active_count": len(active),
         "has_active_booking": bool(active),
         "bookings": active,
-        "message": (
-            "Este huésped ya tiene reserva(s) activa(s). "
-            "Pregunta si quiere otra o cancelar la anterior con cancel_room_booking."
-            if active
-            else "No hay reservas activas pendientes para este huésped."
-        ),
+        "message": message,
     }
 
 
