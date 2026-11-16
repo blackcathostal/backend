@@ -327,12 +327,13 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "check_guest_bookings",
             "description": (
-                "Check if this guest already has an active unused booking. "
-                "Prefer RUT/passport (guest_document). If they don't remember it, "
-                "use guest_first_name + guest_last_name. When matched_by=name, "
-                "show booking_summaries (name · dates · code) and ask "
-                "«¿es esa tu reserva?». Only after they say yes, cancel/change "
-                "with guest_confirmed=true."
+                "REQUIRED before create_room_booking whenever the guest gave "
+                "RUT/passport OR first+last name while wanting to book. "
+                "Finds unused active bookings. Prefer guest_document; else "
+                "guest_first_name + guest_last_name. When matched_by=name, "
+                "show booking_summaries and ask «¿es esa tu reserva?». "
+                "If has_active_booking, ask: another, cancel, or change — "
+                "do not silently create another."
             ),
             "parameters": {
                 "type": "object",
