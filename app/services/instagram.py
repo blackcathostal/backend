@@ -2735,6 +2735,7 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
                     recent_help is not None and recent_help < GREETING_SKIP_WINDOW_SECONDS
                 ),
                 public_ugc=_is_foreign_or_collaborative(latest),
+                channel="instagram",
             )
         finally:
             db.close()
@@ -2794,6 +2795,7 @@ async def suggest_reply(item_id: str) -> dict[str, Any]:
                 exclude_id=item.get("id"),
             ),
             thread_history=thread_history_for_reply(item, inbound_text=inbound),
+            channel="instagram",
         )
     finally:
         db.close()

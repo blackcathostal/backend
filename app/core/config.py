@@ -130,6 +130,24 @@ class Settings(BaseSettings):
     deepseek_offpeak_cache_hit_price_per_million: float = 0.007
     deepseek_offpeak_cache_miss_price_per_million: float = 0.22
     deepseek_offpeak_output_price_per_million: float = 0.66
+    # FNSrooms Motor (channel / booking engine) — Basic Auth + POST JSON
+    fns_channel_id: str = ""
+    fns_channel_user: str = ""
+    fns_channel_password: str = ""
+    fns_motor_base_url: str = "https://admin.fnsbooking.com"
+    fns_hotel_id: str = ""
+    fns_motor_availability_path: str = (
+        "/recieveNotifications/ota/2.1/search_availability_json.php"
+    )
+    # FNSrooms PMS API service (not the web portal login)
+    fns_pms_id: str = ""
+    fns_pms_user: str = ""
+    fns_pms_password: str = ""
+    fns_pms_base_url: str = "https://adminchile1.fnsmanager.com"
+    fns_hotel_pms_id: str = ""
+    # Pilot allowlists for live FNS booking via IG/FB agents (comma-separated handles).
+    fns_booking_ig_allowlist: str = "emkrypted"
+    fns_booking_fb_allowlist: str = ""
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

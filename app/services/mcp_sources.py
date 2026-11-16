@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -17,21 +18,46 @@ from app.models.ai_sources import AiSources
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.users import Users
 from app.services.ai_api_sources import collect_external_api_materials
+from app.services.fns_motor import (
+    FnsMotorError,
+    booking_allowed,
+    create_booking,
+    search_availability,
+)
 from app.services.hostel_directions import directions_from_hostel
 from app.services.instagram_knowledge import hostel_info_dict, search_common_answers
 from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content
+from app.services.reply_context import get_reply_channel, get_reply_username
 
 mcp = FastMCP(
     "Black Cat Tourism Sources",
     instructions=(
         "Responde con datos del hostal y las preguntas frecuentes. "
         "Para precios y tipos de habitación usa solo preguntas frecuentes. "
-        "Si piden reservar, usa get_hostel_info y envíalos al WhatsApp. "
+        "Si el huésped está autorizado a reservar por API, usa "
+        "search_room_availability y create_room_booking. "
+        "Si no, usa get_hostel_info y envíalos al WhatsApp. "
         "Sé vendedor: combina el dato con un beneficio real e invita a quedarse. "
         "Si falta algo, busca en la web. No inventes datos ni promociones."
     ),
     streamable_http_path="/",
 )
+
+
+def _booking_gate() -> dict[str, Any] | None:
+    username = get_reply_username()
+    channel = get_reply_channel()
+    if booking_allowed(channel=channel, username=username):
+        return None
+    return {
+        "ok": False,
+        "error": (
+            "Reserva por API no habilitada para este usuario. "
+            "Ofrece WhatsApp con get_hostel_info."
+        ),
+        "channel": channel,
+        "username": username,
+    }
 
 
 @mcp.tool(
@@ -220,7 +246,7 @@ def search_rooms_tool(query: str = "") -> dict[str, Any]:
     description=(
         "Lee check-in, check-out, desayuno, estacionamiento, WhatsApp, correo y dirección "
         "guardados en la información del hostal. "
-        "Úsala siempre si piden reservar: incluye whatsapp_url en la respuesta."
+        "Si el huésped NO puede reservar por API, úsala para mandarlo a WhatsApp."
     ),
     structured_output=True,
 )
@@ -228,6 +254,98 @@ def get_hostel_info_tool() -> dict[str, Any]:
     with SessionLocal() as db:
         info = hostel_info_dict(db)
     return {"ok": True, **info}
+
+
+@mcp.tool(
+    name="search_room_availability",
+    description=(
+        "Consulta disponibilidad real en FNSrooms (Motor) para Black Cat Hostal. "
+        "Úsala cuando un huésped autorizado quiera reservar o ver cupo/precios por fechas. "
+        "Devuelve room_type_code, rate_plan_code, precios y day_rates para create_room_booking. "
+        "Moneda preferida: USD."
+    ),
+    structured_output=True,
+)
+async def search_room_availability_tool(
+    start_date: str,
+    end_date: str,
+    adults: int = 2,
+    children: int = 0,
+    currency: str = "USD",
+) -> dict[str, Any]:
+    blocked = _booking_gate()
+    if blocked:
+        return blocked
+    try:
+        return await search_availability(
+            start_date=start_date,
+            end_date=end_date,
+            adults=adults,
+            children=children,
+            currency=currency or "USD",
+        )
+    except FnsMotorError as exc:
+        return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
+
+
+@mcp.tool(
+    name="create_room_booking",
+    description=(
+        "Crea una reserva real en FNSrooms Motor. Solo para huéspedes autorizados. "
+        "Antes llama search_room_availability y usa room_type_code, rate_plan_code, "
+        "precio total y day_rates. Pide nombre, apellido y fechas si faltan."
+    ),
+    structured_output=True,
+)
+async def create_room_booking_tool(
+    start_date: str,
+    end_date: str,
+    room_type_code: str,
+    rate_plan_code: str,
+    amount_after_tax: str,
+    guest_first_name: str,
+    guest_last_name: str,
+    currency: str = "USD",
+    adults: int = 2,
+    children: int = 0,
+    units: int = 1,
+    guest_email: str = "",
+    guest_phone: str = "",
+    remarks: str = "",
+    day_rates_json: str = "[]",
+) -> dict[str, Any]:
+    blocked = _booking_gate()
+    if blocked:
+        return blocked
+    day_rates: list[dict[str, str]] = []
+    raw = str(day_rates_json or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                day_rates = [row for row in parsed if isinstance(row, dict)]
+        except json.JSONDecodeError:
+            return {"ok": False, "error": "day_rates_json inválido; envía un JSON array."}
+    try:
+        return await create_booking(
+            start_date=start_date,
+            end_date=end_date,
+            room_type_code=room_type_code,
+            rate_plan_code=rate_plan_code,
+            amount_after_tax=amount_after_tax,
+            currency=currency or "USD",
+            adults=adults,
+            children=children,
+            units=units,
+            guest_first_name=guest_first_name,
+            guest_last_name=guest_last_name,
+            guest_email=guest_email,
+            guest_phone=guest_phone,
+            remarks=remarks,
+            day_rates=day_rates,
+        )
+    except FnsMotorError as exc:
+        return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
 
 
 @mcp.tool(

@@ -283,10 +283,83 @@ DEEPSEEK_TOOLS = [
             "description": (
                 "Get official check-in/out times, breakfast hours, parking, WhatsApp URL, "
                 "address and email for Black Cat Hostal. "
-                "ALWAYS call this when the guest wants to book/reserve (“reservame”, "
-                "“quiero reservar”, etc.) and put whatsapp_url in the reply."
+                "If the guest is NOT allowed to book via API, use this and send WhatsApp."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_room_availability",
+            "description": (
+                "Check real FNSrooms availability for Black Cat Hostal by dates. "
+                "Use for authorized guests who want to reserve or see live rates/cupo. "
+                "Returns room_type_code, rate_plan_code, prices and day_rates. Prefer USD."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Check-in YYYY-MM-DD",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "Check-out YYYY-MM-DD",
+                    },
+                    "adults": {"type": "integer", "description": "Adults (default 2)"},
+                    "children": {"type": "integer", "description": "Children (default 0)"},
+                    "currency": {
+                        "type": "string",
+                        "description": "ISO currency, prefer USD",
+                    },
+                },
+                "required": ["start_date", "end_date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_room_booking",
+            "description": (
+                "Create a real FNSrooms booking. Only for authorized guests. "
+                "Call search_room_availability first. Need guest first/last name, "
+                "dates, room_type_code, rate_plan_code, amount_after_tax and day_rates_json."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string"},
+                    "end_date": {"type": "string"},
+                    "room_type_code": {"type": "string"},
+                    "rate_plan_code": {"type": "string"},
+                    "amount_after_tax": {"type": "string"},
+                    "guest_first_name": {"type": "string"},
+                    "guest_last_name": {"type": "string"},
+                    "currency": {"type": "string"},
+                    "adults": {"type": "integer"},
+                    "children": {"type": "integer"},
+                    "units": {"type": "integer"},
+                    "guest_email": {"type": "string"},
+                    "guest_phone": {"type": "string"},
+                    "remarks": {"type": "string"},
+                    "day_rates_json": {
+                        "type": "string",
+                        "description": 'JSON array like [{"day":"2026-11-20","pnight":"90.00"}]',
+                    },
+                },
+                "required": [
+                    "start_date",
+                    "end_date",
+                    "room_type_code",
+                    "rate_plan_code",
+                    "amount_after_tax",
+                    "guest_first_name",
+                    "guest_last_name",
+                ],
+            },
         },
     },
     {

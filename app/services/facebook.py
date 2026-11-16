@@ -999,6 +999,7 @@ async def suggest_inbox_reply(item_id: str) -> dict[str, Any]:
             item_type="comment" if detail.get("type") == "comment" else "message",
             author_username=detail.get("peer_username") or detail.get("author_username"),
             thread_history=_facebook_thread_history(detail, text),
+            channel="facebook",
         )
     finally:
         db.close()

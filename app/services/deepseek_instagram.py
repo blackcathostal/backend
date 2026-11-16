@@ -13,8 +13,10 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.services.fns_motor import booking_allowed
 from app.services.instagram_knowledge import DEEPSEEK_TOOLS, hostel_info_dict
 from app.services.mcp_sources import call_reply_tool
+from app.services.reply_context import set_reply_context
 from app.services.room_rates import load_room_rates
 
 SANTIAGO = ZoneInfo("America/Santiago")
@@ -560,7 +562,9 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- Cédula/pasaporte/beneficio dudoso: WhatsApp, no inventes.\n"
         "- WhatsApp máximo 1 vez por hilo. Si ya salió, no lo menciones otra vez ni digas «por WhatsApp».\n"
         "- NUNCA digas que confirmas o hablas con recepción.\n"
-        "- Reserva / «por dónde reservo»: SIEMPRE el enlace WhatsApp + fechas/personas. Nunca digas «por ahí».\n"
+        "- Reserva / «por dónde reservo»: si el huésped NO está autorizado a API, "
+        "WhatsApp + fechas/personas. Si SÍ está autorizado, usa search_room_availability "
+        "y create_room_booking (pide fechas, personas, nombre/apellido). Nunca digas «por ahí».\n"
         "- Tiempo/distancia: eta_only=true → solo min en auto, SIN mapa.\n"
         "- Si se despide, despídete corto. Si no, no.\n"
         "- Instagram y Facebook: mismas reglas.\n"
@@ -1491,8 +1495,11 @@ async def generate_instagram_reply(
     thread_history: list[dict[str, str]] | None = None,
     skip_duplicate_greeting: bool = False,
     public_ugc: bool = False,
+    channel: str = "instagram",
 ) -> dict[str, Any]:
     """Return {action, message, reason, model} using DeepSeek + knowledge tools."""
+    set_reply_context(username=author_username, channel=channel)
+    can_book = booking_allowed(channel=channel, username=author_username)
     prior = [
         turn
         for turn in (thread_history or [])
@@ -1500,7 +1507,7 @@ async def generate_instagram_reply(
     ]
     is_follow_up = bool(prior)
     # On foreign/collab reels, prices/booking are redirected to DM by the caller.
-    if _looks_like_price_question(inbound_text) and not public_ugc:
+    if _looks_like_price_question(inbound_text) and not public_ugc and not can_book:
         return _price_summary_reply(
             inbound_text=inbound_text,
             is_follow_up=is_follow_up,
@@ -1528,7 +1535,8 @@ async def generate_instagram_reply(
             prior=prior,
             reason="doc_id_whatsapp",
         )
-    if _looks_like_reservation(inbound_text) and not public_ugc:
+    # Pilot: allowlisted guests go through FNS Motor tools instead of WhatsApp-only.
+    if _looks_like_reservation(inbound_text) and not public_ugc and not can_book:
         return _reservation_whatsapp_reply(
             db,
             inbound_text=inbound_text,
@@ -1548,12 +1556,20 @@ async def generate_instagram_reply(
         if public_ugc
         else ""
     )
+    booking_hint = (
+        "\n\nEste huésped SÍ puede reservar por API FNSrooms. "
+        "Si pide reserva/disponibilidad: usa search_room_availability (USD) y "
+        "create_room_booking. Pide fechas, personas, nombre y apellido. "
+        "Confirma habitación/tarifa/total antes de crear. No inventes códigos."
+        if can_book and not public_ugc
+        else ""
+    )
     base, model, headers = _require_deepseek()
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
             "content": system_prompt_for_reply(
-                distance_hint + ugc_hint, is_follow_up=is_follow_up
+                distance_hint + ugc_hint + booking_hint, is_follow_up=is_follow_up
             ),
         },
     ]
