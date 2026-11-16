@@ -18,9 +18,18 @@ from app.services.facturacion_client import FacturacionClient, FacturacionError
 
 router = APIRouter(prefix="/accounting-accounts", tags=["accounting-accounts"])
 
-COA_FILE = Path(__file__).resolve().parents[1] / "data" / "chile_hostel_coa.json"
+COA_FILE = Path(__file__).resolve().parents[1] / "data" / "blackcat_eerr_coa.json"
 VALID_TYPES = {"activo", "pasivo", "patrimonio", "ingreso", "gasto"}
 VALID_NATURES = {"deudora", "acreedora"}
+CATEGORY_ORDER = {
+    "Ingresos": 10,
+    "Remuneraciones": 20,
+    "Materiales": 30,
+    "Mantencion": 40,
+    "Servicios": 50,
+    "Activo Fijo": 60,
+    "Balance": 70,
+}
 
 
 def _load_coa_catalog() -> list[dict]:
@@ -46,8 +55,13 @@ def _load_coa_catalog() -> list[dict]:
             continue
         code = str(item.get("code") or "").strip()
         name = str(item.get("name") or "").strip()
+        category = str(item.get("category") or "").strip()
         account_type = str(item.get("account_type") or "").strip().lower()
         nature = str(item.get("nature") or "deudora").strip().lower()
+        try:
+            sort_order = int(item.get("sort_order") or 0)
+        except (TypeError, ValueError):
+            sort_order = 0
         if not code or not name:
             continue
         if account_type not in VALID_TYPES or nature not in VALID_NATURES:
@@ -56,13 +70,19 @@ def _load_coa_catalog() -> list[dict]:
             {
                 "code": code,
                 "name": name,
+                "category": category,
                 "account_type": account_type,
                 "nature": nature,
+                "sort_order": sort_order,
             }
         )
     if not accounts:
         raise HTTPException(status_code=500, detail="Catálogo de cuentas contables sin filas válidas")
     return accounts
+
+
+def _clean_category(value: str | None) -> str:
+    return str(value or "").strip()
 
 
 @router.get("/", response_model=list[AccountingAccountsOut])
@@ -74,7 +94,22 @@ def list_accounting_accounts(
     query = db.query(AccountingAccounts)
     if active_only:
         query = query.filter(AccountingAccounts.is_active.is_(True))
-    return query.order_by(AccountingAccounts.code.asc(), AccountingAccounts.id.asc()).all()
+    rows = query.order_by(
+        AccountingAccounts.category.asc(),
+        AccountingAccounts.sort_order.asc(),
+        AccountingAccounts.code.asc(),
+        AccountingAccounts.id.asc(),
+    ).all()
+    rows.sort(
+        key=lambda row: (
+            CATEGORY_ORDER.get(row.category or "", 999),
+            row.category or "",
+            int(row.sort_order or 0),
+            row.code or "",
+            row.id or 0,
+        )
+    )
+    return rows
 
 
 @router.post("/import-facturacion", response_model=AccountingAccountsImportResult)
@@ -103,8 +138,10 @@ def import_accounting_accounts_from_facturacion(
             account = AccountingAccounts(
                 code=code,
                 name=item["name"],
+                category=item["category"],
                 account_type=item["account_type"],
                 nature=item["nature"],
+                sort_order=item["sort_order"],
                 description=None,
                 is_active=True,
             )
@@ -117,11 +154,17 @@ def import_accounting_accounts_from_facturacion(
         if row.name != item["name"]:
             row.name = item["name"]
             changed = True
+        if (row.category or "") != item["category"]:
+            row.category = item["category"]
+            changed = True
         if row.account_type != item["account_type"]:
             row.account_type = item["account_type"]
             changed = True
         if row.nature != item["nature"]:
             row.nature = item["nature"]
+            changed = True
+        if int(row.sort_order or 0) != item["sort_order"]:
+            row.sort_order = item["sort_order"]
             changed = True
         if not row.is_active:
             row.is_active = True
@@ -163,8 +206,10 @@ def create_accounting_account(
     account = AccountingAccounts(
         code=code,
         name=payload.name.strip(),
+        category=_clean_category(payload.category),
         account_type=payload.account_type,
         nature=payload.nature,
+        sort_order=int(payload.sort_order or 0),
         description=(payload.description or "").strip() or None,
         is_active=payload.is_active,
     )
@@ -198,9 +243,13 @@ def update_accounting_account(
         data["code"] = code
     if "name" in data and data["name"] is not None:
         data["name"] = str(data["name"]).strip()
+    if "category" in data and data["category"] is not None:
+        data["category"] = _clean_category(data["category"])
     if "description" in data and data["description"] is not None:
         cleaned = str(data["description"]).strip()
         data["description"] = cleaned or None
+    if "sort_order" in data and data["sort_order"] is not None:
+        data["sort_order"] = int(data["sort_order"])
 
     for key, value in data.items():
         setattr(account, key, value)

@@ -161,6 +161,20 @@ def _ensure_schema_patches() -> None:
             conn.execute(
                 text("ALTER TABLE complaints ADD COLUMN data_consent_accepted_at DATETIME NULL")
             )
+        if not column_exists("accounting_accounts", "category"):
+            conn.execute(
+                text(
+                    "ALTER TABLE accounting_accounts "
+                    "ADD COLUMN category VARCHAR(80) NOT NULL DEFAULT ''"
+                )
+            )
+        if not column_exists("accounting_accounts", "sort_order"):
+            conn.execute(
+                text(
+                    "ALTER TABLE accounting_accounts "
+                    "ADD COLUMN sort_order INT NOT NULL DEFAULT 0"
+                )
+            )
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

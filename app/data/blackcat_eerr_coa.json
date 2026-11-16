@@ -1,0 +1,44 @@
+[
+  {"code": "4101", "name": "Hospedaje", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 10},
+  {"code": "4102", "name": "Consumos", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 20},
+  {"code": "4103", "name": "Estacionamiento", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 30},
+
+  {"code": "5101", "name": "Sueldo Base", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
+  {"code": "5102", "name": "Horas Extras", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
+  {"code": "5103", "name": "Gratificación", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
+  {"code": "5104", "name": "Colación", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 40},
+  {"code": "5105", "name": "Movilización", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 50},
+  {"code": "5106", "name": "Beneficios Trabajador", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 60},
+  {"code": "5107", "name": "Uniformes", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 70},
+  {"code": "5108", "name": "Honorarios Apoyo", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 80},
+  {"code": "5109", "name": "Honorarios Profesionales", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 90},
+
+  {"code": "5201", "name": "Insumos Bar", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
+  {"code": "5202", "name": "Insumos Cafeteria", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
+  {"code": "5203", "name": "Insumos de Limpieza", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
+  {"code": "5204", "name": "Lenceria", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 40},
+  {"code": "5205", "name": "Utiles de Oficina", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 50},
+
+  {"code": "5301", "name": "Mantención Ascensores", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
+  {"code": "5302", "name": "Mantención Fumigación", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
+  {"code": "5303", "name": "Mantencion General", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
+  {"code": "5304", "name": "Mantención Piscina", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 40},
+  {"code": "5305", "name": "Mantención Termos", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 50},
+
+  {"code": "5401", "name": "Comisiones Booking", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
+  {"code": "5402", "name": "Comisión Expidia", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
+  {"code": "5403", "name": "Comisión HotelBeds", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
+  {"code": "5404", "name": "Comisión FNS", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 40},
+  {"code": "5405", "name": "Comisiones Transbank", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 50},
+  {"code": "5406", "name": "Comision Banco", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 60},
+  {"code": "5407", "name": "Comisión Fee Cafeteria", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 70},
+  {"code": "5408", "name": "Internet", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 80},
+  {"code": "5409", "name": "Seguro", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 90},
+  {"code": "5410", "name": "Servicio de Fotocopiadora", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 100},
+  {"code": "5411", "name": "Servicio Lavandería", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 110},
+  {"code": "5412", "name": "Tecnologias de Información", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 120},
+
+  {"code": "1201", "name": "Compra Lenceria", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 10},
+  {"code": "1202", "name": "Compra Aire Acondicionado", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 20},
+  {"code": "1203", "name": "Compra Termos y Bomba", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 30}
+]
