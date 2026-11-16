@@ -293,9 +293,12 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "search_room_availability",
             "description": (
-                "Check real FNSrooms availability for Black Cat Hostal by dates. "
-                "Use for authorized guests who want to reserve or see live rates/cupo. "
-                "Returns room_type_code, rate_plan_code, prices and day_rates. Prefer USD."
+                "Check real FNSrooms availability (cupo) for Black Cat Hostal by dates. "
+                "Use for authorized guests who want to reserve. Returns room_type_code, "
+                "rate_plan_code and CLP booking fields "
+                "(booking_amount_after_tax, booking_day_rates_json), plus guest prices "
+                "in CLP only (guest_price_*_clp). Quote CLP to the guest; no USD. "
+                "Persist bookings in CLP."
             ),
             "parameters": {
                 "type": "object",
@@ -312,7 +315,7 @@ DEEPSEEK_TOOLS = [
                     "children": {"type": "integer", "description": "Children (default 0)"},
                     "currency": {
                         "type": "string",
-                        "description": "ISO currency, prefer USD",
+                        "description": "Motor search currency for cupo; usually USD",
                     },
                 },
                 "required": ["start_date", "end_date"],
@@ -326,7 +329,9 @@ DEEPSEEK_TOOLS = [
             "description": (
                 "Create a real FNSrooms booking. Only for authorized guests. "
                 "Call search_room_availability first. Need guest first/last name, "
-                "dates, room_type_code, rate_plan_code, amount_after_tax and day_rates_json."
+                "dates, room_type_code, rate_plan_code, and CLP amount_after_tax + "
+                "day_rates_json from booking_* fields. currency must be CLP. "
+                "Confirm the guest with CLP total only (no USD)."
             ),
             "parameters": {
                 "type": "object",
@@ -338,7 +343,10 @@ DEEPSEEK_TOOLS = [
                     "amount_after_tax": {"type": "string"},
                     "guest_first_name": {"type": "string"},
                     "guest_last_name": {"type": "string"},
-                    "currency": {"type": "string"},
+                    "currency": {
+                        "type": "string",
+                        "description": "Must be CLP to persist hostel prices in pesos",
+                    },
                     "adults": {"type": "integer"},
                     "children": {"type": "integer"},
                     "units": {"type": "integer"},
@@ -347,7 +355,10 @@ DEEPSEEK_TOOLS = [
                     "remarks": {"type": "string"},
                     "day_rates_json": {
                         "type": "string",
-                        "description": 'JSON array like [{"day":"2026-11-20","pnight":"90.00"}]',
+                        "description": (
+                            'CLP night rates JSON, e.g. '
+                            '[{"day":"2026-11-18","pnight":"19990.00"}]'
+                        ),
                     },
                 },
                 "required": [

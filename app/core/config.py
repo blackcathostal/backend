@@ -145,9 +145,19 @@ class Settings(BaseSettings):
     fns_pms_password: str = ""
     fns_pms_base_url: str = "https://adminchile1.fnsmanager.com"
     fns_hotel_pms_id: str = ""
+    # FNSrooms Maestros (tipo de cambio) — https://ms.fnsmanager.com/api-doc/pms/#/Datos%20Maestros/Maestros_Cambio
+    fns_ms_base_url: str = "https://ms.fnsmanager.com"
+    fns_central_id: str = ""
+    fns_ms_user: str = ""
+    fns_ms_password: str = ""
+    # Currency IDs in Maestros_Cambio: 2=USD, 4=CLP
+    fns_currency_usd_id: int = 2
+    fns_currency_clp_id: int = 4
     # Pilot allowlists for live FNS booking via IG/FB agents (comma-separated handles).
     fns_booking_ig_allowlist: str = "emkrypted"
     fns_booking_fb_allowlist: str = ""
+    # Optional hard override CLP per 1 USD (0 = auto: FNS Maestros_Cambio, then public FX).
+    fns_usd_clp_rate: float = 0.0
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

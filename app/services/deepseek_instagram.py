@@ -564,7 +564,9 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- NUNCA digas que confirmas o hablas con recepción.\n"
         "- Reserva / «por dónde reservo»: si el huésped NO está autorizado a API, "
         "WhatsApp + fechas/personas. Si SÍ está autorizado, usa search_room_availability "
-        "y create_room_booking (pide fechas, personas, nombre/apellido). Nunca digas «por ahí».\n"
+        "y create_room_booking (pide fechas, personas, nombre/apellido). "
+        "En IG/FB cotiza SOLO CLP (19990 / 54990 / 69990). No digas USD. "
+        "Nunca digas «por ahí».\n"
         "- Tiempo/distancia: eta_only=true → solo min en auto, SIN mapa.\n"
         "- Si se despide, despídete corto. Si no, no.\n"
         "- Instagram y Facebook: mismas reglas.\n"
@@ -1507,7 +1509,8 @@ async def generate_instagram_reply(
     ]
     is_follow_up = bool(prior)
     # On foreign/collab reels, prices/booking are redirected to DM by the caller.
-    if _looks_like_price_question(inbound_text) and not public_ugc and not can_book:
+    # Always quote our FAQ CLP rates — never Motor/USD — even for booking pilot users.
+    if _looks_like_price_question(inbound_text) and not public_ugc:
         return _price_summary_reply(
             inbound_text=inbound_text,
             is_follow_up=is_follow_up,
@@ -1558,9 +1561,16 @@ async def generate_instagram_reply(
     )
     booking_hint = (
         "\n\nEste huésped SÍ puede reservar por API FNSrooms. "
-        "Si pide reserva/disponibilidad: usa search_room_availability (USD) y "
+        "Si pide reserva/disponibilidad: usa search_room_availability y "
         "create_room_booking. Pide fechas, personas, nombre y apellido. "
-        "Confirma habitación/tarifa/total antes de crear. No inventes códigos."
+        "Al cotizar en Instagram/Facebook da SOLO CLP "
+        "(guest_price_per_night_clp / guest_total_clp: "
+        "compartida 19990, matrimonial/twin 54990, triple 69990). "
+        "No digas USD. "
+        "Para create_room_booking GUARDA en CLP: currency=CLP, "
+        "amount_after_tax=booking_amount_after_tax, "
+        "day_rates_json=booking_day_rates_json. "
+        "Confirma habitación y total CLP antes de crear. No inventes códigos."
         if can_book and not public_ugc
         else ""
     )

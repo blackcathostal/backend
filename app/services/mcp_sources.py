@@ -28,6 +28,7 @@ from app.services.hostel_directions import directions_from_hostel
 from app.services.instagram_knowledge import hostel_info_dict, search_common_answers
 from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content
 from app.services.reply_context import get_reply_channel, get_reply_username
+from app.services.room_rates import load_room_rates
 
 mcp = FastMCP(
     "Black Cat Tourism Sources",
@@ -256,13 +257,150 @@ def get_hostel_info_tool() -> dict[str, Any]:
     return {"ok": True, **info}
 
 
+def _faq_guest_prices_clp() -> dict[str, Any]:
+    rates = load_room_rates()
+    rooms = []
+    for room in rates.get("rooms") or []:
+        if not isinstance(room, dict):
+            continue
+        rooms.append(
+            {
+                "slug": room.get("slug"),
+                "name_es": room.get("name_es"),
+                "price_from_clp": room.get("price_from_clp"),
+            }
+        )
+    return {
+        "currency": "CLP",
+        "rooms": rooms,
+        "note": (
+            "Precios en pesos (CLP) del hostal para Instagram/Facebook. "
+            "Al huésped cotiza SOLO CLP; no digas USD."
+        ),
+    }
+
+
+def _nights_between(start_date: str, end_date: str) -> int:
+    try:
+        start = datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+        end = datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+        return max(1, (end - start).days)
+    except ValueError:
+        return 1
+
+
+def _stay_nights(start_date: str, end_date: str) -> list[str]:
+    """Nights of the stay as YYYY-MM-DD (checkout day excluded)."""
+    try:
+        start = datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+        end = datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return []
+    if end <= start:
+        return [start.isoformat()]
+    days: list[str] = []
+    cursor = start
+    while cursor < end:
+        days.append(cursor.isoformat())
+        cursor = cursor.fromordinal(cursor.toordinal() + 1)
+    return days
+
+
+def _clp_day_rates(start_date: str, end_date: str, price_per_night_clp: int) -> list[dict[str, str]]:
+    pnight = f"{int(price_per_night_clp)}.00"
+    return [{"day": day, "pnight": pnight} for day in _stay_nights(start_date, end_date)]
+
+
+async def _attach_guest_pricing(
+    payload: dict[str, Any], *, start_date: str, end_date: str
+) -> dict[str, Any]:
+    """Guest quote + FNS booking amounts in FAQ CLP."""
+    faq = _faq_guest_prices_clp()
+    nights = _nights_between(start_date, end_date)
+    by_slug = {
+        str(row.get("slug") or ""): row for row in (faq.get("rooms") or []) if isinstance(row, dict)
+    }
+    shared = int((by_slug.get("shared") or {}).get("price_from_clp") or 19990)
+    matrimonial = int((by_slug.get("matrimonial-suite") or {}).get("price_from_clp") or 54990)
+    twin = int((by_slug.get("twin") or {}).get("price_from_clp") or 54990)
+    triple = int((by_slug.get("triple") or {}).get("price_from_clp") or 69990)
+
+    rooms_out: list[dict[str, Any]] = []
+    for room in payload.get("rooms") or []:
+        if not isinstance(room, dict):
+            continue
+        name = str(room.get("room_name") or "").lower()
+        if "compart" in name or "shared" in name or "bed" in name or "litera" in name:
+            guest_night_clp = shared
+            guest_label = "Compartida (por cama)"
+        elif "triple" in name:
+            guest_night_clp = triple
+            guest_label = "Triple"
+        elif "twin" in name or "doble" in name:
+            guest_night_clp = twin
+            guest_label = "Twin"
+        else:
+            guest_night_clp = matrimonial
+            guest_label = "Matrimonial/Suite"
+
+        guest_total_clp = guest_night_clp * nights
+        booking_day_rates = _clp_day_rates(start_date, end_date, guest_night_clp)
+
+        plans = []
+        for plan in room.get("rate_plans") or []:
+            if not isinstance(plan, dict):
+                continue
+            plans.append(
+                {
+                    "rate_plan_code": plan.get("rate_plan_code"),
+                    "rate_name": plan.get("rate_name"),
+                    "occupancy": plan.get("occupancy"),
+                    # Keep Motor USD only as reference; booking uses CLP below.
+                    "motor_booking_price_usd": plan.get("price"),
+                    "motor_currency": plan.get("currency") or "USD",
+                    "motor_day_rates_usd": plan.get("day_rates") or [],
+                }
+            )
+
+        rooms_out.append(
+            {
+                "room_type_code": room.get("room_type_code"),
+                "room_name": room.get("room_name"),
+                "inventory": room.get("inventory"),
+                "guest_room_label": guest_label,
+                "guest_price_per_night_clp": guest_night_clp,
+                "guest_total_clp": guest_total_clp,
+                # Persist these into FNS booking (CurrencyCode CLP).
+                "booking_currency": "CLP",
+                "booking_amount_after_tax": str(guest_total_clp),
+                "booking_day_rates": booking_day_rates,
+                "booking_day_rates_json": json.dumps(booking_day_rates, ensure_ascii=False),
+                "nights": nights,
+                "rate_plans": plans,
+            }
+        )
+    return {
+        **payload,
+        "rooms": rooms_out,
+        "guest_prices_clp": faq,
+        "quote_rule": (
+            "En Instagram/Facebook cotiza SOLO pesos (guest_price_*_clp / guest_total_clp). "
+            "No digas USD ni guest_price_*_usd al huésped. "
+            "Al crear la reserva en FNS usa SIEMPRE CLP: "
+            "currency=CLP, amount_after_tax=booking_amount_after_tax, "
+            "day_rates_json=booking_day_rates_json."
+        ),
+    }
+
+
 @mcp.tool(
     name="search_room_availability",
     description=(
-        "Consulta disponibilidad real en FNSrooms (Motor) para Black Cat Hostal. "
-        "Úsala cuando un huésped autorizado quiera reservar o ver cupo/precios por fechas. "
-        "Devuelve room_type_code, rate_plan_code, precios y day_rates para create_room_booking. "
-        "Moneda preferida: USD."
+        "Consulta cupo real en FNSrooms (Motor) para Black Cat Hostal. "
+        "Úsala para huéspedes autorizados que quieren reservar. "
+        "Devuelve room_type_code, rate_plan_code y montos CLP para create_room_booking "
+        "(booking_amount_after_tax + booking_day_rates_json). "
+        "Al huésped cotiza SOLO CLP (guest_price_*_clp / guest_total_clp)."
     ),
     structured_output=True,
 )
@@ -277,13 +415,16 @@ async def search_room_availability_tool(
     if blocked:
         return blocked
     try:
-        return await search_availability(
+        payload = await search_availability(
             start_date=start_date,
             end_date=end_date,
             adults=adults,
             children=children,
             currency=currency or "USD",
         )
+        if not payload.get("ok"):
+            return payload
+        return await _attach_guest_pricing(payload, start_date=start_date, end_date=end_date)
     except FnsMotorError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
 
@@ -292,8 +433,11 @@ async def search_room_availability_tool(
     name="create_room_booking",
     description=(
         "Crea una reserva real en FNSrooms Motor. Solo para huéspedes autorizados. "
-        "Antes llama search_room_availability y usa room_type_code, rate_plan_code, "
-        "precio total y day_rates. Pide nombre, apellido y fechas si faltan."
+        "Antes llama search_room_availability. Guarda la reserva en CLP: "
+        "currency=CLP, amount_after_tax=booking_amount_after_tax, "
+        "day_rates_json=booking_day_rates_json (tarifas del hostal en pesos). "
+        "Al huésped confirma solo el total en CLP. "
+        "Pide nombre, apellido y fechas si faltan."
     ),
     structured_output=True,
 )
@@ -305,7 +449,7 @@ async def create_room_booking_tool(
     amount_after_tax: str,
     guest_first_name: str,
     guest_last_name: str,
-    currency: str = "USD",
+    currency: str = "CLP",
     adults: int = 2,
     children: int = 0,
     units: int = 1,
@@ -317,6 +461,10 @@ async def create_room_booking_tool(
     blocked = _booking_gate()
     if blocked:
         return blocked
+    # Force CLP persistence for IG/FB bookings.
+    cur = (currency or "CLP").strip().upper() or "CLP"
+    if cur != "CLP":
+        cur = "CLP"
     day_rates: list[dict[str, str]] = []
     raw = str(day_rates_json or "").strip()
     if raw:
@@ -326,6 +474,15 @@ async def create_room_booking_tool(
                 day_rates = [row for row in parsed if isinstance(row, dict)]
         except json.JSONDecodeError:
             return {"ok": False, "error": "day_rates_json inválido; envía un JSON array."}
+    if not day_rates:
+        # Fallback: rebuild CLP night rates from amount/nights if the model omitted them.
+        nights = _nights_between(start_date, end_date)
+        try:
+            total = int(float(str(amount_after_tax).replace(",", ".")))
+        except ValueError:
+            total = 0
+        per_night = int(total / nights) if nights else total
+        day_rates = _clp_day_rates(start_date, end_date, per_night)
     try:
         return await create_booking(
             start_date=start_date,
@@ -333,7 +490,7 @@ async def create_room_booking_tool(
             room_type_code=room_type_code,
             rate_plan_code=rate_plan_code,
             amount_after_tax=amount_after_tax,
-            currency=currency or "USD",
+            currency=cur,
             adults=adults,
             children=children,
             units=units,
@@ -341,7 +498,7 @@ async def create_room_booking_tool(
             guest_last_name=guest_last_name,
             guest_email=guest_email,
             guest_phone=guest_phone,
-            remarks=remarks,
+            remarks=remarks or "Reserva Instagram/Facebook Black Cat (CLP)",
             day_rates=day_rates,
         )
     except FnsMotorError as exc:
