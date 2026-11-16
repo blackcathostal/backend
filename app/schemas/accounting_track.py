@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class AccountingTrackDocumentOut(BaseModel):
@@ -19,6 +19,7 @@ class AccountingTrackDocumentOut(BaseModel):
     pms_class: str = "Sin match"
     pms_ref: str = ""
     source: str = "api"
+    has_pdf: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

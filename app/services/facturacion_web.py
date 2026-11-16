@@ -311,6 +311,23 @@ class FacturacionWebClient:
                         if value_match
                         else self._strip_html(body)
                     )
+                    pdf_match = re.search(
+                        r"vistaprevia\.php\?data=([^\"'\s]+)",
+                        body,
+                        re.I,
+                    )
+                    if pdf_match:
+                        cells["PDF_DATA"] = pdf_match.group(1).strip()
+                elif name == "DOCUMENTO":
+                    cells[name] = self._strip_html(body)
+                    if "PDF_DATA" not in cells:
+                        pdf_match = re.search(
+                            r"vistaprevia\.php\?data=([^\"'\s]+)",
+                            body,
+                            re.I,
+                        )
+                        if pdf_match:
+                            cells["PDF_DATA"] = pdf_match.group(1).strip()
                 elif name == "RAZONSOCIAL":
                     rut_match = re.search(
                         r"seenopago\(['\"]([^'\"]+)['\"]\)",
@@ -336,9 +353,26 @@ class FacturacionWebClient:
                     "razonsocial": cells.get("RAZONSOCIAL") or "",
                     "montototal": cells.get("TOTAL") or "",
                     "rut": rut,
+                    "pdf_data": cells.get("PDF_DATA") or "",
                 }
             )
         return rows
+
+    def download_pdf(self, pdf_data: str) -> bytes:
+        """Fetch PDF bytes for a Libro de Compras document token."""
+        token = (pdf_data or "").strip()
+        if not token:
+            raise FacturacionError("Documento sin token PDF")
+        self.login()
+        client = self._ensure_client()
+        response = client.get(urljoin(self.base_url, f"vistaprevia.php?data={token}"))
+        body = response.content or b""
+        content_type = (response.headers.get("content-type") or "").lower()
+        if response.status_code >= 400 or not body.startswith(b"%PDF"):
+            raise FacturacionError(
+                f"No se pudo descargar el PDF (HTTP {response.status_code}, {content_type})"
+            )
+        return body
 
     def fetch_recibidas(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """Pull Libro de Compras month-by-month from company web UI."""
@@ -361,20 +395,19 @@ class FacturacionWebClient:
 
             month_docs: list[dict[str, Any]] = []
             for raw in batch_raw:
-                doc = normalizer._normalize_doc(
-                    {
-                        "folio": raw.get("folio"),
-                        "tipo": raw.get("tipo") or raw.get("doc_type"),
-                        "fecha": raw.get("fecha"),
-                        "razonsocial": raw.get("razonsocial"),
-                        "montototal": raw.get("montototal"),
-                        "montoneto": raw.get("montoneto") or raw.get("neto"),
-                        "montoiva": raw.get("montoiva") or raw.get("iva"),
-                        "montoexento": raw.get("montoexento") or raw.get("exento"),
-                        "rut": raw.get("rut") or raw.get("rutproveedor"),
-                    },
-                    direction="recibida",
-                )
+                payload = {
+                    "folio": raw.get("folio"),
+                    "tipo": raw.get("tipo") or raw.get("doc_type"),
+                    "fecha": raw.get("fecha"),
+                    "razonsocial": raw.get("razonsocial"),
+                    "montototal": raw.get("montototal"),
+                    "montoneto": raw.get("montoneto") or raw.get("neto"),
+                    "montoiva": raw.get("montoiva") or raw.get("iva"),
+                    "montoexento": raw.get("montoexento") or raw.get("exento"),
+                    "rut": raw.get("rut") or raw.get("rutproveedor"),
+                    "pdf_data": raw.get("pdf_data") or "",
+                }
+                doc = normalizer._normalize_doc(payload, direction="recibida")
                 if not doc["total_amount"] and raw.get("montototal") is not None:
                     doc["total_amount"] = _parse_amount(raw.get("montototal"))
                 month_docs.append(doc)

@@ -4,6 +4,7 @@ import json
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -20,6 +21,38 @@ from app.services.facturacion_web import FacturacionWebClient
 from app.services.fns_accounting import classify_document, fetch_pms_production
 
 router = APIRouter(prefix="/accounting-track", tags=["accounting-track"])
+
+
+def _has_pdf(row: AccountingTrackDocuments) -> bool:
+    raw = row.raw_json or ""
+    if not raw:
+        return False
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return "pdf_data" in raw
+    if isinstance(payload, dict):
+        return bool(str(payload.get("pdf_data") or "").strip())
+    return False
+
+
+def _pdf_token(row: AccountingTrackDocuments) -> str:
+    raw = row.raw_json or ""
+    if not raw:
+        return ""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    if isinstance(payload, dict):
+        return str(payload.get("pdf_data") or "").strip()
+    return ""
+
+
+def _serialize_doc(row: AccountingTrackDocuments) -> AccountingTrackDocumentOut:
+    item = AccountingTrackDocumentOut.model_validate(row)
+    item.has_pdf = _has_pdf(row)
+    return item
 
 
 def _parse_bound(value: str | None, *, fallback: date) -> date:
@@ -139,7 +172,7 @@ def _list_direction(
         AccountingTrackDocuments.id.desc(),
     ).all()
     return AccountingTrackListResult(
-        items=[AccountingTrackDocumentOut.model_validate(row) for row in rows],
+        items=[_serialize_doc(row) for row in rows],
         total=len(rows),
         from_date=date_from,
         to_date=date_to,
@@ -175,6 +208,35 @@ def list_recibidas(
         direction="recibida",
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
+    )
+
+
+@router.get("/documents/{doc_id}/pdf")
+def download_document_pdf(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> Response:
+    row = db.query(AccountingTrackDocuments).filter(AccountingTrackDocuments.id == doc_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    token = _pdf_token(row)
+    if not token:
+        raise HTTPException(
+            status_code=404,
+            detail="Este documento no tiene PDF. Actualizá Recibidas para refrescar los links.",
+        )
+    try:
+        with FacturacionWebClient() as web:
+            pdf_bytes = web.download_pdf(token)
+    except FacturacionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    filename = f"DTE_{row.folio or doc_id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
