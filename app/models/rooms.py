@@ -16,7 +16,7 @@ class Rooms(Base):
     price: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     features: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # JSON list of up to 6 photo paths, e.g. ["/uploads/rooms/2-0.webp", ...]
-    photos: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    photos: Mapped[str | None] = mapped_column(Text, nullable=True, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

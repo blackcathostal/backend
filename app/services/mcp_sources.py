@@ -30,7 +30,7 @@ from app.services.fns_motor import (
     search_availability,
 )
 from app.models.rooms import Rooms
-from app.services.hostel_directions import directions_from_hostel, _public_api_origin
+from app.services.hostel_directions import directions_from_hostel
 from app.services.instagram_knowledge import hostel_info_dict, search_common_answers
 from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content
 from app.services.reply_context import get_reply_channel, get_reply_username
@@ -251,6 +251,16 @@ def search_rooms_tool(query: str = "") -> dict[str, Any]:
     }
 
 
+def _public_uploads_origin() -> str:
+    redirect = (settings.meta_redirect_uri or "").strip()
+    if redirect.startswith("https://"):
+        parsed = urlparse(redirect)
+        host = (parsed.netloc or "").lower()
+        if host and "localhost" not in host and not host.startswith("127."):
+            return f"https://{parsed.netloc}"
+    return "https://api.blackcathostal.com"
+
+
 def _room_photo_urls(raw_photos: str | None) -> list[str]:
     try:
         loaded = json.loads(raw_photos or "[]")
@@ -258,7 +268,7 @@ def _room_photo_urls(raw_photos: str | None) -> list[str]:
         loaded = []
     if not isinstance(loaded, list):
         return []
-    origin = _public_api_origin().rstrip("/")
+    origin = _public_uploads_origin().rstrip("/")
     urls: list[str] = []
     for item in loaded:
         path = str(item or "").strip()
