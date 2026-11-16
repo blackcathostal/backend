@@ -76,8 +76,14 @@ def _ensure_schema_patches() -> None:
         if not column_exists("rooms", "features"):
             conn.execute(text("ALTER TABLE rooms ADD COLUMN features TEXT NULL"))
         if not column_exists("rooms", "photos"):
-            conn.execute(text("ALTER TABLE rooms ADD COLUMN photos TEXT NULL"))
-            conn.execute(text("UPDATE rooms SET photos = '[]' WHERE photos IS NULL"))
+            try:
+                conn.execute(text("ALTER TABLE rooms ADD COLUMN photos TEXT NULL"))
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not add rooms.photos column")
+            try:
+                conn.execute(text("UPDATE rooms SET photos = '[]' WHERE photos IS NULL"))
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not backfill rooms.photos")
         if column_exists("rooms", "status"):
             conn.execute(text("ALTER TABLE rooms DROP COLUMN status"))
         if column_exists("rooms", "caracteristicas") and column_exists("rooms", "features"):
@@ -186,7 +192,11 @@ async def lifespan(_: FastAPI):
     comment_poll_task: asyncio.Task | None = None
     try:
         Base.metadata.create_all(bind=engine)
-        _ensure_schema_patches()
+        try:
+            _ensure_schema_patches()
+        except Exception:  # noqa: BLE001
+            # Never take the API down for a column patch (e.g. rooms.photos).
+            logger.exception("Schema patch failed at startup; continuing")
         db = SessionLocal()
         try:
             seed_database(db)
@@ -194,6 +204,8 @@ async def lifespan(_: FastAPI):
             db.close()
     except OperationalError:
         logger.warning("Database unavailable at startup; API will run without MySQL.")
+    except Exception:  # noqa: BLE001
+        logger.exception("Startup DB init failed; API will continue")
 
     try:
         from app.services.instagram import poll_instagram_comments_loop
