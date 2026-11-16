@@ -2720,13 +2720,14 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
                     continue
                 trimmed.append(turn)
             recent_help = _seconds_since_last_help_reply(latest)
+            guest_username = _guest_handle_for_reply(latest, item)
             decision = await generate_instagram_reply(
                 db=db,
                 inbound_text=inbound,
                 item_type=latest.get("type") or item.get("type") or "message",
-                author_username=latest.get("author_username") or item.get("author_username"),
+                author_username=guest_username,
                 person_history=author_channel_history(
-                    author_username=latest.get("author_username") or item.get("author_username"),
+                    author_username=guest_username,
                     author_id=latest.get("author_id") or item.get("author_id"),
                     exclude_id=latest.get("id"),
                 ),
@@ -2784,13 +2785,14 @@ async def suggest_reply(item_id: str) -> dict[str, Any]:
     db = SessionLocal()
     try:
         inbound = item.get("text") or ""
+        guest_username = _guest_handle_for_reply(item)
         decision = await generate_instagram_reply(
             db=db,
             inbound_text=inbound,
             item_type=item.get("type") or "message",
-            author_username=item.get("author_username"),
+            author_username=guest_username,
             person_history=author_channel_history(
-                author_username=item.get("author_username"),
+                author_username=guest_username,
                 author_id=item.get("author_id"),
                 exclude_id=item.get("id"),
             ),
