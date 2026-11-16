@@ -16,6 +16,7 @@ from app.schemas.accounting_track import (
     AccountingTrackRefreshResult,
 )
 from app.services.facturacion_client import FacturacionClient, FacturacionError
+from app.services.facturacion_web import FacturacionWebClient
 from app.services.fns_accounting import classify_document, fetch_pms_production
 
 router = APIRouter(prefix="/accounting-track", tags=["accounting-track"])
@@ -42,6 +43,7 @@ def _upsert_docs(
     *,
     source: str,
     pms_rows: list[dict] | None = None,
+    match_fns: bool = True,
 ) -> tuple[int, int]:
     upserted = 0
     classified = 0
@@ -65,9 +67,12 @@ def _upsert_docs(
             except ValueError:
                 issued_at = None
 
-        class_info = classify_document(item, pms_rows)
-        if class_info.get("pms_class") and class_info["pms_class"] != "Sin match":
-            classified += 1
+        if match_fns:
+            class_info = classify_document(item, pms_rows)
+            if class_info.get("pms_class") and class_info["pms_class"] != "Sin match":
+                classified += 1
+        else:
+            class_info = {"pms_class": "—", "pms_ref": ""}
 
         row = (
             db.query(AccountingTrackDocuments)
@@ -185,25 +190,30 @@ async def refresh_track(
 
     warning = ""
     docs: list[dict] = []
-    if direction == "recibida":
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "facturacion.cl no expone libro de compras por API. "
-                "Track Recibidas queda pendiente hasta tener ese servicio."
-            ),
-        )
+    source = "api"
+    pms_rows: list[dict] = []
 
-    client = FacturacionClient()
     try:
-        # Validate REST credentials first, then SOAP libro.
-        client.login()
-        docs = client.fetch_emitidas(date_from, date_to)
+        if direction == "recibida":
+            # Libro de compras: no SOAP contratado → scrape Plano. Sin cruce FNS.
+            source = "web"
+            with FacturacionWebClient() as web:
+                docs = web.fetch_recibidas(date_from, date_to)
+        else:
+            client = FacturacionClient()
+            client.login()
+            docs = client.fetch_emitidas(date_from, date_to)
+            pms_rows = await fetch_pms_production(date_from, date_to)
     except FacturacionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    pms_rows = await fetch_pms_production(date_from, date_to)
-    upserted, classified = _upsert_docs(db, docs, source="api", pms_rows=pms_rows)
+    upserted, classified = _upsert_docs(
+        db,
+        docs,
+        source=source,
+        pms_rows=pms_rows,
+        match_fns=direction == "emitida",
+    )
     return AccountingTrackRefreshResult(
         direction=direction,
         fetched=len(docs),
