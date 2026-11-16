@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api import (
     accounting_accounts,
+    accounting_track,
     ai,
     analytics,
     auth,
@@ -50,3 +51,4 @@ api_router.include_router(facebook.router)
 api_router.include_router(analytics.router)
 api_router.include_router(terms.router)
 api_router.include_router(accounting_accounts.router)
+api_router.include_router(accounting_track.router)
