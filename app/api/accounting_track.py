@@ -23,6 +23,18 @@ from app.services.fns_accounting import classify_document, fetch_pms_production
 router = APIRouter(prefix="/accounting-track", tags=["accounting-track"])
 
 
+def _extract_pdf_token(payload: object) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    token = str(payload.get("pdf_data") or "").strip()
+    if token:
+        return token
+    nested = payload.get("raw")
+    if isinstance(nested, dict):
+        return str(nested.get("pdf_data") or "").strip()
+    return ""
+
+
 def _has_pdf(row: AccountingTrackDocuments) -> bool:
     raw = row.raw_json or ""
     if not raw:
@@ -31,9 +43,7 @@ def _has_pdf(row: AccountingTrackDocuments) -> bool:
         payload = json.loads(raw)
     except json.JSONDecodeError:
         return "pdf_data" in raw
-    if isinstance(payload, dict):
-        return bool(str(payload.get("pdf_data") or "").strip())
-    return False
+    return bool(_extract_pdf_token(payload))
 
 
 def _pdf_token(row: AccountingTrackDocuments) -> str:
@@ -44,9 +54,7 @@ def _pdf_token(row: AccountingTrackDocuments) -> str:
         payload = json.loads(raw)
     except json.JSONDecodeError:
         return ""
-    if isinstance(payload, dict):
-        return str(payload.get("pdf_data") or "").strip()
-    return ""
+    return _extract_pdf_token(payload)
 
 
 def _serialize_doc(row: AccountingTrackDocuments) -> AccountingTrackDocumentOut:
