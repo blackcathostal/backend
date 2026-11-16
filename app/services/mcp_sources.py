@@ -29,7 +29,8 @@ from app.services.fns_motor import (
     remember_channel_booking,
     search_availability,
 )
-from app.services.hostel_directions import directions_from_hostel
+from app.models.rooms import Rooms
+from app.services.hostel_directions import directions_from_hostel, _public_api_origin
 from app.services.instagram_knowledge import hostel_info_dict, search_common_answers
 from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content
 from app.services.reply_context import get_reply_channel, get_reply_username
@@ -247,6 +248,126 @@ def search_rooms_tool(query: str = "") -> dict[str, Any]:
             "No uses el listado de habitaciones. Para precios y tipos de habitación "
             "llama search_common_answers o search_frequent_questions."
         ),
+    }
+
+
+def _room_photo_urls(raw_photos: str | None) -> list[str]:
+    try:
+        loaded = json.loads(raw_photos or "[]")
+    except json.JSONDecodeError:
+        loaded = []
+    if not isinstance(loaded, list):
+        return []
+    origin = _public_api_origin().rstrip("/")
+    urls: list[str] = []
+    for item in loaded:
+        path = str(item or "").strip()
+        if not path:
+            continue
+        if path.startswith("https://"):
+            urls.append(path)
+        elif path.startswith("/uploads/"):
+            urls.append(f"{origin}{path}")
+        if len(urls) >= 6:
+            break
+    return urls
+
+
+@mcp.tool(
+    name="get_room_photos",
+    description=(
+        "Devuelve fotos reales de una habitación del hostal (hasta 6) subidas en el admin. "
+        "Úsala cuando el huésped pida ver fotos / imágenes de matrimonial, twin, triple, "
+        "suite, cama compartida, etc. No inventes URLs. Si no hay fotos, dilo corto "
+        "y ofrece blackcathostal.com/habitaciones — NO mandes a WhatsApp solo por fotos."
+    ),
+    structured_output=True,
+)
+def get_room_photos_tool(query: str = "") -> dict[str, Any]:
+    text = str(query or "").strip().lower()
+    with SessionLocal() as db:
+        rooms = db.query(Rooms).order_by(Rooms.id.asc()).all()
+    if not rooms:
+        return {
+            "ok": False,
+            "query": text,
+            "photos": [],
+            "error": "No hay habitaciones cargadas en el panel.",
+        }
+
+    def score(room: Rooms) -> int:
+        blob = f"{room.name} {room.type} {room.features}".lower()
+        if not text:
+            return 1
+        points = 0
+        for token in re.findall(r"[a-záéíóúñ0-9]+", text):
+            if token in blob:
+                points += 2 if token in {"matrimonial", "suite", "twin", "triple", "cama", "shared", "compartid"} else 1
+        aliases = {
+            "matrimonial": ("matrimonial", "doble", "couple"),
+            "suite": ("suite", "boutique"),
+            "twin": ("twin", "doble", "two"),
+            "triple": ("triple",),
+            "cama": ("cama", "compartid", "dormitorio", "shared", "hostel"),
+            "individual": ("individual", "single"),
+        }
+        for key, words in aliases.items():
+            if key in text or any(w in text for w in words):
+                if any(w in blob for w in words) or key in blob:
+                    points += 5
+        return points
+
+    ranked = sorted(rooms, key=score, reverse=True)
+    best = ranked[0] if ranked and score(ranked[0]) > 0 else None
+    if best is None and len(rooms) == 1:
+        best = rooms[0]
+    if best is None:
+        # If query empty or no match, list available room types with photo counts.
+        catalog = []
+        for room in rooms:
+            photos = _room_photo_urls(room.photos)
+            catalog.append(
+                {
+                    "id": room.id,
+                    "name": room.name,
+                    "type": room.type,
+                    "photo_count": len(photos),
+                }
+            )
+        return {
+            "ok": False,
+            "query": text,
+            "photos": [],
+            "rooms": catalog,
+            "error": (
+                "Indica el tipo (matrimonial, twin, triple, suite, cama). "
+                "Si el huésped no especifica, pregunta cuál quiere ver."
+            ),
+        }
+
+    photos = _room_photo_urls(best.photos)
+    if not photos:
+        return {
+            "ok": False,
+            "query": text,
+            "room_id": best.id,
+            "room_name": best.name,
+            "room_type": best.type,
+            "photos": [],
+            "error": (
+                f"Aún no hay fotos cargadas para {best.name}. "
+                "Dile que puede verlas en blackcathostal.com (sección Habitaciones)."
+            ),
+        }
+    return {
+        "ok": True,
+        "query": text,
+        "room_id": best.id,
+        "room_name": best.name,
+        "room_type": best.type,
+        "photos": [{"image_url": url} for url in photos],
+        "image_urls": photos,
+        "note": "El sistema enviará estas fotos al huésped en el DM. Mensaje corto, sin WhatsApp.",
     }
 
 

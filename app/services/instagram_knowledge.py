@@ -554,6 +554,29 @@ DEEPSEEK_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_room_photos",
+            "description": (
+                "Get real photos of a hostel room type (matrimonial, twin, triple, suite, "
+                "shared bed, etc.) uploaded in the admin. Use when the guest asks to see "
+                "photos/images of a room. Returns image_urls the system will send in the DM. "
+                "Do NOT send WhatsApp only for photos. Short reply like "
+                "«Te mando las fotos de la Matrimonial»."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Room type keywords, e.g. matrimonial, suite, twin",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_web",
             "description": (
                 "Search the public web when the answer is not in the frequent questions "

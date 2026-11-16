@@ -1131,36 +1131,59 @@ async def send_dm(recipient_id: str, message: str) -> dict[str, Any]:
     return data
 
 
-def _local_map_bytes(image_url: str) -> bytes:
-    """Read a hosted /uploads/maps image from disk when possible."""
+def _local_upload_bytes(image_url: str) -> bytes:
+    """Read a hosted /uploads/... image from disk when possible."""
     url = str(image_url or "").strip()
-    marker = "/uploads/maps/"
+    marker = "/uploads/"
     if marker not in url:
         return b""
-    name = url.split(marker, 1)[1].split("?", 1)[0].strip("/")
-    if not name or "/" in name or "\\" in name:
+    rel = url.split(marker, 1)[1].split("?", 1)[0].strip("/")
+    if not rel or ".." in rel:
         return b""
-    path = settings.uploads_dir / "maps" / name
+    path = settings.uploads_dir / rel
     try:
         data = path.read_bytes()
     except OSError:
         return b""
-    if data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG"):
-        return data
-    return b""
+    return data
+
+
+def _ensure_jpeg_or_png(content: bytes) -> bytes:
+    """Meta DM attachments need JPEG/PNG; convert WebP/other via Pillow when needed."""
+    if content.startswith(b"\xff\xd8\xff") or content.startswith(b"\x89PNG"):
+        return content
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        image = Image.open(BytesIO(content))
+        if image.mode in ("P", "LA"):
+            image = image.convert("RGBA")
+        elif image.mode == "CMYK":
+            image = image.convert("RGB")
+        if image.mode == "RGBA":
+            background = Image.new("RGB", image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[-1])
+            image = background
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+        out = BytesIO()
+        image.save(out, format="JPEG", quality=88)
+        return out.getvalue()
+    except Exception as exc:
+        raise InstagramError(f"No se pudo convertir la imagen a JPEG: {exc}") from exc
 
 
 async def _download_image_bytes(image_url: str) -> bytes:
-    local = _local_map_bytes(image_url)
+    local = _local_upload_bytes(image_url)
     if local:
-        return local
+        return _ensure_jpeg_or_png(local)
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         response = await client.get(image_url)
         response.raise_for_status()
         content = response.content
-    if not (content.startswith(b"\xff\xd8\xff") or content.startswith(b"\x89PNG")):
-        raise InstagramError("La imagen del mapa no es un JPEG/PNG válido")
-    return content
+    return _ensure_jpeg_or_png(content)
 
 
 async def _upload_message_image(image_url: str) -> str:
@@ -2264,6 +2287,7 @@ async def send_inbox_reply(
     source: str = "human",
     map_image_url: str = "",
     maps_url: str = "",
+    image_urls: list[str] | None = None,
 ) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
@@ -2279,10 +2303,15 @@ async def send_inbox_reply(
     # Only attach a map when this turn asked for one. Never reuse a stale pending image
     # on WhatsApp/price replies (that made IG look “confused”: image first, then text).
     image = str(map_image_url or "").strip()
-    if not image and source == "human":
+    extra_images = [
+        str(u).strip()
+        for u in (image_urls or [])
+        if str(u).strip().startswith("https://")
+    ][:6]
+    if not image and not extra_images and source == "human":
         image = str(item.get("pending_map_image") or "").strip()
     open_url = str(maps_url or "").strip()
-    if not open_url and source == "human":
+    if not open_url and source == "human" and not extra_images:
         open_url = str(item.get("pending_maps_url") or "").strip()
     # Tap target for the map card only (never shown as plain text in the first bubble).
     if open_url and not (
@@ -2291,6 +2320,10 @@ async def send_inbox_reply(
         or "bit.ly/" in open_url
     ):
         open_url = ""
+    # Prefer room photo gallery over a single map for this turn.
+    send_images = list(extra_images)
+    if not send_images and image.startswith("https://"):
+        send_images = [image]
 
     try:
         meta_result: dict[str, Any]
@@ -2344,39 +2377,52 @@ async def send_inbox_reply(
             recipient_id = item.get("author_id") or item.get("peer_id")
             if not recipient_id:
                 raise InstagramError("Falta author_id (IGSID) para DM")
-            # Text first (no URL). Then Google map card — tap opens Google Maps.
+            # Text first (no URL). Then photos / Google map card.
             meta_result = await send_dm(recipient_id, text)
-            if image.startswith("https://"):
-                try:
-                    img = await send_dm_image(
-                        recipient_id,
-                        image,
-                        open_url=open_url if open_url.startswith("https://") else "",
-                    )
-                    replies = list(item.get("replies") or [])
-                    replies.append(
-                        {
-                            "text": "",
-                            "source": source,
-                            "created_at": _now_iso(),
-                            "meta_message_id": img.get("message_id") or img.get("id") or "",
-                            "is_map": True,
-                            "image_url": image,
-                            "maps_url": open_url,
-                            "map_card": img.get("_map_card") or "image",
-                        }
-                    )
-                    item["replies"] = replies
-                    item.pop("map_send_error", None)
-                except InstagramError as map_exc:
-                    # Keep the raw Meta detail — never mask map failures as 24h-window.
-                    detail = ""
-                    if isinstance(map_exc.details, dict):
-                        err = map_exc.details.get("error") or map_exc.details
-                        if isinstance(err, dict):
-                            detail = str(err.get("message") or "")
-                    item["map_send_error"] = detail or str(map_exc)
-                    item["pending_map_image"] = image
+            if send_images:
+                replies = list(item.get("replies") or [])
+                for idx, img_url in enumerate(send_images):
+                    try:
+                        # Only the first map image (non-gallery) may carry maps open_url.
+                        tap = (
+                            open_url
+                            if (
+                                not extra_images
+                                and idx == 0
+                                and open_url.startswith("https://")
+                            )
+                            else ""
+                        )
+                        img = await send_dm_image(
+                            recipient_id,
+                            img_url,
+                            open_url=tap,
+                        )
+                        replies.append(
+                            {
+                                "text": "",
+                                "source": source,
+                                "created_at": _now_iso(),
+                                "meta_message_id": img.get("message_id") or img.get("id") or "",
+                                "is_map": not bool(extra_images),
+                                "is_room_photo": bool(extra_images),
+                                "image_url": img_url,
+                                "maps_url": tap,
+                                "map_card": img.get("_map_card") or "image",
+                            }
+                        )
+                        item.pop("map_send_error", None)
+                    except InstagramError as map_exc:
+                        detail = ""
+                        if isinstance(map_exc.details, dict):
+                            err = map_exc.details.get("error") or map_exc.details
+                            if isinstance(err, dict):
+                                detail = str(err.get("message") or "")
+                        item["map_send_error"] = detail or str(map_exc)
+                        if not extra_images:
+                            item["pending_map_image"] = img_url
+                        break
+                item["replies"] = replies
     except InstagramError as exc:
         if item.get("type") == "message" and _is_window_closed_error(exc):
             item["status"] = "window_closed"
@@ -2828,6 +2874,11 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
         source="deepseek",
         map_image_url=str(decision.get("map_image_url") or ""),
         maps_url=str(decision.get("maps_url") or ""),
+        image_urls=[
+            str(u).strip()
+            for u in (decision.get("image_urls") or [])
+            if str(u).strip().startswith("https://")
+        ],
     )
 
 

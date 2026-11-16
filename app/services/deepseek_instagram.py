@@ -206,6 +206,9 @@ Idioma (OBLIGATORIO):
 
 Datos (OBLIGATORIO):
 - Precios / tipos de habitación → SOLO search_common_answers. Nunca search_rooms ni panel.
+- Fotos de habitaciones → get_room_photos (matrimonial/twin/triple/suite/cama). El sistema
+  manda las imágenes en el DM. Mensaje corto (“Te mando las fotos…”). NO mandes a WhatsApp
+  solo por fotos. Si no hay fotos cargadas, di blackcathostal.com (Habitaciones).
 - NO digas precios ni listes habitaciones a menos que el huésped lo pida explícitamente.
   Si pide “precios” en general, da el resumen corto de FAQ; detalle por tipo SOLO si pregunta por ese tipo.
 - Mensual: $1.500.000 CLP (FAQ topic mensual).
@@ -1381,6 +1384,7 @@ async def _run_reply_loop(
     is_follow_up: bool = False,
 ) -> dict[str, Any]:
     route_reply: dict[str, Any] | None = None
+    room_photo_urls: list[str] = []
 
     async with httpx.AsyncClient(timeout=45.0) as client:
         for _ in range(4):
@@ -1447,6 +1451,24 @@ async def _run_reply_loop(
                         and result.get("ok")
                     ):
                         route_reply = result
+                    if (
+                        name == "get_room_photos"
+                        and isinstance(result, dict)
+                        and result.get("ok")
+                    ):
+                        urls = [
+                            str(u).strip()
+                            for u in (result.get("image_urls") or [])
+                            if str(u).strip().startswith("https://")
+                        ]
+                        if not urls:
+                            for row in result.get("photos") or []:
+                                if isinstance(row, dict):
+                                    u = str(row.get("image_url") or "").strip()
+                                    if u.startswith("https://"):
+                                        urls.append(u)
+                        if urls:
+                            room_photo_urls = urls[:6]
                     messages.append(
                         {
                             "role": "tool",
@@ -1465,6 +1487,7 @@ async def _run_reply_loop(
             reason = str(data.get("reason") or "").strip()
             map_image_url = ""
             maps_url = ""
+            image_urls: list[str] = list(room_photo_urls or [])
             guest_blob = " ".join(
                 _guest_raw_text(str(turn.get("content") or ""))
                 for turn in messages
@@ -1525,6 +1548,20 @@ async def _run_reply_loop(
             if action == "reply" and not reply_message:
                 action = "escalate"
                 reason = reason or "empty_reply"
+            # Room photos take priority over map for this turn.
+            if image_urls:
+                map_image_url = ""
+                maps_url = ""
+                reason = reason or "room_photos"
+                # Avoid WhatsApp dump when we are sending photos.
+                reply_message = re.sub(
+                    r"https?://(?:api\.)?blackcathostal\.com/api/w/\S*",
+                    "",
+                    reply_message or "",
+                    flags=re.I,
+                ).strip()
+                if not reply_message:
+                    reply_message = "Te mando las fotos."
             return {
                 "action": action,
                 "message": reply_message,
@@ -1532,6 +1569,7 @@ async def _run_reply_loop(
                 "model": model,
                 "map_image_url": map_image_url,
                 "maps_url": maps_url,
+                "image_urls": image_urls,
             }
 
     raise DeepSeekError("DeepSeek agotó el límite de tool calls sin respuesta final")
