@@ -174,9 +174,15 @@ class FacturacionClient:
             match = re.search(r"<faultstring>(.*?)</faultstring>", text, re.I | re.S)
             if match:
                 fault = match.group(1).strip()
+            fault_l = fault.lower()
+            if "servicio adicional" in fault_l or "contraten" in fault_l or "object reference" in fault_l:
+                raise FacturacionError(
+                    "ConsultaLibroVentas no está contratado en facturacion.cl. "
+                    "Pediles activar el servicio adicional de libro de ventas/boletas "
+                    "para poder usar Actualizar en Track."
+                )
             raise FacturacionError(
-                fault
-                or "ConsultaLibroVentas no disponible (servicio adicional en facturacion.cl)."
+                fault or "Error SOAP en facturacion.cl al consultar el libro de ventas."
             )
         return text
 

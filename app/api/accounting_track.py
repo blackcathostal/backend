@@ -186,14 +186,21 @@ async def refresh_track(
     warning = ""
     docs: list[dict] = []
     if direction == "recibida":
-        warning = "La API de facturacion.cl no expone libro de compras (recibidas)."
-    else:
-        client = FacturacionClient()
-        try:
-            client.login()
-            docs = client.fetch_emitidas(date_from, date_to)
-        except FacturacionError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "facturacion.cl no expone libro de compras por API. "
+                "Track Recibidas queda pendiente hasta tener ese servicio."
+            ),
+        )
+
+    client = FacturacionClient()
+    try:
+        # Validate REST credentials first, then SOAP libro.
+        client.login()
+        docs = client.fetch_emitidas(date_from, date_to)
+    except FacturacionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     pms_rows = await fetch_pms_production(date_from, date_to)
     upserted, classified = _upsert_docs(db, docs, source="api", pms_rows=pms_rows)
