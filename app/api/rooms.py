@@ -21,23 +21,25 @@ MAX_ROOM_PHOTOS = 6
 
 
 def _photos_list(room: Rooms) -> list[str]:
+    """Return exactly 6 positional slots (empty string = empty box)."""
     raw = room.photos or "[]"
     try:
         loaded = json.loads(raw)
     except json.JSONDecodeError:
-        return []
+        loaded = []
     if not isinstance(loaded, list):
-        return []
-    return [str(item).strip() for item in loaded if str(item).strip()][:MAX_ROOM_PHOTOS]
+        loaded = []
+    slots = [str(item or "").strip() for item in loaded][:MAX_ROOM_PHOTOS]
+    while len(slots) < MAX_ROOM_PHOTOS:
+        slots.append("")
+    return slots
 
 
 def _set_photos(room: Rooms, photos: list[str]) -> None:
-    cleaned = [str(item).strip() for item in photos if str(item).strip()][:MAX_ROOM_PHOTOS]
-    while len(cleaned) < MAX_ROOM_PHOTOS:
-        cleaned.append("")
-    # Persist compact list without trailing empty slots for storage clarity,
-    # but keep positional slots (empty string = empty gray box).
-    room.photos = json.dumps(cleaned[:MAX_ROOM_PHOTOS], ensure_ascii=False)
+    slots = [str(item or "").strip() for item in photos][:MAX_ROOM_PHOTOS]
+    while len(slots) < MAX_ROOM_PHOTOS:
+        slots.append("")
+    room.photos = json.dumps(slots, ensure_ascii=False)
 
 
 def _serialize(room: Rooms) -> RoomsOut:
