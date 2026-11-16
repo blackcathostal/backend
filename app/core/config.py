@@ -158,6 +158,37 @@ class Settings(BaseSettings):
     fns_booking_fb_allowlist: str = ""
     # Optional hard override CLP per 1 USD (0 = auto: FNS Maestros_Cambio, then public FX).
     fns_usd_clp_rate: float = 0.0
+    # facturacion.cl DTE API — FACTURACION_ENV=des|prod
+    facturacion_env: str = "des"
+    facturacion_base_url: str = "https://rest.facturacion.cl"
+    facturacion_user: str = ""
+    facturacion_prod_rut: str = ""
+    facturacion_prod_clave: str = ""
+    facturacion_des_rut: str = ""
+    facturacion_des_clave: str = ""
+    facturacion_web_test_url: str = "https://www.facturacion.cl/plano/"
+    facturacion_web_test_user: str = ""
+    facturacion_web_test_clave: str = ""
+
+    @property
+    def facturacion_is_prod(self) -> bool:
+        return str(self.facturacion_env or "").strip().lower() in {"prod", "production", "prd"}
+
+    @property
+    def facturacion_rut(self) -> str:
+        return (
+            self.facturacion_prod_rut
+            if self.facturacion_is_prod
+            else self.facturacion_des_rut
+        )
+
+    @property
+    def facturacion_clave(self) -> str:
+        return (
+            self.facturacion_prod_clave
+            if self.facturacion_is_prod
+            else self.facturacion_des_clave
+        )
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

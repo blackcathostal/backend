@@ -36,3 +36,9 @@ class AccountingAccountsOut(BaseModel):
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AccountingAccountsImportResult(BaseModel):
+    created: int
+    updated: int
+    total: int
