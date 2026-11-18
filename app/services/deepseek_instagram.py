@@ -1435,20 +1435,48 @@ _POSITIVE_AVAIL_RE = re.compile(
 )
 
 
+_GUEST_DATE_INTENT_RE = re.compile(
+    r"(?:"
+    r"\b\d{1,2}(?:\s*(?:al|-|/)\s*\d{1,2})?\b|"
+    r"\b(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|"
+    r"enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
+    r"septiembre|octubre|noviembre|diciembre|"
+    r"january|february|march|april|june|july|august|"
+    r"september|october|november|december)\b|"
+    r"disponib|cupo|compartida|reserv"
+    r")",
+    re.IGNORECASE,
+)
+
+
 def _fns_availability_snapshot(result: dict[str, Any]) -> dict[str, Any]:
     rooms = [row for row in (result.get("rooms") or []) if isinstance(row, dict)]
     available = bool(result.get("available")) and bool(rooms)
     summary = str(result.get("availability_summary") or result.get("message") or "")
     if "NO HAY CUPO" in summary.upper():
         available = False
+    shared_available = bool(result.get("shared_available")) and available
     return {
         "checked": True,
+        "ok": result.get("ok", True) is not False,
         "available": available,
-        "shared_available": bool(result.get("shared_available")) and available,
+        "shared_available": shared_available,
         "summary": summary,
         "start_date": str(result.get("start_date") or ""),
         "end_date": str(result.get("end_date") or ""),
+        "date_normalized": bool(result.get("date_normalized")),
+        "original_start_date": str(result.get("original_start_date") or ""),
+        "original_end_date": str(result.get("original_end_date") or ""),
+        "source": str(result.get("source") or "fns_motor_search_availability"),
     }
+
+
+def _guest_blob_from_messages(messages: list[dict[str, Any]]) -> str:
+    return " ".join(
+        _guest_raw_text(str(turn.get("content") or ""))
+        for turn in messages
+        if turn.get("role") == "user"
+    )
 
 
 async def _run_reply_loop(
@@ -1573,12 +1601,19 @@ async def _run_reply_loop(
             reply_message = str(data.get("message") or "").strip()
             reason = str(data.get("reason") or "").strip()
 
-            # Hard stop: never let the model invent FNS availability.
+            # Hard stop: never invent FNS availability. Must call MCP
+            # search_room_availability (FNS Motor) before yes/no cupo.
+            guest_blob = _guest_blob_from_messages(messages)
+            guest_wants_dates = bool(_GUEST_DATE_INTENT_RE.search(guest_blob))
+            claims_availability = bool(
+                _AVAILABILITY_CLAIM_RE.search(reply_message or "")
+            )
             if (
                 enforce_fns_availability
                 and action == "reply"
-                and _AVAILABILITY_CLAIM_RE.search(reply_message or "")
+                and (claims_availability or guest_wants_dates)
             ):
+                today = datetime.now(SANTIAGO).date().isoformat()
                 if last_fns_availability is None and not availability_nudge_sent:
                     availability_nudge_sent = True
                     messages.append(
@@ -1591,35 +1626,63 @@ async def _run_reply_loop(
                         {
                             "role": "user",
                             "content": (
-                                "STOP: acabas de afirmar disponibilidad sin consultar FNS. "
-                                "Llama search_room_availability con las fechas del huésped "
-                                "y responde SOLO con ese resultado. "
-                                "Nunca inventes cupo ni fechas alternativas."
+                                "STOP: disponibilidad SOLO con la tool MCP "
+                                "search_room_availability (endpoint FNS Motor). "
+                                f"Hoy en Santiago: {today}. "
+                                "Fechas YYYY-MM-DD en año actual o futuro; "
+                                "NUNCA un año pasado. "
+                                "Llama search_room_availability ahora con las fechas "
+                                "del huésped y responde SOLO con availability_summary. "
+                                "Prohibido inventar cupo o decir no hay sin ese resultado."
                             ),
                         }
                     )
                     continue
-                if last_fns_availability is not None and not last_fns_availability.get(
-                    "available"
-                ):
-                    if _POSITIVE_AVAIL_RE.search(reply_message or ""):
-                        start = last_fns_availability.get("start_date") or ""
-                        end = last_fns_availability.get("end_date") or ""
-                        if start and end:
-                            reply_message = (
-                                f"No hay cupo para {start} → {end}."
+                if last_fns_availability is not None:
+                    start = last_fns_availability.get("start_date") or ""
+                    end = last_fns_availability.get("end_date") or ""
+                    if last_fns_availability.get("available"):
+                        if (
+                            re.search(
+                                r"no\s+hay\s+(?:cupo|disponib)|sin\s+cupo|sold\s+out",
+                                reply_message or "",
+                                re.IGNORECASE,
                             )
+                            and last_fns_availability.get("shared_available")
+                        ):
+                            reply_message = (
+                                f"Sí hay cupo en compartida {start} al {end}. "
+                                "Tenemos compartidas solo para hombres y solo para "
+                                "mujeres; ¿cuál requieres?"
+                            )
+                            reason = reason or "fns_shared_available_enforced"
+                        elif (
+                            re.search(
+                                r"no\s+hay\s+(?:cupo|disponib)|sin\s+cupo|sold\s+out",
+                                reply_message or "",
+                                re.IGNORECASE,
+                            )
+                            and last_fns_availability.get("available")
+                        ):
+                            summary = str(
+                                last_fns_availability.get("summary") or ""
+                            ).strip()
+                            reply_message = (
+                                summary[:220]
+                                if summary
+                                else f"Sí hay cupo para {start} al {end}."
+                            )
+                            reason = reason or "fns_available_enforced"
+                    elif _POSITIVE_AVAIL_RE.search(reply_message or ""):
+                        if start and end:
+                            reply_message = f"No hay cupo para {start} → {end}."
                         else:
                             reply_message = "No hay cupo para esas fechas."
                         reason = reason or "fns_no_availability_enforced"
             map_image_url = ""
             maps_url = ""
             image_urls: list[str] = list(room_photo_urls or [])
-            guest_blob = " ".join(
-                _guest_raw_text(str(turn.get("content") or ""))
-                for turn in messages
-                if turn.get("role") == "user"
-            )
+            guest_blob = _guest_blob_from_messages(messages)
             distance_only = _looks_like_distance_question(guest_blob) or str(
                 route_reply.get("style") if route_reply else ""
             ) == "eta"

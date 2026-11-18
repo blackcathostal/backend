@@ -773,10 +773,18 @@ async def search_room_availability_tool(
                 "Dilo así. NUNCA digas que sí hay cupo después ni inventes otras fechas "
                 "sin volver a llamar search_room_availability."
             )
+        priced["ok"] = True
+        priced["source"] = "fns_motor_search_availability"
         priced["message"] = priced["availability_summary"]
         priced["start_date"] = start_date
         priced["end_date"] = end_date
         priced.update(date_meta)
+        if date_meta.get("date_normalized"):
+            priced["agent_rule"] = (
+                str(priced.get("agent_rule") or "")
+                + " Fechas corregidas a año actual/futuro (nunca pasado). "
+                f"Usa start_date={start_date} end_date={end_date} al responder."
+            ).strip()
         return priced
     except FnsMotorError as exc:
         return {
@@ -1904,8 +1912,24 @@ def tool_result_payload(result: Any) -> dict[str, Any]:
 async def call_reply_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run one MCP tool for a DeepSeek Instagram or Facebook reply."""
     tool_name = str(name or "").strip()
+    args = dict(arguments or {})
+    # Belt-and-suspenders: never send past years to FNS booking tools.
+    if tool_name in {
+        "search_room_availability",
+        "create_room_booking",
+        "change_room_booking",
+    }:
+        start_date, end_date, date_meta = _normalize_future_stay_dates(
+            str(args.get("start_date") or ""),
+            str(args.get("end_date") or ""),
+        )
+        if start_date and end_date:
+            args["start_date"] = start_date
+            args["end_date"] = end_date
+            if date_meta.get("date_normalized"):
+                args["_date_normalization"] = date_meta
     try:
-        result = await mcp.call_tool(tool_name, arguments or {})
+        result = await mcp.call_tool(tool_name, args)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     payload = tool_result_payload(result)
