@@ -128,7 +128,7 @@ def update_contact(
     return contact
 
 
-@router.delete("/{contact_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{contact_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_contact(
     contact_id: int,
     db: Session = Depends(get_db),

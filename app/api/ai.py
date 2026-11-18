@@ -121,7 +121,7 @@ def update_source(
     return source
 
 
-@router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_source(
     source_id: int,
     db: Session = Depends(get_db),

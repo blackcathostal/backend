@@ -436,7 +436,7 @@ def send_campaign(
     )
 
 
-@router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_campaign(
     campaign_id: int,
     db: Session = Depends(get_db),

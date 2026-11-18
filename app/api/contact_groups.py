@@ -94,7 +94,7 @@ def update_contact_group(
     return group
 
 
-@router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_contact_group(
     group_id: int,
     db: Session = Depends(get_db),

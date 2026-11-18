@@ -75,7 +75,7 @@ def update_service(
     return service
 
 
-@router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_service(
     service_id: int,
     db: Session = Depends(get_db),

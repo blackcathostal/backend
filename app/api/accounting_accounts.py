@@ -264,7 +264,7 @@ def update_accounting_account(
     return account
 
 
-@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_accounting_account(
     account_id: int,
     db: Session = Depends(get_db),

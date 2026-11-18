@@ -137,7 +137,7 @@ def update_role(
     return _serialize_role(role)
 
 
-@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_role(
     role_id: int,
     db: Session = Depends(get_db),
@@ -226,7 +226,11 @@ def update_permission(
     return PermissionOut.model_validate(row)
 
 
-@router.delete("/permissions/{permission_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/permissions/{permission_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
 def delete_permission(
     permission_id: int,
     db: Session = Depends(get_db),

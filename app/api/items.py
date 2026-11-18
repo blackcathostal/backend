@@ -32,7 +32,7 @@ def update_item(item_id: int, payload: ItemUpdate) -> ItemRead:
     return item
 
 
-@router.delete("/{item_id}", status_code=204)
+@router.delete("/{item_id}", status_code=204, response_model=None)
 def delete_item(item_id: int) -> None:
     deleted = items_service.delete_item(item_id)
     if not deleted:
