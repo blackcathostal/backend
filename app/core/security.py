@@ -11,6 +11,10 @@ from app.core.database import get_db
 from app.models.users import Users
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_prefix}/auth/login-form")
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.api_prefix}/auth/login-form",
+    auto_error=False,
+)
 
 
 def hash_password(password: str) -> str:
@@ -47,4 +51,23 @@ def get_current_user(
     user = db.query(Users).filter(Users.email == email).first()
     if not user or not user.is_active:
         raise credentials_exception
+    return user
+
+
+def get_current_user_optional(
+    token: str | None = Depends(oauth2_scheme_optional),
+    db: Session = Depends(get_db),
+) -> Users | None:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+        email = payload.get("sub")
+        if not email:
+            return None
+    except jwt.PyJWTError:
+        return None
+    user = db.query(Users).filter(Users.email == email).first()
+    if not user or not user.is_active:
+        return None
     return user

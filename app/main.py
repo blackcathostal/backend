@@ -15,6 +15,7 @@ from app.models import (  # noqa: F401
     AiGenerationRuns,
     AiSources,
     AiUsage,
+    Audits,
     CampaignDeliveries,
     Campaigns,
     Complaints,
@@ -24,7 +25,7 @@ from app.models import (  # noqa: F401
     DteStatuses,
     DteTypes,
     DteVersions,
-    TaxDocuments,
+    Logs,
     MailAccounts,
     Medias,
     Posts,
@@ -32,6 +33,8 @@ from app.models import (  # noqa: F401
     Rooms,
     Services,
     Sliders,
+    Suppliers,
+    TaxDocuments,
     TermsAndConditions,
     Users,
     VisitorEvents,
@@ -283,7 +286,7 @@ def _ensure_schema_patches() -> None:
                     """
                 )
             ).scalar()
-            if not has_new_uq:
+            if not has_new_uq and column_exists("tax_documents", "counterpart_rut"):
                 conn.execute(
                     text(
                         """
@@ -293,10 +296,67 @@ def _ensure_schema_patches() -> None:
                         """
                     )
                 )
+            # Rename counterpart_rut → identification_number
+            if column_exists("tax_documents", "counterpart_rut") and not column_exists(
+                "tax_documents", "identification_number"
+            ):
+                # Drop unique key that still references counterpart_rut
+                has_uq = conn.execute(
+                    text(
+                        """
+                        SELECT COUNT(*)
+                        FROM information_schema.STATISTICS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'tax_documents'
+                          AND INDEX_NAME = 'uq_tax_documents_doc'
+                        """
+                    )
+                ).scalar()
+                if has_uq:
+                    conn.execute(text("ALTER TABLE tax_documents DROP INDEX uq_tax_documents_doc"))
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "CHANGE COLUMN counterpart_rut identification_number "
+                        "VARCHAR(40) NOT NULL DEFAULT ''"
+                    )
+                )
+            if not column_exists("tax_documents", "identification_number"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "ADD COLUMN identification_number VARCHAR(40) NOT NULL DEFAULT ''"
+                    )
+                )
+            # Recreate unique key on English column
+            has_id_uq = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'tax_documents'
+                      AND INDEX_NAME = 'uq_tax_documents_doc'
+                    """
+                )
+            ).scalar()
+            if not has_id_uq and column_exists("tax_documents", "identification_number"):
+                conn.execute(
+                    text(
+                        """
+                        ALTER TABLE tax_documents
+                        ADD UNIQUE KEY uq_tax_documents_doc
+                        (dte_version_id, dte_type_id, folio, identification_number)
+                        """
+                    )
+                )
+            if column_exists("tax_documents", "counterpart_name"):
+                conn.execute(text("ALTER TABLE tax_documents DROP COLUMN counterpart_name"))
             if column_exists("tax_documents", "direction"):
                 conn.execute(text("ALTER TABLE tax_documents DROP COLUMN direction"))
             if column_exists("tax_documents", "doc_type"):
                 conn.execute(text("ALTER TABLE tax_documents DROP COLUMN doc_type"))
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -356,6 +416,35 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.api_prefix)
 app.mount("/uploads", StaticFiles(directory=str(settings.uploads_dir)), name="uploads")
 app.mount("/mcp", protected_mcp_app())
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc: Exception):
+    """Persist unexpected backend errors into logs table; re-raise HTTPException path."""
+    from fastapi import HTTPException
+    from fastapi.responses import JSONResponse
+
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    logger.exception("Unhandled backend error on %s", getattr(request, "url", ""))
+    try:
+        from app.api.logs import capture_backend_error
+
+        db = SessionLocal()
+        try:
+            capture_backend_error(
+                db,
+                message=str(exc),
+                path=str(getattr(request, "url", "") or ""),
+                stack=repr(exc),
+                meta={"type": type(exc).__name__},
+            )
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not write backend error to logs table")
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/")

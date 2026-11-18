@@ -2,6 +2,7 @@ from app.models.accounting_accounts import AccountingAccounts
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_sources import AiSources
 from app.models.ai_usage import AiUsage
+from app.models.audits import Audits
 from app.models.campaign_deliveries import CampaignDeliveries
 from app.models.campaigns import Campaigns
 from app.models.complaints import Complaints
@@ -9,6 +10,7 @@ from app.models.contact_groups import ContactGroups
 from app.models.contact_inquiries import ContactInquiries
 from app.models.contacts import Contacts
 from app.models.hostel_info import CommonAnswers, HostelInfo
+from app.models.logs import Logs
 from app.models.mail_accounts import MailAccounts
 from app.models.medias import Medias
 from app.models.posts import Posts
@@ -16,6 +18,7 @@ from app.models.roles import Roles
 from app.models.rooms import Rooms
 from app.models.services import Services
 from app.models.sliders import Sliders
+from app.models.suppliers import Suppliers
 from app.models.tax_documents import DteStatuses, DteTypes, DteVersions, TaxDocuments
 from app.models.terms import TermsAndConditions
 from app.models.users import Users
@@ -27,6 +30,9 @@ __all__ = [
     "DteTypes",
     "DteVersions",
     "DteStatuses",
+    "Suppliers",
+    "Audits",
+    "Logs",
     "AiSources",
     "AiGenerationRuns",
     "AiUsage",

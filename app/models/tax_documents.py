@@ -15,19 +15,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
-# SII DTE type codes
-DTE_TYPE_INVOICE = 33  # Factura
-DTE_TYPE_RECEIPT = 39  # Boleta
-
-# Issued vs received
-DTE_VERSION_ISSUED = 1
-DTE_VERSION_RECEIVED = 2
-
-DTE_STATUS_PENDING_PAYMENT = 1
-DTE_STATUS_PAID = 2
-
 
 class DteTypes(Base):
+    """SII DTE type catalog (e.g. code 33 Invoice, 39 Receipt)."""
+
     __tablename__ = "dte_types"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -36,6 +27,8 @@ class DteTypes(Base):
 
 
 class DteVersions(Base):
+    """Issued vs received catalog."""
+
     __tablename__ = "dte_versions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -55,7 +48,7 @@ class DteStatuses(Base):
 
 
 class TaxDocuments(Base):
-    """Tax document (documento tributario): boleta/factura issued or received."""
+    """Tax document (documento tributario): receipt/invoice issued or received."""
 
     __tablename__ = "tax_documents"
     __table_args__ = (
@@ -63,7 +56,7 @@ class TaxDocuments(Base):
             "dte_version_id",
             "dte_type_id",
             "folio",
-            "counterpart_rut",
+            "identification_number",
             name="uq_tax_documents_doc",
         ),
     )
@@ -74,7 +67,6 @@ class TaxDocuments(Base):
         ForeignKey("dte_versions.id"),
         nullable=False,
         index=True,
-        default=DTE_VERSION_ISSUED,
     )
     dte_type_id: Mapped[int | None] = mapped_column(
         Integer,
@@ -90,8 +82,7 @@ class TaxDocuments(Base):
     )
     period: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     folio: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
-    counterpart_rut: Mapped[str] = mapped_column(String(40), nullable=False, default="")
-    counterpart_name: Mapped[str] = mapped_column(String(220), nullable=False, default="")
+    identification_number: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
     issued_at: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     net_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     exempt_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

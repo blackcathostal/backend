@@ -9,15 +9,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.tax_documents import (
-    DTE_STATUS_PENDING_PAYMENT,
-    DTE_TYPE_INVOICE,
-    DTE_TYPE_RECEIPT,
-    DTE_VERSION_ISSUED,
-    DTE_VERSION_RECEIVED,
-    DteStatuses,
-    TaxDocuments,
-)
+from app.models.suppliers import Suppliers
+from app.models.tax_documents import DteStatuses, TaxDocuments
 from app.models.users import Users
 from app.schemas.tax_documents import (
     DteStatusOut,
@@ -26,29 +19,12 @@ from app.schemas.tax_documents import (
     TaxDocumentPatch,
     TaxDocumentRefreshResult,
 )
+from app.services import dte_catalog
 from app.services.facturacion_client import FacturacionClient, FacturacionError
 from app.services.facturacion_web import FacturacionWebClient
 from app.services.fns_accounting import classify_document, fetch_pms_production
 
 router = APIRouter(tags=["tax-documents"])
-
-_VERSION_ALIASES = {
-    "issued": DTE_VERSION_ISSUED,
-    "emitida": DTE_VERSION_ISSUED,
-    "1": DTE_VERSION_ISSUED,
-    str(DTE_VERSION_ISSUED): DTE_VERSION_ISSUED,
-    "received": DTE_VERSION_RECEIVED,
-    "recibida": DTE_VERSION_RECEIVED,
-    "2": DTE_VERSION_RECEIVED,
-    str(DTE_VERSION_RECEIVED): DTE_VERSION_RECEIVED,
-}
-
-
-def _normalize_version(value: str | int | None, *, default: int = DTE_VERSION_ISSUED) -> int:
-    key = str(value if value is not None else default).strip().lower()
-    if key not in _VERSION_ALIASES:
-        raise HTTPException(status_code=400, detail="version must be issued/received or 1/2")
-    return _VERSION_ALIASES[key]
 
 
 def _extract_pdf_token(payload: object) -> str:
@@ -85,13 +61,11 @@ def _pdf_token(row: TaxDocuments) -> str:
     return _extract_pdf_token(payload)
 
 
-def _resolve_type_id(item: dict) -> int:
+def _resolve_type_id(db: Session, item: dict) -> int | None:
     raw = item.get("dte_type_id")
-    if raw in {DTE_TYPE_INVOICE, DTE_TYPE_RECEIPT, str(DTE_TYPE_INVOICE), str(DTE_TYPE_RECEIPT)}:
-        return int(raw)
-    return FacturacionClient.resolve_dte_type_id(
-        item.get("doc_type") or item.get("dte_type_id") or "",
-    )
+    if raw is None or raw == "":
+        raw = item.get("dte_type_code") or item.get("doc_type") or ""
+    return dte_catalog.type_id_from_raw(db, raw)
 
 
 def _list_statuses(db: Session) -> list[DteStatusOut]:
@@ -99,9 +73,22 @@ def _list_statuses(db: Session) -> list[DteStatusOut]:
     return [DteStatusOut.model_validate(row) for row in rows]
 
 
-def _serialize_doc(row: TaxDocuments) -> TaxDocumentOut:
+def _supplier_name_map(db: Session, identification_numbers: list[str]) -> dict[str, str]:
+    ids = sorted({str(x or "").strip() for x in identification_numbers if str(x or "").strip()})
+    if not ids:
+        return {}
+    rows = (
+        db.query(Suppliers)
+        .filter(Suppliers.identification_number.in_(ids))
+        .all()
+    )
+    return {row.identification_number: (row.company_name or "") for row in rows}
+
+
+def _serialize_doc(row: TaxDocuments, *, company_name: str = "") -> TaxDocumentOut:
     item = TaxDocumentOut.model_validate(row)
     item.has_pdf = _has_pdf(row)
+    item.company_name = company_name or ""
     if row.dte_type is not None:
         item.dte_type_code = row.dte_type.code or ""
         item.dte_type_name = row.dte_type.name or ""
@@ -137,6 +124,29 @@ def _default_range() -> tuple[date, date]:
     return date(year, month, 1), today
 
 
+def _upsert_supplier(db: Session, identification_number: str, company_name: str) -> bool:
+    identification_number = str(identification_number or "").strip()
+    if not identification_number:
+        return False
+    company_name = str(company_name or "").strip()[:220]
+    row = (
+        db.query(Suppliers)
+        .filter(Suppliers.identification_number == identification_number)
+        .first()
+    )
+    if row is None:
+        db.add(
+            Suppliers(
+                identification_number=identification_number,
+                company_name=company_name,
+            )
+        )
+        return True
+    if company_name and row.company_name != company_name:
+        row.company_name = company_name
+    return False
+
+
 def _upsert_docs(
     db: Session,
     docs: list[dict],
@@ -145,18 +155,32 @@ def _upsert_docs(
     dte_version_id: int,
     pms_rows: list[dict] | None = None,
     match_fns: bool = True,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     upserted = 0
     classified = 0
+    suppliers_upserted = 0
+    version_ids = dte_catalog.all_version_ids(db)
+    pending_status_id = dte_catalog.pending_payment_status_id(db)
+
     for item in docs:
         version_id = int(item.get("dte_version_id") or dte_version_id or 0)
-        if version_id not in {DTE_VERSION_ISSUED, DTE_VERSION_RECEIVED}:
+        if version_id not in version_ids:
             version_id = dte_version_id
-        type_id = _resolve_type_id(item)
+        type_id = _resolve_type_id(db, item)
         folio = str(item.get("folio") or "").strip()
-        counterpart_rut = str(item.get("counterpart_rut") or "").strip()
-        if not folio and not counterpart_rut:
+        identification_number = str(
+            item.get("identification_number")
+            or item.get("counterpart_rut")
+            or ""
+        ).strip()
+        company_name = str(
+            item.get("company_name") or item.get("counterpart_name") or ""
+        ).strip()
+        if not folio and not identification_number:
             continue
+
+        if _upsert_supplier(db, identification_number, company_name):
+            suppliers_upserted += 1
 
         issued_raw = item.get("issued_at")
         issued_at = None
@@ -168,8 +192,14 @@ def _upsert_docs(
             except ValueError:
                 issued_at = None
 
+        # Keep classify_document compatible during transition
+        classify_payload = {
+            **item,
+            "counterpart_rut": identification_number,
+            "counterpart_name": company_name,
+        }
         if match_fns:
-            class_info = classify_document(item, pms_rows)
+            class_info = classify_document(classify_payload, pms_rows)
             if class_info.get("pms_class") and class_info["pms_class"] != "Sin match":
                 classified += 1
         else:
@@ -181,7 +211,7 @@ def _upsert_docs(
                 TaxDocuments.dte_version_id == version_id,
                 TaxDocuments.dte_type_id == type_id,
                 TaxDocuments.folio == folio,
-                TaxDocuments.counterpart_rut == counterpart_rut,
+                TaxDocuments.identification_number == identification_number,
             )
             .first()
         )
@@ -191,8 +221,8 @@ def _upsert_docs(
                 dte_version_id=version_id,
                 dte_type_id=type_id,
                 folio=folio,
-                counterpart_rut=counterpart_rut,
-                status_id=DTE_STATUS_PENDING_PAYMENT,
+                identification_number=identification_number,
+                status_id=pending_status_id,
                 period="",
             )
             db.add(row)
@@ -201,9 +231,9 @@ def _upsert_docs(
         row.dte_type_id = type_id
         if is_new or row.period is None:
             row.period = ""
-        if not row.status_id:
-            row.status_id = DTE_STATUS_PENDING_PAYMENT
-        row.counterpart_name = str(item.get("counterpart_name") or "")[:220]
+        if not row.status_id and pending_status_id:
+            row.status_id = pending_status_id
+        row.identification_number = identification_number
         row.issued_at = issued_at
         row.net_amount = float(item.get("net_amount") or 0)
         row.exempt_amount = float(item.get("exempt_amount") or 0)
@@ -220,7 +250,7 @@ def _upsert_docs(
         upserted += 1
 
     db.commit()
-    return upserted, classified
+    return upserted, classified, suppliers_upserted
 
 
 def _list_version(
@@ -248,8 +278,12 @@ def _list_version(
         TaxDocuments.issued_at.desc(),
         TaxDocuments.id.desc(),
     ).all()
+    names = _supplier_name_map(db, [row.identification_number for row in rows])
     return TaxDocumentListResult(
-        items=[_serialize_doc(row) for row in rows],
+        items=[
+            _serialize_doc(row, company_name=names.get(row.identification_number or "", ""))
+            for row in rows
+        ],
         total=len(rows),
         from_date=date_from,
         to_date=date_to,
@@ -265,9 +299,10 @@ def list_issued(
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentListResult:
     start, end = _default_range()
+    version_id = dte_catalog.version_id_from_raw(db, dte_catalog.VERSION_CODE_ISSUED)
     return _list_version(
         db,
-        dte_version_id=DTE_VERSION_ISSUED,
+        dte_version_id=version_id,
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
@@ -281,9 +316,10 @@ def list_received(
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentListResult:
     start, end = _default_range()
+    version_id = dte_catalog.version_id_from_raw(db, dte_catalog.VERSION_CODE_RECEIVED)
     return _list_version(
         db,
-        dte_version_id=DTE_VERSION_RECEIVED,
+        dte_version_id=version_id,
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
@@ -296,13 +332,7 @@ def list_issued_legacy(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentListResult:
-    start, end = _default_range()
-    return _list_version(
-        db,
-        dte_version_id=DTE_VERSION_ISSUED,
-        date_from=_parse_bound(from_date, fallback=start),
-        date_to=_parse_bound(to_date, fallback=end),
-    )
+    return list_issued(from_date=from_date, to_date=to_date, db=db, _=_)
 
 
 @router.get("/recibidas", response_model=TaxDocumentListResult, include_in_schema=False)
@@ -312,13 +342,7 @@ def list_received_legacy(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentListResult:
-    start, end = _default_range()
-    return _list_version(
-        db,
-        dte_version_id=DTE_VERSION_RECEIVED,
-        date_from=_parse_bound(from_date, fallback=start),
-        date_to=_parse_bound(to_date, fallback=end),
-    )
+    return list_received(from_date=from_date, to_date=to_date, db=db, _=_)
 
 
 @router.get("/statuses", response_model=list[DteStatusOut])
@@ -370,7 +394,11 @@ def patch_document(
         .filter(TaxDocuments.id == doc_id)
         .first()
     )
-    return _serialize_doc(row)
+    names = _supplier_name_map(db, [row.identification_number])
+    return _serialize_doc(
+        row,
+        company_name=names.get(row.identification_number or "", ""),
+    )
 
 
 def _persist_pdf_token(db: Session, row: TaxDocuments, token: str) -> None:
@@ -408,7 +436,7 @@ def download_document_pdf(
             if not token:
                 token = web.find_pdf_data(
                     folio=row.folio or "",
-                    rut=row.counterpart_rut or "",
+                    rut=row.identification_number or "",
                     issued_at=row.issued_at,
                 )
                 if token:
@@ -440,7 +468,14 @@ async def refresh_tax_documents(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentRefreshResult:
-    version_id = _normalize_version(direction, default=DTE_VERSION_ISSUED)
+    try:
+        version_id = dte_catalog.version_id_from_raw(db, direction)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="version must be issued/received or 1/2") from exc
+
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+
     start, end = _default_range()
     date_from = _parse_bound(from_date, fallback=start)
     date_to = _parse_bound(to_date, fallback=end)
@@ -451,7 +486,7 @@ async def refresh_tax_documents(
     pms_rows: list[dict] = []
 
     try:
-        if version_id == DTE_VERSION_RECEIVED:
+        if version_id == received_id:
             source = "web"
             with FacturacionWebClient() as web:
                 docs = web.fetch_recibidas(date_from, date_to)
@@ -465,20 +500,23 @@ async def refresh_tax_documents(
 
     for doc in docs:
         doc["dte_version_id"] = version_id
-        doc["dte_type_id"] = _resolve_type_id(doc)
+        resolved_type = _resolve_type_id(db, doc)
+        if resolved_type is not None:
+            doc["dte_type_id"] = resolved_type
 
-    upserted, classified = _upsert_docs(
+    upserted, classified, suppliers_upserted = _upsert_docs(
         db,
         docs,
         source=source,
         dte_version_id=version_id,
         pms_rows=pms_rows,
-        match_fns=version_id == DTE_VERSION_ISSUED,
+        match_fns=version_id == issued_id,
     )
     return TaxDocumentRefreshResult(
         dte_version_id=version_id,
         fetched=len(docs),
         upserted=upserted,
         classified=classified,
+        suppliers_upserted=suppliers_upserted,
         warning=warning,
     )

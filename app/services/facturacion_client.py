@@ -200,30 +200,31 @@ class FacturacionClient:
         return ""
 
     @staticmethod
-    def resolve_dte_type_id(raw_type: object, *, tipolibro: str | None = None) -> int:
-        """Map SII/facturacion labels to dte_types.id (33 Factura, 39 Boleta)."""
+    def resolve_dte_type_code(raw_type: object, *, tipolibro: str | None = None) -> str:
+        """Map SII/facturacion labels to dte_types.code (resolved to id in API via DB)."""
         text = str(raw_type or "").strip().lower()
         digits = "".join(ch for ch in text if ch.isdigit())
-        if digits.startswith("39") or digits == "39":
-            return 39
-        if digits.startswith("33") or digits == "33":
-            return 33
-        if "39" in digits:
-            return 39
-        if "33" in digits:
-            return 33
-        if "boleta" in text or (tipolibro or "").strip().upper() == "B":
-            return 39
-        if "factura" in text or (tipolibro or "").strip().upper() == "V":
-            return 33
-        return 33
+        if digits.startswith("39") or digits == "39" or "39" in digits:
+            return "39"
+        if digits.startswith("33") or digits == "33" or "33" in digits:
+            return "33"
+        if "boleta" in text or "receipt" in text or (tipolibro or "").strip().upper() == "B":
+            return "39"
+        if "factura" in text or "invoice" in text or (tipolibro or "").strip().upper() == "V":
+            return "33"
+        return "33"
 
     @staticmethod
-    def resolve_dte_version_id(direction: str | None) -> int:
+    def resolve_dte_type_id(raw_type: object, *, tipolibro: str | None = None) -> int:
+        """Legacy helper: returns SII type code as int; prefer resolve_dte_type_code."""
+        return int(FacturacionClient.resolve_dte_type_code(raw_type, tipolibro=tipolibro))
+
+    @staticmethod
+    def resolve_dte_version_code(direction: str | None) -> str:
         value = str(direction or "").strip().lower()
         if value in {"recibida", "received", "2"}:
-            return 2
-        return 1
+            return "received"
+        return "issued"
 
     def _normalize_doc(
         self,
@@ -244,29 +245,34 @@ class FacturacionClient:
             pick("fecha", "fechadocumento", "fecha_documento", "fechaemision", "fecha_emision")
         )
         raw_type = pick("tipodte", "tipo_dte", "tipo", "tipo documento", "tipodocumento") or ""
-        dte_type_id = self.resolve_dte_type_id(raw_type, tipolibro=tipolibro)
-        dte_version_id = self.resolve_dte_version_id(direction)
+        dte_type_code = self.resolve_dte_type_code(raw_type, tipolibro=tipolibro)
+        dte_version_code = self.resolve_dte_version_code(direction)
+        identification_number = str(
+            pick("rut", "rutcliente", "rut_cliente", "rut proveedor", "rutproveedor") or ""
+        ).strip()
+        company_name = str(
+            pick(
+                "razon",
+                "razonsocial",
+                "razon_social",
+                "nombre",
+                "cliente",
+                "proveedor",
+            )
+            or ""
+        ).strip()
         return {
-            "dte_type_id": dte_type_id,
-            "dte_version_id": dte_version_id,
-            # Legacy keys kept for older callers during transition
-            "direction": "recibida" if dte_version_id == 2 else "emitida",
-            "doc_type": "Boleta" if dte_type_id == 39 else "Factura",
+            "dte_type_code": dte_type_code,
+            "dte_version_code": dte_version_code,
+            # Provisional numeric hints; API overwrites ids from catalog tables
+            "dte_type_id": int(dte_type_code) if dte_type_code.isdigit() else None,
+            "dte_version_id": 2 if dte_version_code == "received" else 1,
             "folio": str(pick("folio", "nro", "numero", "n°", "nº") or "").strip(),
-            "counterpart_rut": str(
-                pick("rut", "rutcliente", "rut_cliente", "rut proveedor", "rutproveedor") or ""
-            ).strip(),
-            "counterpart_name": str(
-                pick(
-                    "razon",
-                    "razonsocial",
-                    "razon_social",
-                    "nombre",
-                    "cliente",
-                    "proveedor",
-                )
-                or ""
-            ).strip(),
+            "identification_number": identification_number,
+            "company_name": company_name,
+            # Legacy aliases for classify/PMS helpers
+            "counterpart_rut": identification_number,
+            "counterpart_name": company_name,
             "issued_at": issued_at.isoformat() if issued_at else None,
             "net_amount": _parse_amount(pick("montoneto", "monto_neto", "neto")),
             "exempt_amount": _parse_amount(pick("montoexento", "monto_exento", "exento")),
@@ -376,9 +382,9 @@ class FacturacionClient:
                     if issued and (issued < date_from or issued > date_to):
                         continue
                     key = (
-                        str(doc.get("dte_type_id") or ""),
+                        str(doc.get("dte_type_code") or doc.get("dte_type_id") or ""),
                         str(doc.get("folio") or ""),
-                        str(doc.get("counterpart_rut") or ""),
+                        str(doc.get("identification_number") or doc.get("counterpart_rut") or ""),
                     )
                     if key in seen:
                         continue

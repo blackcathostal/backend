@@ -42,8 +42,8 @@ class TaxDocumentOut(BaseModel):
     status_tip_color: str = "red"
     period: str = ""
     folio: str
-    counterpart_rut: str
-    counterpart_name: str
+    identification_number: str = ""
+    company_name: str = ""
     issued_at: date | None = None
     net_amount: float = 0
     exempt_amount: float = 0
@@ -70,6 +70,7 @@ class TaxDocumentRefreshResult(BaseModel):
     fetched: int
     upserted: int
     classified: int
+    suppliers_upserted: int = 0
     warning: str = ""
 
 

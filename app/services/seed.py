@@ -3,17 +3,12 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import hash_password
 from app.models.tax_documents import (
-    DTE_STATUS_PAID,
-    DTE_STATUS_PENDING_PAYMENT,
-    DTE_TYPE_INVOICE,
-    DTE_TYPE_RECEIPT,
-    DTE_VERSION_ISSUED,
-    DTE_VERSION_RECEIVED,
     DteStatuses,
     DteTypes,
     DteVersions,
     TaxDocuments,
 )
+from app.services import dte_catalog
 from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
 from app.models.hostel_info import CommonAnswers
@@ -409,12 +404,15 @@ def seed_database(db: Session) -> None:
                 row.answer_guide = updated["answer_guide"]
                 row.keywords = updated["keywords"]
 
+    # Catalog rows live in DB; seed only upserts by code (SII ids for types).
     dte_versions = (
-        (DTE_VERSION_ISSUED, "issued", "Emitida"),
-        (DTE_VERSION_RECEIVED, "received", "Recibida"),
+        (1, dte_catalog.VERSION_CODE_ISSUED, "Issued"),
+        (2, dte_catalog.VERSION_CODE_RECEIVED, "Received"),
     )
     for version_id, code, name in dte_versions:
-        row = db.query(DteVersions).filter(DteVersions.id == version_id).first()
+        row = db.query(DteVersions).filter(DteVersions.code == code).first()
+        if row is None:
+            row = db.query(DteVersions).filter(DteVersions.id == version_id).first()
         if row is None:
             db.add(DteVersions(id=version_id, code=code, name=name))
         else:
@@ -422,11 +420,13 @@ def seed_database(db: Session) -> None:
             row.name = name
 
     dte_types = (
-        (DTE_TYPE_INVOICE, "33", "Factura"),
-        (DTE_TYPE_RECEIPT, "39", "Boleta"),
+        (33, dte_catalog.TYPE_CODE_INVOICE, "Invoice"),
+        (39, dte_catalog.TYPE_CODE_RECEIPT, "Receipt"),
     )
     for type_id, code, name in dte_types:
-        row = db.query(DteTypes).filter(DteTypes.id == type_id).first()
+        row = db.query(DteTypes).filter(DteTypes.code == code).first()
+        if row is None:
+            row = db.query(DteTypes).filter(DteTypes.id == type_id).first()
         if row is None:
             db.add(DteTypes(id=type_id, code=code, name=name))
         else:
@@ -434,11 +434,13 @@ def seed_database(db: Session) -> None:
             row.name = name
 
     dte_statuses = (
-        (DTE_STATUS_PENDING_PAYMENT, "pending_payment", "Imputada por Pagar", "red"),
-        (DTE_STATUS_PAID, "paid", "Imputada Pagada", "green"),
+        (1, dte_catalog.STATUS_CODE_PENDING_PAYMENT, "Imputada por Pagar", "red"),
+        (2, dte_catalog.STATUS_CODE_PAID, "Imputada Pagada", "green"),
     )
     for status_id, code, name, tip_color in dte_statuses:
-        row = db.query(DteStatuses).filter(DteStatuses.id == status_id).first()
+        row = db.query(DteStatuses).filter(DteStatuses.code == code).first()
+        if row is None:
+            row = db.query(DteStatuses).filter(DteStatuses.id == status_id).first()
         if row is None:
             db.add(
                 DteStatuses(
@@ -455,32 +457,39 @@ def seed_database(db: Session) -> None:
 
     db.flush()
 
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+    invoice_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_INVOICE)
+    receipt_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_RECEIPT)
+    pending_id = dte_catalog.pending_payment_status_id(db)
+    known_type_ids = dte_catalog.all_type_ids(db)
+
     # Backfill version/type/status; period stays empty unless already set.
     for doc in db.query(TaxDocuments).all():
         direction = str(getattr(doc, "direction", "") or "").strip().lower()
         if not getattr(doc, "dte_version_id", None):
             doc.dte_version_id = (
-                DTE_VERSION_RECEIVED if direction in {"recibida", "received"} else DTE_VERSION_ISSUED
-            )
+                received_id if direction in {"recibida", "received"} else issued_id
+            ) or issued_id
         raw_type = str(getattr(doc, "doc_type", "") or "").strip().lower()
         type_id = getattr(doc, "dte_type_id", None)
-        if type_id not in {DTE_TYPE_INVOICE, DTE_TYPE_RECEIPT}:
-            if "boleta" in raw_type or str(type_id) == "39":
-                doc.dte_type_id = DTE_TYPE_RECEIPT
+        if type_id not in known_type_ids:
+            if "boleta" in raw_type or "receipt" in raw_type or str(type_id) == dte_catalog.TYPE_CODE_RECEIPT:
+                doc.dte_type_id = receipt_id
             else:
-                doc.dte_type_id = DTE_TYPE_INVOICE
-        if not doc.status_id:
-            doc.status_id = DTE_STATUS_PENDING_PAYMENT
+                doc.dte_type_id = invoice_id
+        if not doc.status_id and pending_id:
+            doc.status_id = pending_id
         if doc.period is None:
             doc.period = ""
 
     db.flush()
 
     # Remove legacy issued/received rows mistakenly stored in dte_types.
-    for legacy_id in (1, 2):
-        legacy = db.query(DteTypes).filter(DteTypes.id == legacy_id).first()
-        if legacy and legacy.code in {"issued", "received", "emitido", "recibido"}:
-            db.delete(legacy)
+    for legacy in db.query(DteTypes).filter(
+        DteTypes.code.in_(["issued", "received", "emitido", "recibido"])
+    ).all():
+        db.delete(legacy)
 
     db.commit()
     ensure_default_terms(db)

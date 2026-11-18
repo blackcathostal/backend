@@ -148,8 +148,8 @@ def classify_document(
 ) -> dict[str, str]:
     """Return pms_class + pms_ref for a normalized DTE dict."""
     text_class = classify_from_text(
-        str(doc.get("counterpart_name") or ""),
-        str(doc.get("doc_type") or ""),
+        str(doc.get("company_name") or doc.get("counterpart_name") or ""),
+        str(doc.get("dte_type_code") or doc.get("doc_type") or ""),
         str((doc.get("raw") or {}).get("Glosa") or ""),
         str((doc.get("raw") or {}).get("glosa") or ""),
         str((doc.get("raw") or {}).get("Detalle") or ""),
