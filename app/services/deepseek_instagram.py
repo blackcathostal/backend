@@ -17,7 +17,6 @@ from app.services.fns_motor import booking_allowed
 from app.services.instagram_knowledge import DEEPSEEK_TOOLS, hostel_info_dict
 from app.services.mcp_sources import call_reply_tool
 from app.services.reply_context import set_reply_context
-from app.services.room_rates import load_room_rates
 
 SANTIAGO = ZoneInfo("America/Santiago")
 # Booking tools hit FNS several times (list/search/cancel/create); 70s left threads stuck.
@@ -205,15 +204,16 @@ Idioma (OBLIGATORIO):
 - Mensajes cortos (“sí”, “ok”) heredan el idioma del hilo. No mezcles idiomas.
 
 Datos (OBLIGATORIO):
-- Precios / tipos de habitación → SOLO search_common_answers. Nunca search_rooms ni panel.
-- Fotos de habitaciones → get_room_photos (matrimonial/twin/triple/suite/cama). El sistema
+- Precios / tipos / descripción / servicios de habitación → SOLO search_rooms (CRUD).
+  NUNCA inventes habitaciones ni precios. Si search_rooms no trae dato, dilo.
+- Fotos de habitaciones → get_room_photos (o photo_urls de search_rooms). El sistema
   manda las imágenes en el DM. Mensaje corto (“Te mando las fotos…”). NO mandes a WhatsApp
   solo por fotos. Si no hay fotos cargadas, di blackcathostal.com (Habitaciones).
 - NO digas precios ni listes habitaciones a menos que el huésped lo pida explícitamente.
-  Si pide “precios” en general, da el resumen corto de FAQ; detalle por tipo SOLO si pregunta por ese tipo.
-- Mensual: $1.500.000 CLP (FAQ topic mensual).
+  Si pide “precios”, llama search_rooms y resume SOLO lo del CRUD; detalle por tipo SOLO si pregunta por ese tipo.
+- Mensual → search_common_answers topic mensual (no inventes).
 - Check-in, check-out, desayuno, estacionamiento, WhatsApp, dirección → get_hostel_info.
-- Otras dudas del hostal → search_common_answers.
+- Otras dudas del hostal → search_common_answers (no habitaciones).
 - WhatsApp: dalo MÁXIMO UNA vez por conversación (enlace; se envía sin imagen).
   Si ya lo diste en el hilo, NO lo vuelvas a mencionar ni cierres con “por WhatsApp”.
 - NUNCA digas que vas a confirmar con recepción, ni que hablas con recepción, ni que “recibimos
@@ -224,6 +224,11 @@ Datos (OBLIGATORIO):
 - Si el huésped se despide, despídete corto. Si no, no te despidas.
 - Reserva → invita a WhatsApp con fechas y personas (número solo si aún no salió en el hilo).
   Nunca inventes estado de reserva.
+- Disponibilidad/cupo → SOLO tras search_room_availability (FNS). NUNCA inventes cupo,
+  “sí hay después”, ni fechas alternativas sin volver a consultar FNS. Si FNS dice no hay
+  cupo, dilo; no contradigas ni inventes disponibilidad.
+- Compartida: hay dormitorios de hombres y de mujeres. Pregunta en cuál se siente
+  cómodo/a. No preguntes orientación sexual ni fuerces «¿eres hombre o mujer?».
 - Tarifas noche (solo si preguntan): Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, cama $19.990.
 - Pago/factura/reclamo conflictivo → escalate. Spam/vacío → escalate.
 
@@ -575,10 +580,10 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "- Nunca te despidas si el huésped no se despidió primero.\n"
         "- No repitas Barrio Brasil / desayuno / boutique en cada mensaje; solo si preguntan eso.\n"
         "- UN mensaje por respuesta. Corto. Sin segunda burbuja de confirmación.\n"
-        "- Precios/habitaciones SOLO si lo pide; una sola tarifa si pregunta por un tipo.\n"
-        "- «valor», «hola valor», «precios», «tarifa» = pide precios. Contesta tarifas YA; "
-        "NO respondas solo «¿en qué te podemos ayudar?».\n"
-        "- Mensual $1.500.000. Noche FAQ: 54990 / 54990 / 69990 / 19990.\n"
+        "- Precios/habitaciones SOLO si lo pide; usa search_rooms (CRUD). No inventes.\n"
+        "- «valor», «hola valor», «precios», «tarifa» = pide precios. Contesta YA con "
+        "search_rooms; NO respondas solo «¿en qué te podemos ayudar?».\n"
+        "- Mensual: search_common_answers. Noche: SOLO precios de search_rooms.\n"
         "- Voluntariado/gratis: no estamos aceptando voluntariado (amable y corto).\n"
         "- Cédula/pasaporte/beneficio dudoso: WhatsApp, no inventes.\n"
         "- WhatsApp máximo 1 vez por hilo. Si ya salió, no lo menciones otra vez ni digas «por WhatsApp».\n"
@@ -593,8 +598,13 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "muestra la reserva → «¿es esa?» → solo si sí, cancel/change con "
         "guest_confirmed=true. Cambiar: SIEMPRE change_room_booking "
         "(nunca create+confirm_extra; eso no borra la vieja). "
-        "En IG/FB cotiza SOLO CLP (19990 / 54990 / 69990). "
-        "No digas USD. Nunca digas «por ahí».\n"
+        "En IG/FB cotiza SOLO CLP de search_rooms (CRUD). No inventes tarifas. "
+        "No digas USD. Nunca digas «por ahí». "
+        "Compartida: hay de hombres y de mujeres; pregunta en cuál se siente "
+        "cómodo/a (no preguntes orientación ni fuerces «¿eres hombre o mujer?»).\n"
+        "- Disponibilidad/cupo: OBLIGATORIO search_room_availability (FNS) antes de "
+        "afirmar. NUNCA inventes cupo, «sí hay después» ni otras fechas sin consultar "
+        "FNS de nuevo. Si FNS dice NO HAY CUPO, dilo y no lo contradigas.\n"
         "- Tiempo/distancia: eta_only=true → solo min en auto, SIN mapa.\n"
         "- Si se despide, despídete corto. Si no, no.\n"
         "- Instagram y Facebook: mismas reglas.\n"
@@ -929,8 +939,8 @@ def _guest_turn(
         "Idioma: toda la charla; mensajes cortos heredan el idioma del hilo. No mezcles. "
         "UN solo mensaje corto. Sin segunda burbuja. "
         "Saludo solo (sin valor/precio) → «Hola, ¿en qué te podemos ayudar?» y PARA. "
-        "«hola valor» / valor / precios → da tarifas YA en este mensaje. "
-        "Una tarifa si preguntan un tipo; no listes todo. Mensual 1500000. "
+        "«hola valor» / valor / precios → search_rooms y da tarifas del CRUD YA. "
+        "Una tarifa si preguntan un tipo; no inventes. Mensual: FAQ. "
         "Voluntariado → no aceptamos (corto). Cédula dudosa → WhatsApp una vez. "
         "Si ya diste WhatsApp, no lo repitas ni cierres con «por WhatsApp». Sin recepción. "
         "Tiempo/distancia → eta_only=true. Si se despide → despídete. JSON final.",
@@ -993,48 +1003,51 @@ def _price_summary_reply(
     is_follow_up: bool,
     prior: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Deterministic rates for «hola valor» / precios — do not leave this to the LLM."""
+    """Deterministic rates from Rooms CRUD — never invent prices."""
     prior_texts = [
         str(turn.get("content") or "")
         for turn in (prior or [])
         if turn.get("role") == "user"
     ]
     lang = _conversation_language([*prior_texts, inbound_text], default="es")
-    rates = load_room_rates()
-    by_slug = {
-        str(room.get("slug") or ""): room for room in (rates.get("rooms") or [])
-    }
-    matrimonial = int((by_slug.get("matrimonial-suite") or {}).get("price_from_clp") or 54990)
-    twin = int((by_slug.get("twin") or {}).get("price_from_clp") or 54990)
-    triple = int((by_slug.get("triple") or {}).get("price_from_clp") or 69990)
-    shared = int((by_slug.get("shared") or {}).get("price_from_clp") or 19990)
-    m = _format_clp(matrimonial)
-    t = _format_clp(twin)
-    tr = _format_clp(triple)
-    s = _format_clp(shared)
-    if lang == "en":
+    from app.core.database import SessionLocal
+    from app.services.instagram_knowledge import search_rooms
+
+    with SessionLocal() as db:
+        rooms = search_rooms(db)
+    bits: list[str] = []
+    for room in rooms:
+        name = str(room.get("name") or room.get("type") or "").strip()
+        price = int(room.get("price_clp") or 0)
+        if not name or price <= 0:
+            continue
+        bits.append(f"{name} {_format_clp(price)}")
+    if not bits:
         body = (
-            f"From {m} double/suite, {t} twin, {tr} triple, "
-            f"{s} shared bed (per night)."
+            "We don't have room rates loaded yet."
+            if lang == "en"
+            else "Aún no hay tarifas de habitaciones cargadas en el panel."
         )
-        message = body if is_follow_up else f"Hi! {body}"
+    elif lang == "en":
+        body = "From " + ", ".join(bits) + " (per night)."
     elif lang == "pt":
-        body = (
-            f"A partir de {m} casal/suite, {t} twin, {tr} triplo, "
-            f"{s} cama compartilhada (por noite)."
-        )
-        message = body if is_follow_up else f"Olá! {body}"
+        body = "A partir de " + ", ".join(bits) + " (por noite)."
     else:
-        body = (
-            f"Desde {m} matrimonial/suite, {t} twin, {tr} triple "
-            f"y {s} cama compartida (noche)."
-        )
-        message = body if is_follow_up else f"Hola! {body}"
+        body = "Desde " + ", ".join(bits) + " (noche)."
+    if bits and not is_follow_up:
+        if lang == "en":
+            message = f"Hi! {body}"
+        elif lang == "pt":
+            message = f"Olá! {body}"
+        else:
+            message = f"Hola! {body}"
+    else:
+        message = body
     return {
         "action": "reply",
         "message": message,
         "reason": "price_question",
-        "model": "rule:prices",
+        "model": "rule:prices_rooms_crud",
         "map_image_url": "",
         "maps_url": "",
     }
@@ -1374,6 +1387,57 @@ def _reservation_whatsapp_reply(
     }
 
 
+_AVAILABILITY_CLAIM_RE = re.compile(
+    r"(?:"
+    r"hay\s+(?:cupo|disponib)|"
+    r"tenemos\s+(?:cupo|disponib)|"
+    r"s[ií]\s+hay|"
+    r"available|"
+    r"we\s+have\s+(?:availability|rooms?|beds?)|"
+    r"no\s+hay\s+(?:cupo|disponib)|"
+    r"sin\s+cupo|"
+    r"sold\s+out|"
+    r"para\s+(?:el|la|los|las)\s+\d|"
+    r"otra(?:s)?\s+fecha|"
+    r"otros?\s+d[ií]as|"
+    r"la\s+semana\s+siguiente|"
+    r"m[aá]s\s+adelante\s+hay|"
+    r"despu[eé]s\s+hay|"
+    r"hay\s+despu[eé]s"
+    r")",
+    re.IGNORECASE,
+)
+_POSITIVE_AVAIL_RE = re.compile(
+    r"(?:"
+    r"hay\s+(?:cupo|disponib)|"
+    r"tenemos\s+(?:cupo|disponib)|"
+    r"s[ií]\s+hay|"
+    r"available|"
+    r"we\s+have\s+(?:availability|rooms?|beds?)|"
+    r"m[aá]s\s+adelante\s+hay|"
+    r"despu[eé]s\s+hay|"
+    r"hay\s+despu[eé]s"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _fns_availability_snapshot(result: dict[str, Any]) -> dict[str, Any]:
+    rooms = [row for row in (result.get("rooms") or []) if isinstance(row, dict)]
+    available = bool(result.get("available")) and bool(rooms)
+    summary = str(result.get("availability_summary") or result.get("message") or "")
+    if "NO HAY CUPO" in summary.upper():
+        available = False
+    return {
+        "checked": True,
+        "available": available,
+        "shared_available": bool(result.get("shared_available")) and available,
+        "summary": summary,
+        "start_date": str(result.get("start_date") or ""),
+        "end_date": str(result.get("end_date") or ""),
+    }
+
+
 async def _run_reply_loop(
     *,
     db: Session,
@@ -1382,9 +1446,12 @@ async def _run_reply_loop(
     model: str,
     headers: dict[str, str],
     is_follow_up: bool = False,
+    enforce_fns_availability: bool = False,
 ) -> dict[str, Any]:
     route_reply: dict[str, Any] | None = None
     room_photo_urls: list[str] = []
+    last_fns_availability: dict[str, Any] | None = None
+    availability_nudge_sent = False
 
     async with httpx.AsyncClient(timeout=45.0) as client:
         for _ in range(4):
@@ -1441,10 +1508,17 @@ async def _run_reply_loop(
                                 f"La tool {name} tardó demasiado "
                                 f"(>{int(tool_timeout)}s). "
                                 "Di al huésped que reintente en un momento; "
-                                "no inventes 'sin cupo'."
+                                "NO inventes cupo ni digas que no hay cupo."
                             ),
                             "timeout": True,
                         }
+                    if (
+                        name == "search_room_availability"
+                        and isinstance(result, dict)
+                        and result.get("ok") is not False
+                        and not result.get("timeout")
+                    ):
+                        last_fns_availability = _fns_availability_snapshot(result)
                     if (
                         name == "get_directions_from_hostel"
                         and isinstance(result, dict)
@@ -1485,6 +1559,46 @@ async def _run_reply_loop(
                 action = "escalate"
             reply_message = str(data.get("message") or "").strip()
             reason = str(data.get("reason") or "").strip()
+
+            # Hard stop: never let the model invent FNS availability.
+            if (
+                enforce_fns_availability
+                and action == "reply"
+                and _AVAILABILITY_CLAIM_RE.search(reply_message or "")
+            ):
+                if last_fns_availability is None and not availability_nudge_sent:
+                    availability_nudge_sent = True
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": content,
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "STOP: acabas de afirmar disponibilidad sin consultar FNS. "
+                                "Llama search_room_availability con las fechas del huésped "
+                                "y responde SOLO con ese resultado. "
+                                "Nunca inventes cupo ni fechas alternativas."
+                            ),
+                        }
+                    )
+                    continue
+                if last_fns_availability is not None and not last_fns_availability.get(
+                    "available"
+                ):
+                    if _POSITIVE_AVAIL_RE.search(reply_message or ""):
+                        start = last_fns_availability.get("start_date") or ""
+                        end = last_fns_availability.get("end_date") or ""
+                        if start and end:
+                            reply_message = (
+                                f"No hay cupo para {start} → {end}."
+                            )
+                        else:
+                            reply_message = "No hay cupo para esas fechas."
+                        reason = reason or "fns_no_availability_enforced"
             map_image_url = ""
             maps_url = ""
             image_urls: list[str] = list(room_photo_urls or [])
@@ -1676,18 +1790,27 @@ async def generate_instagram_reply(
         "search_room_availability → create_room_booking. "
         "Eliminar → cancel_room_booking. "
         "Cambiar → change_room_booking (OBLIGATORIO: cancela vieja + crea nueva). "
-        "NUNCA digas 'no hay cupo' si search_room_availability devolvió rooms "
-        "o shared_available=true / availability_summary con HAY CUPO. "
-        "Si shared_available=true, di que SÍ hay compartida y usa 22851/22853. "
-        "Si quiere CAMBIAR o EXTENDER (ej. agregar 2 días) y shared_available=true, "
-        "usa change_room_booking con las fechas nuevas; no inventes falta de cupo. "
-        "Extender 25-26 +2 días = 25-28; cotiza noches x 19990 CLP. "
+        "REGLA ANTI-INVENCIÓN (crítica): "
+        "NUNCA inventes disponibilidad ni digas «sí hay después/otras fechas» "
+        "sin search_room_availability para ESAS fechas. "
+        "Si availability_summary dice NO HAY CUPO / available=false / rooms=[]: "
+        "di que no hay cupo. No lo contradigas en el mismo hilo. "
+        "Si el huésped propone otras fechas, llama search_room_availability otra vez "
+        "antes de afirmar cupo. "
+        "Solo di 'hay cupo' si el ÚLTIMO search_room_availability devolvió rooms "
+        "con inventory>0 o shared_available=true / HAY CUPO. "
+        "Si shared_available=true: di que SÍ hay compartida y ANTES de reservar pregunta "
+        "«Hay compartida de hombres y de mujeres; indícame en cuál te sientes cómodo/a». "
+        "NO preguntes orientación sexual ni fuerces «¿eres hombre o mujer?». "
+        "Cuando elija, create/change con shared_dorm_preference=men|women y código 22851/22853. "
+        "Si quiere CAMBIAR o EXTENDER: primero search_room_availability de las fechas "
+        "nuevas; solo si hay cupo, change_room_booking. "
+        "Extender: recalcula noches x guest_price_per_night_clp del CRUD SOLO si FNS confirma cupo. "
         "NUNCA para 'cambiar' uses create_room_booking con confirm_extra_booking; "
         "eso deja la vieja viva. Si usas create para cambiar: replace_existing=true. "
         "Otra adicional (mantener la vieja) → confirm_extra_booking=true solo si insiste. "
-        "Al cotizar da SOLO CLP "
-        "(guest_price_per_night_clp / guest_total_clp: "
-        "compartida 19990, matrimonial/twin 54990, triple 69990). "
+        "Al cotizar da SOLO CLP de search_rooms / guest_price_*_clp del último availability "
+        "(CRUD). No inventes montos. "
         "No digas USD. "
         "Para create/change GUARDA en CLP: currency=CLP, "
         "amount_after_tax=booking_amount_after_tax, "
@@ -1746,6 +1869,7 @@ async def generate_instagram_reply(
                 model=model,
                 headers=headers,
                 is_follow_up=is_follow_up,
+                enforce_fns_availability=bool(can_book and not public_ugc),
             ),
             timeout=REPLY_LOOP_TIMEOUT_SECONDS,
         )

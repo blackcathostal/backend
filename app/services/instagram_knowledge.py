@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.models.hostel_info import CommonAnswers, HostelInfo
-from app.services.hostel_directions import directions_from_hostel, driving_eta_from_hostel
 from app.models.rooms import Rooms
+from app.services.hostel_directions import directions_from_hostel, driving_eta_from_hostel
 
 
 def get_or_create_hostel_info(db: Session) -> HostelInfo:
@@ -60,11 +62,32 @@ def update_hostel_info(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     return hostel_info_dict(db)
 
 
+def _room_photo_paths(raw_photos: str | None) -> list[str]:
+    try:
+        loaded = json.loads(raw_photos or "[]")
+    except (TypeError, json.JSONDecodeError):
+        loaded = []
+    if not isinstance(loaded, list):
+        return []
+    out: list[str] = []
+    for item in loaded:
+        path = str(item or "").strip()
+        if path:
+            out.append(path)
+        if len(out) >= 6:
+            break
+    return out
+
+
 def search_rooms(db: Session, query: str | None = None) -> list[dict[str, Any]]:
+    """Rooms CRUD catalog: prices, description/features, capacity, photos."""
     rooms = db.query(Rooms).order_by(Rooms.type.asc(), Rooms.price.asc()).all()
     needle = (query or "").strip().lower()
+    tokens = [t for t in re.findall(r"[a-záéíóúñ0-9]+", needle) if t] if needle else []
     out: list[dict[str, Any]] = []
     for room in rooms:
+        features = str(getattr(room, "features", None) or "").strip()
+        photos = _room_photo_paths(getattr(room, "photos", None))
         item = {
             "id": room.id,
             "name": room.name,
@@ -72,9 +95,13 @@ def search_rooms(db: Session, query: str | None = None) -> list[dict[str, Any]]:
             "capacity": room.capacity,
             "price_clp": int(room.price or 0),
             "price_label": f"${int(room.price or 0):,}".replace(",", "."),
-            "features": getattr(room, "features", None) or "",
+            "features": features,
+            "description": features,
+            "services": features,
+            "photo_count": len(photos),
+            "photos": photos,
         }
-        if needle:
+        if tokens:
             blob = " ".join(
                 [
                     str(item["name"]),
@@ -82,7 +109,7 @@ def search_rooms(db: Session, query: str | None = None) -> list[dict[str, Any]]:
                     str(item["features"]),
                 ]
             ).lower()
-            if needle not in blob:
+            if needle not in blob and not any(tok in blob for tok in tokens):
                 continue
         out.append(item)
     return out
@@ -132,12 +159,23 @@ def _whatsapp_phone(whatsapp: str) -> str:
 
 
 def _prices_from_rooms(rooms: list[dict[str, Any]], whatsapp: str) -> str:
-    del rooms, whatsapp  # Keep signature; prefer FAQ text, not a room-by-room dump.
-    return (
-        "Tarifas referenciales por noche (pueden variar): "
-        "Matrimonial/Suite $54.990; Twin $54.990; Triple $69.990; cama $19.990. "
-        "Mensual $1.500.000."
-    )
+    del whatsapp
+    bits: list[str] = []
+    for room in rooms:
+        if not isinstance(room, dict):
+            continue
+        name = str(room.get("name") or room.get("type") or "").strip()
+        price = int(room.get("price_clp") or 0)
+        if not name or price <= 0:
+            continue
+        bits.append(f"{name} ${_format_price_clp(price)}")
+    if not bits:
+        return "Aún no hay tarifas de habitaciones en el panel. Pide que escriban por WhatsApp."
+    return "Tarifas por noche desde el panel: " + "; ".join(bits) + "."
+
+
+def _format_price_clp(amount: int) -> str:
+    return f"{int(amount):,}".replace(",", ".")
 
 
 def _live_faq_answer(
@@ -286,6 +324,30 @@ DEEPSEEK_TOOLS = [
                 "If the guest is NOT allowed to book via API, use this and send WhatsApp."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_rooms",
+            "description": (
+                "OBLIGATORIO for room types, prices, descriptions, services/amenities "
+                "and what each room includes. Reads the admin Rooms CRUD — never invent "
+                "rooms or prices. Use before answering about habitaciones/tarifas. "
+                "For photos also call get_room_photos."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Optional filter, e.g. matrimonial, twin, triple, suite, "
+                            "compartida. Empty = full catalog."
+                        ),
+                    }
+                },
+            },
         },
     },
     {
@@ -533,11 +595,9 @@ DEEPSEEK_TOOLS = [
         "function": {
             "name": "search_common_answers",
             "description": (
-                "Lee las preguntas frecuentes. Úsala SIEMPRE para precios, tipos de habitación "
-                "y qué incluye cada una: el campo answer ya trae esos datos. "
-                "También sirve para WhatsApp, correo, horarios y dirección. "
-                "Escribe esos valores en la respuesta, en el idioma del huésped. "
-                "No uses el listado de habitaciones del panel. "
+                "Lee las preguntas frecuentes (check-in, políticas, mensual, etc.). "
+                "Para precios, tipos, descripción y servicios de habitaciones usa "
+                "search_rooms (CRUD del panel), no inventes. "
                 "No contestes con instrucciones como 'comparte el WhatsApp'."
             ),
             "parameters": {

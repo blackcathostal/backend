@@ -256,6 +256,17 @@ def clp_to_usd(amount_clp: float | int, usd_clp_rate: float) -> float:
     return round(float(amount_clp) / rate, 2)
 
 
+def _inventory_units(value: Any) -> int:
+    """Parse FNS invcount; anything non-positive is treated as no stock."""
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return 0
+    try:
+        return max(0, int(float(text)))
+    except (TypeError, ValueError):
+        return 0
+
+
 async def search_availability(
     *,
     start_date: str,
@@ -313,6 +324,10 @@ async def search_availability(
     for room in hotel.get("room_types") or []:
         if not isinstance(room, dict):
             continue
+        inventory = _inventory_units(room.get("invcount"))
+        # Never expose sold-out room types as bookable.
+        if inventory <= 0:
+            continue
         rateplans = []
         for plan in room.get("rateplans") or []:
             if not isinstance(plan, dict):
@@ -340,7 +355,7 @@ async def search_availability(
             {
                 "room_type_code": str(room.get("code") or room.get("thid") or ""),
                 "room_name": str(room.get("RoomName") or ""),
-                "inventory": str(room.get("invcount") or ""),
+                "inventory": str(inventory),
                 "min_price": room.get("minprice"),
                 "rate_plans": rateplans,
             }
@@ -354,6 +369,11 @@ async def search_availability(
         "end_date": end,
         "currency": hotel.get("currency") or body["params"]["currency"],
         "rooms": rooms_out,
+        "message": (
+            f"Hay cupo ({len(rooms_out)} tipos) para {start}→{end}."
+            if rooms_out
+            else f"No hay disponibilidad para {start}→{end}."
+        ),
     }
 
 

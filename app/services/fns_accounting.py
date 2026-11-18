@@ -1,4 +1,4 @@
-"""FNS PMS helpers to classify DTE amounts (hospedaje / consumos / etc.)."""
+"""FNS PMS Contabilidad helpers (API service, not web portal login)."""
 from __future__ import annotations
 
 import logging
@@ -16,6 +16,13 @@ CLASS_CONSUMOS = "Consumos"
 CLASS_ESTACIONAMIENTO = "Estacionamiento"
 CLASS_SERVICIOS = "Servicios"
 CLASS_SIN_MATCH = "Sin match"
+
+# Contabilidad endpoints from PMS API catalog (POST + Basic Auth).
+CONTABILIDAD_PATHS = (
+    "/v1/contabilidad/facturacion.php",
+    "/v1/contabilidad/cobros.php",
+    "/v1/contabilidad/produccion.php",
+)
 
 
 def _parse_amount(value: Any) -> float:
@@ -41,12 +48,27 @@ def _parse_date(value: Any) -> date | None:
     return None
 
 
+def _as_int(value: Any) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def _auth() -> tuple[str, str] | None:
     user = (settings.fns_pms_user or "").strip()
     password = (settings.fns_pms_password or "").strip()
     if not user or not password:
         return None
     return user, password
+
+
+def _service_base_url() -> str:
+    # API PMS service host (not the interactive web app login flow).
+    return (settings.fns_pms_base_url or "https://adminchile1.fnsmanager.com").rstrip("/")
 
 
 def classify_from_text(*parts: str) -> str | None:
@@ -87,58 +109,173 @@ def classify_from_text(*parts: str) -> str | None:
     return None
 
 
+def _movement_amount(movement: dict[str, Any]) -> float:
+    total = 0.0
+    for side in ("credito", "debito"):
+        bucket = movement.get(side)
+        if not isinstance(bucket, dict):
+            continue
+        for entry in bucket.values():
+            if not isinstance(entry, dict):
+                continue
+            amount = abs(_parse_amount(entry.get("importe")))
+            if amount:
+                total = max(total, amount)
+    if total:
+        return total
+    return abs(
+        _parse_amount(
+            movement.get("total")
+            or movement.get("monto")
+            or movement.get("importe")
+            or movement.get("amount")
+        )
+    )
+
+
+def _movement_labels(movement: dict[str, Any]) -> list[str]:
+    labels: list[str] = []
+    for key in (
+        "origen",
+        "fuente",
+        "factura_tipo",
+        "documento",
+        "fp_codigo",
+        "tipocuenta",
+        "auxiliar_operativo",
+    ):
+        value = str(movement.get(key) or "").strip()
+        if value:
+            labels.append(value)
+    for side in ("credito", "debito"):
+        bucket = movement.get(side)
+        if not isinstance(bucket, dict):
+            continue
+        for entry in bucket.values():
+            if not isinstance(entry, dict):
+                continue
+            for key in ("descripcion", "cc_nombre", "cuenta"):
+                value = str(entry.get(key) or "").strip()
+                if value:
+                    labels.append(value)
+    return labels
+
+
+def _flatten_contabilidad_payload(payload: dict[str, Any], *, source: str) -> list[dict[str, Any]]:
+    movimientos = payload.get("movimientos")
+    terceros = payload.get("terceros") if isinstance(payload.get("terceros"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    if not isinstance(movimientos, dict):
+        return rows
+
+    for key, movement in movimientos.items():
+        if not isinstance(movement, dict):
+            continue
+        cif = str(movement.get("cif") or "").strip()
+        third = terceros.get(cif) if isinstance(terceros.get(cif), dict) else {}
+        labels = _movement_labels(movement)
+        if isinstance(third, dict):
+            for field in ("nombre", "nombrecompleto"):
+                value = str(third.get(field) or "").strip()
+                if value:
+                    labels.append(value)
+        rows.append(
+            {
+                "id": str(movement.get("identificador") or key),
+                "folio": str(
+                    movement.get("factura_codigo")
+                    or movement.get("documento")
+                    or movement.get("auxiliar_operativo")
+                    or ""
+                ),
+                "reserva": str(movement.get("auxiliar_operativo") or ""),
+                "booking_id": str(movement.get("auxiliar_operativo") or ""),
+                "fecha": movement.get("fecha"),
+                "total": _movement_amount(movement),
+                "monto": _movement_amount(movement),
+                "importe": _movement_amount(movement),
+                "concepto": " ".join(labels),
+                "descripcion": " ".join(labels),
+                "nombre": str(
+                    (third or {}).get("nombrecompleto")
+                    or (third or {}).get("nombre")
+                    or ""
+                ),
+                "tipo": str(movement.get("factura_tipo") or movement.get("fuente") or source),
+                "centro_coste": " ".join(
+                    str((entry or {}).get("cc_nombre") or "")
+                    for side in ("credito", "debito")
+                    for entry in ((movement.get(side) or {}) if isinstance(movement.get(side), dict) else {}).values()
+                    if isinstance(entry, dict)
+                ),
+                "cif": cif,
+                "fuente": source,
+                "raw": movement,
+            }
+        )
+    return rows
+
+
 async def fetch_pms_production(date_from: date, date_to: date) -> list[dict[str, Any]]:
-    """Best-effort pull of PMS production/charges for classification."""
+    """Pull Contabilidad from FNS PMS API service (POST + Basic Auth)."""
     auth = _auth()
     if not auth:
+        logger.warning("FNS PMS credentials missing; Contabilidad skipped")
         return []
 
-    pms = (settings.fns_pms_base_url or "").rstrip("/")
-    ms = (settings.fns_ms_base_url or "").rstrip("/")
-    hotel = (settings.fns_hotel_pms_id or settings.fns_hotel_id or "").strip()
-    pms_id = (settings.fns_pms_id or "").strip()
-    params = {
-        "pms_id": pms_id,
-        "hotel_id": hotel,
-        "fecha_desde": date_from.isoformat(),
-        "fecha_hasta": date_to.isoformat(),
-        "desde": date_from.isoformat(),
-        "hasta": date_to.isoformat(),
+    hotel = _as_int(settings.fns_hotel_pms_id or settings.fns_hotel_id)
+    pms_id = _as_int(settings.fns_pms_id)
+    if hotel is None:
+        logger.warning("FNS alojamiento_id missing; Contabilidad skipped")
+        return []
+
+    filter_body: dict[str, Any] = {
+        "alojamiento_id": hotel,
+        "start_date": date_from.isoformat(),
+        "end_date": date_to.isoformat(),
     }
-    paths = [
-        "/v1/contabilidad/facturacion.php",
-        "/v1/contabilidad/cobros.php",
-        "/v1/ventas/produccion.php",
-        "/v1/ventas/produccion_centro_coste.php",
-        "/api/pms/reportes/cobros",
-    ]
+    if pms_id is not None:
+        filter_body["pms_id"] = pms_id
+
+    body = {"filter": filter_body}
+    base = _service_base_url()
     rows: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=40.0, follow_redirects=True, auth=auth) as client:
-        for base in (pms, ms):
-            if not base:
+
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True, auth=auth) as client:
+        for path in CONTABILIDAD_PATHS:
+            url = f"{base}{path}"
+            try:
+                response = await client.post(url, json=body)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("FNS Contabilidad POST failed %s: %s", url, exc)
                 continue
-            for path in paths:
-                try:
-                    response = await client.get(f"{base}{path}", params=params)
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("FNS GET failed %s%s: %s", base, path, exc)
-                    continue
-                if response.status_code >= 400:
-                    continue
-                try:
-                    payload = response.json()
-                except ValueError:
-                    continue
-                if isinstance(payload, list):
-                    rows.extend([x for x in payload if isinstance(x, dict)])
-                elif isinstance(payload, dict):
-                    for key in ("data", "rows", "items", "result", "produccion", "cobros"):
-                        value = payload.get(key)
-                        if isinstance(value, list):
-                            rows.extend([x for x in value if isinstance(x, dict)])
-                            break
-                if rows:
-                    return rows
+
+            if response.status_code >= 400:
+                snippet = (response.text or "").strip()[:180] or "<empty body>"
+                logger.warning(
+                    "FNS Contabilidad %s -> %s %s (service host %s; Basic Auth POST)",
+                    path,
+                    response.status_code,
+                    snippet,
+                    base,
+                )
+                continue
+
+            try:
+                payload = response.json()
+            except ValueError:
+                logger.warning("FNS Contabilidad %s returned non-JSON", path)
+                continue
+
+            if not isinstance(payload, dict):
+                continue
+
+            batch = _flatten_contabilidad_payload(payload, source=path.split("/")[-1])
+            if batch:
+                rows.extend(batch)
+                # Prefer first successful Contabilidad source with data.
+                break
+
     return rows
 
 

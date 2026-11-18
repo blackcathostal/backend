@@ -34,7 +34,6 @@ from app.services.hostel_directions import directions_from_hostel
 from app.services.instagram_knowledge import hostel_info_dict, search_common_answers
 from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content
 from app.services.reply_context import get_reply_channel, get_reply_username
-from app.services.room_rates import load_room_rates
 
 mcp = FastMCP(
     "Black Cat Tourism Sources",
@@ -206,9 +205,8 @@ def _faq_payload(query: str = "") -> dict[str, Any]:
 @mcp.tool(
     name="search_frequent_questions",
     description=(
-        "Lee las preguntas frecuentes de Black Cat Hostal. "
-        "Úsala SIEMPRE para precios, tipos de habitación y qué incluye cada una, "
-        "además de otras dudas del huésped. No uses el listado de habitaciones."
+        "Lee las preguntas frecuentes de Black Cat Hostal (políticas, check-in, etc.). "
+        "Para habitaciones/precios/descripción/servicios usa search_rooms (CRUD)."
     ),
     structured_output=True,
 )
@@ -219,9 +217,9 @@ def search_frequent_questions(query: str = "") -> dict[str, Any]:
 @mcp.tool(
     name="search_common_answers",
     description=(
-        "Lee las preguntas frecuentes. Úsala SIEMPRE para precios y tipos de habitación "
-        "(no uses habitaciones del panel). También para otras dudas. "
-        "Si la respuesta no está completa, busca también en la web (excepto precios)."
+        "Lee las preguntas frecuentes (políticas, check-in, mensual, etc.). "
+        "Para precios, tipos, descripción y servicios de habitaciones usa search_rooms. "
+        "No inventes tarifas. Si falta algo no-habitación, puedes buscar en la web."
     ),
     structured_output=True,
 )
@@ -232,21 +230,45 @@ def search_common_answers_tool(query: str = "") -> dict[str, Any]:
 @mcp.tool(
     name="search_rooms",
     description=(
-        "NO usar en respuestas de Instagram/Facebook para precios o tipos de habitación. "
-        "Esos datos salen solo de preguntas frecuentes (search_common_answers / "
-        "search_frequent_questions)."
+        "OBLIGATORIO para habitaciones: precios, nombre, tipo, capacidad, descripción, "
+        "servicios/amenities y fotos del CRUD admin (Rooms). "
+        "Nunca inventes habitaciones ni precios. "
+        "query opcional (matrimonial, twin, triple, suite, compartida); vacío = todas."
     ),
     structured_output=True,
 )
 def search_rooms_tool(query: str = "") -> dict[str, Any]:
-    # Soft-block: redirect the model to FAQ instead of the rooms catalog.
+    from app.services.instagram_knowledge import search_rooms as search_rooms_catalog
+
+    with SessionLocal() as db:
+        rooms = search_rooms_catalog(db, query)
+    origin = _public_uploads_origin().rstrip("/")
+    enriched: list[dict[str, Any]] = []
+    for room in rooms:
+        photos = []
+        for path in room.get("photos") or []:
+            text = str(path or "").strip()
+            if not text:
+                continue
+            if text.startswith("https://"):
+                photos.append(text)
+            elif text.startswith("/uploads/"):
+                photos.append(f"{origin}{text}")
+        enriched.append(
+            {
+                **room,
+                "photo_urls": photos,
+                "image_urls": photos,
+            }
+        )
     return {
-        "ok": False,
+        "ok": True,
         "query": str(query or "").strip(),
-        "rooms": [],
-        "error": (
-            "No uses el listado de habitaciones. Para precios y tipos de habitación "
-            "llama search_common_answers o search_frequent_questions."
+        "source": "rooms_crud",
+        "rooms": enriched,
+        "agent_rule": (
+            "Usa SOLO estos datos del CRUD. No inventes habitaciones, precios, "
+            "servicios ni fotos. Si rooms está vacío, dilo y no inventes."
         ),
     }
 
@@ -396,25 +418,49 @@ def get_hostel_info_tool() -> dict[str, Any]:
     return {"ok": True, **info}
 
 
+def _crud_room_slug(room: dict[str, Any]) -> str:
+    blob = f"{room.get('type') or ''} {room.get('name') or ''}".lower()
+    if any(k in blob for k in ("compart", "dormitor", "litera", "shared", "cama")):
+        return "shared"
+    if "triple" in blob:
+        return "triple"
+    if "twin" in blob:
+        return "twin"
+    if "suite" in blob:
+        return "matrimonial-suite"
+    if any(k in blob for k in ("matrimonial", "doble", "queen", "king")):
+        return "matrimonial-suite"
+    return str(room.get("type") or room.get("name") or "room").strip().lower().replace(" ", "-")
+
+
 def _faq_guest_prices_clp() -> dict[str, Any]:
-    rates = load_room_rates()
-    rooms = []
-    for room in rates.get("rooms") or []:
+    """Guest CLP prices from Rooms CRUD (admin), not invented JSON defaults."""
+    from app.services.instagram_knowledge import search_rooms as search_rooms_catalog
+
+    with SessionLocal() as db:
+        catalog = search_rooms_catalog(db)
+    rooms: list[dict[str, Any]] = []
+    for room in catalog:
         if not isinstance(room, dict):
+            continue
+        price = int(room.get("price_clp") or 0)
+        if price <= 0:
             continue
         rooms.append(
             {
-                "slug": room.get("slug"),
-                "name_es": room.get("name_es"),
-                "price_from_clp": room.get("price_from_clp"),
+                "slug": _crud_room_slug(room),
+                "name_es": room.get("name") or room.get("type"),
+                "price_from_clp": price,
+                "type": room.get("type"),
+                "features": room.get("features") or "",
             }
         )
     return {
         "currency": "CLP",
         "rooms": rooms,
+        "source": "rooms_crud",
         "note": (
-            "Precios en pesos (CLP) del hostal para Instagram/Facebook. "
-            "Al huésped cotiza SOLO CLP; no digas USD."
+            "Precios CLP del CRUD Habitaciones. Cotiza SOLO estos montos; no inventes."
         ),
     }
 
@@ -450,19 +496,32 @@ def _clp_day_rates(start_date: str, end_date: str, price_per_night_clp: int) -> 
     return [{"day": day, "pnight": pnight} for day in _stay_nights(start_date, end_date)]
 
 
+def _crud_price_or_zero(by_slug: dict[str, Any], *slugs: str) -> int:
+    for slug in slugs:
+        row = by_slug.get(slug)
+        if isinstance(row, dict):
+            try:
+                value = int(row.get("price_from_clp") or 0)
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                return value
+    return 0
+
+
 async def _attach_guest_pricing(
     payload: dict[str, Any], *, start_date: str, end_date: str
 ) -> dict[str, Any]:
-    """Guest quote + FNS booking amounts in FAQ CLP."""
+    """Guest quote + FNS booking amounts from Rooms CRUD CLP prices."""
     faq = _faq_guest_prices_clp()
     nights = _nights_between(start_date, end_date)
     by_slug = {
         str(row.get("slug") or ""): row for row in (faq.get("rooms") or []) if isinstance(row, dict)
     }
-    shared = int((by_slug.get("shared") or {}).get("price_from_clp") or 19990)
-    matrimonial = int((by_slug.get("matrimonial-suite") or {}).get("price_from_clp") or 54990)
-    twin = int((by_slug.get("twin") or {}).get("price_from_clp") or 54990)
-    triple = int((by_slug.get("triple") or {}).get("price_from_clp") or 69990)
+    shared = _crud_price_or_zero(by_slug, "shared")
+    matrimonial = _crud_price_or_zero(by_slug, "matrimonial-suite")
+    twin = _crud_price_or_zero(by_slug, "twin", "matrimonial-suite")
+    triple = _crud_price_or_zero(by_slug, "triple")
 
     rooms_out: list[dict[str, Any]] = []
     for room in payload.get("rooms") or []:
@@ -475,12 +534,15 @@ async def _attach_guest_pricing(
         elif "triple" in name:
             guest_night_clp = triple
             guest_label = "Triple"
-        elif "twin" in name or "doble" in name:
+        elif "twin" in name:
             guest_night_clp = twin
             guest_label = "Twin"
         else:
             guest_night_clp = matrimonial
             guest_label = "Matrimonial/Suite"
+        if guest_night_clp <= 0:
+            # Do not invent a price — skip quoting this FNS room until CRUD has it.
+            continue
 
         guest_total_clp = guest_night_clp * nights
         booking_day_rates = _clp_day_rates(start_date, end_date, guest_night_clp)
@@ -523,8 +585,8 @@ async def _attach_guest_pricing(
         "rooms": rooms_out,
         "guest_prices_clp": faq,
         "quote_rule": (
-            "En Instagram/Facebook cotiza SOLO pesos (guest_price_*_clp / guest_total_clp). "
-            "No digas USD ni guest_price_*_usd al huésped. "
+            "Cotiza SOLO pesos del CRUD Habitaciones (guest_price_*_clp / guest_total_clp). "
+            "No inventes precios ni digas USD. "
             "Al crear la reserva en FNS usa SIEMPRE CLP: "
             "currency=CLP, amount_after_tax=booking_amount_after_tax, "
             "day_rates_json=booking_day_rates_json."
@@ -566,7 +628,20 @@ async def search_room_availability_tool(
         priced = await _attach_guest_pricing(
             payload, start_date=start_date, end_date=end_date
         )
-        rooms = [row for row in (priced.get("rooms") or []) if isinstance(row, dict)]
+        def _inv(row: dict[str, Any]) -> int:
+            try:
+                return max(0, int(float(str(row.get("inventory") or "0").strip() or "0")))
+            except (TypeError, ValueError):
+                return 0
+
+        # search_availability already drops inv<=0; keep a hard filter here too.
+        rooms = [
+            row
+            for row in (priced.get("rooms") or [])
+            if isinstance(row, dict) and _inv(row) > 0
+        ]
+        priced["rooms"] = rooms
+        priced["available"] = bool(rooms)
         shared = [
             row
             for row in rooms
@@ -590,6 +665,19 @@ async def search_room_availability_tool(
             }
             for row in shared
         ]
+        priced["shared_dorm_options"] = ["men", "women"]
+        priced["agent_rule"] = (
+            "Disponibilidad SOLO desde este resultado FNS. "
+            "NUNCA inventes cupo ni fechas alternativas. "
+            "Si available=false / rooms vacío: di que no hay cupo para esas fechas. "
+            "Si el huésped pide otras fechas, llama OTRA VEZ search_room_availability "
+            "con esas fechas antes de afirmar nada. "
+            "Si hay compartida: ANTES de reservar pregunta en cuál se siente cómodo/a "
+            "(hombres o mujeres). No preguntes orientación sexual ni fuerces "
+            "«¿eres hombre o mujer?». Frase guía: "
+            "«Hay compartida de hombres y de mujeres; indícame en cuál te sientes cómodo/a». "
+            "Luego pasa shared_dorm_preference=men|women en create_room_booking."
+        )
         if shared:
             bits = [
                 f"{row.get('room_type_code')} inv={row.get('inventory')} "
@@ -599,16 +687,20 @@ async def search_room_availability_tool(
             priced["availability_summary"] = (
                 f"HAY CUPO en compartida {start_date}→{end_date}: "
                 + "; ".join(bits)
-                + ". NUNCA digas que no hay cupo."
+                + ". Di que SÍ hay compartida y pregunta en cuál se siente cómodo/a "
+                "(hombres/mujeres), sin forzar identidad. No inventes otras fechas."
             )
         elif rooms:
             priced["availability_summary"] = (
                 f"Hay cupo en otras habitaciones ({len(rooms)}), "
-                "pero no en compartida para esas fechas."
+                "pero NO en compartida para esas fechas. "
+                "No inventes compartida ni fechas alternativas."
             )
         else:
             priced["availability_summary"] = (
-                f"No hay cupo Motor para {start_date}→{end_date}."
+                f"NO HAY CUPO FNS para {start_date}→{end_date}. "
+                "Dilo así. NUNCA digas que sí hay cupo después ni inventes otras fechas "
+                "sin volver a llamar search_room_availability."
             )
         priced["message"] = priced["availability_summary"]
         return priced
@@ -819,11 +911,75 @@ async def _create_and_remember_booking(
     return created
 
 
+def _is_shared_room_type(room_type_code: str, room_name: str = "") -> bool:
+    code = str(room_type_code or "").strip()
+    if code in {"22851", "22853"}:
+        return True
+    blob = str(room_name or "").lower()
+    return "compart" in blob or "shared" in blob or "litera" in blob
+
+
+def _normalize_shared_dorm_preference(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    if any(k in raw for k in ("mujer", "women", "female", "ladies", "girl")):
+        return "women"
+    if any(k in raw for k in ("hombre", "men", "male", "gents", "guy", "boy")):
+        return "men"
+    return ""
+
+
+def _shared_dorm_preference_gate(
+    *,
+    room_type_code: str,
+    shared_dorm_preference: str = "",
+    remarks: str = "",
+) -> dict[str, Any] | None:
+    if not _is_shared_room_type(room_type_code):
+        return None
+    preference = _normalize_shared_dorm_preference(shared_dorm_preference) or (
+        _normalize_shared_dorm_preference(remarks)
+    )
+    if preference:
+        return None
+    return {
+        "ok": False,
+        "needs_shared_dorm_preference": True,
+        "error": "missing_shared_dorm_preference",
+        "shared_dorm_options": ["men", "women"],
+        "message": (
+            "Compartida requiere preferencia de dormitorio. "
+            "Pregunta: «Hay compartida de hombres y de mujeres; "
+            "indícame en cuál te sientes cómodo/a». "
+            "No preguntes orientación sexual ni fuerces «¿eres hombre o mujer?». "
+            "Luego reintenta con shared_dorm_preference=men o women."
+        ),
+    }
+
+
+def _remarks_with_shared_dorm_preference(
+    remarks: str, shared_dorm_preference: str
+) -> str:
+    preference = _normalize_shared_dorm_preference(shared_dorm_preference)
+    base = str(remarks or "").strip()
+    if not preference:
+        return base
+    label = "mujeres" if preference == "women" else "hombres"
+    note = f"Compartida: se siente cómodo/a en dormitorio de {label}"
+    if note.lower() in base.lower():
+        return base
+    return f"{base}. {note}".strip(". ").strip()
+
+
 @mcp.tool(
     name="create_room_booking",
     description=(
         "Crea una reserva real en FNSrooms Motor. Solo para huéspedes autorizados. "
         "Antes: check_guest_bookings y search_room_availability. "
+        "Si la habitación es compartida (22851/22853): OBLIGATORIO "
+        "shared_dorm_preference=men|women (en cuál se siente cómodo/a). "
+        "No asumas género ni preguntes orientación sexual. "
         "Si ya tiene reserva activa: NO uses confirm_extra_booking para 'cambiar'. "
         "Para CAMBIAR fechas usa change_room_booking (o replace_existing=true, "
         "que cancela la vieja y luego crea). "
@@ -849,6 +1005,7 @@ async def create_room_booking_tool(
     guest_email: str = "",
     guest_phone: str = "",
     remarks: str = "",
+    shared_dorm_preference: str = "",
     day_rates_json: str = "[]",
     confirm_extra_booking: bool = False,
     replace_existing: bool = False,
@@ -865,6 +1022,14 @@ async def create_room_booking_tool(
     )
     if identity_err:
         return identity_err
+    dorm_err = _shared_dorm_preference_gate(
+        room_type_code=room_type_code,
+        shared_dorm_preference=shared_dorm_preference,
+        remarks=remarks,
+    )
+    if dorm_err:
+        return dorm_err
+    remarks = _remarks_with_shared_dorm_preference(remarks, shared_dorm_preference)
 
     try:
         existing = await list_guest_active_bookings(
@@ -1006,6 +1171,8 @@ async def create_room_booking_tool(
         "verifica cupo en fechas NUEVAS, cancela la anterior y crea la nueva. "
         "Si no hay documento y se buscó por nombre, el huésped debió confirmar "
         "«sí, esa es mi reserva» → guest_confirmed=true. "
+        "Si la nueva es compartida: shared_dorm_preference=men|women "
+        "(en cuál se siente cómodo/a; no fuerces identidad). "
         "Antes: search_room_availability y pasar códigos/montos CLP."
     ),
     structured_output=True,
@@ -1028,6 +1195,7 @@ async def change_room_booking_tool(
     guest_email: str = "",
     guest_phone: str = "",
     remarks: str = "",
+    shared_dorm_preference: str = "",
     day_rates_json: str = "[]",
 ) -> dict[str, Any]:
     blocked = _booking_gate()
@@ -1042,6 +1210,14 @@ async def change_room_booking_tool(
     )
     if identity_err:
         return identity_err
+    dorm_err = _shared_dorm_preference_gate(
+        room_type_code=room_type_code,
+        shared_dorm_preference=shared_dorm_preference,
+        remarks=remarks,
+    )
+    if dorm_err:
+        return dorm_err
+    remarks = _remarks_with_shared_dorm_preference(remarks, shared_dorm_preference)
     if not document and not guest_confirmed:
         return {
             "ok": False,
@@ -1192,8 +1368,10 @@ async def change_room_booking_tool(
             "ok": False,
             "error": "no_availability_new_dates",
             "message": (
-                "No hay cupo para esas fechas. "
-                "No cancelé la reserva anterior. Ofrece otras fechas."
+                "No hay cupo FNS para esas fechas. "
+                "No cancelé la reserva anterior. "
+                "Dile que no hay cupo; si propone otras fechas, "
+                "consulta search_room_availability otra vez. No inventes cupo."
             ),
             "old_booking": old_row,
             "availability": priced,
@@ -1642,9 +1820,6 @@ def tool_result_payload(result: Any) -> dict[str, Any]:
 async def call_reply_tool(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run one MCP tool for a DeepSeek Instagram or Facebook reply."""
     tool_name = str(name or "").strip()
-    if tool_name == "search_rooms":
-        # Prices / room types must come only from FAQ.
-        return await call_reply_tool("search_common_answers", arguments or {})
     try:
         result = await mcp.call_tool(tool_name, arguments or {})
     except Exception as exc:

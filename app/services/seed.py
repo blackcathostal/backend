@@ -269,7 +269,9 @@ DEFAULT_COMMON_ANSWERS = [
         "answer_guide": (
             "Dormitorio compartido: se cobra $19.990 CLP por cama (por persona), "
             "no por la habitación completa. "
-            "Las plazas se asignan en dormitorios solo hombres o solo mujeres según disponibilidad. "
+            "Hay compartidas de hombres y de mujeres. "
+            "Pregunta en cuál se siente cómodo/a (no preguntes orientación sexual "
+            "ni fuerces «¿eres hombre o mujer?»). "
             "Para reservar una cama, escribir por WhatsApp con fechas."
         ),
         "sort_order": 15,
@@ -423,21 +425,10 @@ def seed_database(db: Session) -> None:
         for item in DEFAULT_SERVICES:
             db.add(Services(**item))
 
+    # Rooms CRUD in admin is the source of truth — seed only when empty.
     if db.query(Rooms).count() == 0:
         for item in DEFAULT_ROOMS:
             db.add(Rooms(**item))
-    else:
-        by_type = {item["type"]: item for item in DEFAULT_ROOMS}
-        for room in db.query(Rooms).all():
-            match = by_type.get(room.type)
-            if not match:
-                continue
-            room.price = match["price"]
-            room.features = match["features"]
-            if match.get("name"):
-                room.name = match["name"]
-            if match.get("capacity"):
-                room.capacity = match["capacity"]
 
     get_or_create_hostel_info(db)
 
