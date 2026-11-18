@@ -13,6 +13,7 @@ from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
 from app.models.hostel_info import CommonAnswers
 from app.models.medias import Medias
+from app.models.permissions import Permissions, RolePermissions
 from app.models.roles import Roles
 from app.models.rooms import Rooms
 from app.models.services import Services
@@ -287,9 +288,29 @@ DEFAULT_COMMON_ANSWERS = [
 LEGACY_ENGLISH_ANSWERS: dict[str, tuple[str, str]] = {}
 
 
+DEFAULT_SIDEBAR_PERMISSIONS = (
+    ("dashboard", "Inicio", "dashboard", "Access dashboard"),
+    ("accounting", "Contabilidad", "accounting", "Accounting section"),
+    ("track", "Track", "track", "Tax documents Track section"),
+    ("sliders", "Sliders", "sliders", "Sliders section"),
+    ("rooms", "Habitaciones", "rooms", "Rooms section"),
+    ("services", "Servicios", "services", "Services section"),
+    ("complaints", "Denuncias", "complaints", "Complaints section"),
+    ("analytics", "Visitas", "analytics", "Analytics section"),
+    ("blog", "Blog", "blog", "Blog section"),
+    ("communications", "Comunicaciones", "communications", "Communications section"),
+    ("settings", "Configuraciones", "settings", "Settings section"),
+    ("maintainers", "Mantenedores", "maintainers", "Maintainers section"),
+    ("suppliers", "Proveedores", "maintainers", "Suppliers list"),
+    ("roles", "Roles", "maintainers", "Roles and permissions management"),
+)
+
+
 def seed_database(db: Session) -> None:
     roles = {
-        "admin": "Full access to the administration panel",
+        "admin": "Full access to the administration panel (legacy)",
+        "Administrador": "Full access to the administration panel",
+        "Comunicador": "Communications-focused access",
         "editor": "Can manage content such as sliders, posts and media",
         "viewer": "Read-only access",
     }
@@ -300,13 +321,57 @@ def seed_database(db: Session) -> None:
             role = Roles(name=name, description=description)
             db.add(role)
             db.flush()
+        else:
+            role.description = description
         role_by_name[name] = role
 
+    permission_by_code: dict[str, Permissions] = {}
+    for code, label, section, description in DEFAULT_SIDEBAR_PERMISSIONS:
+        row = db.query(Permissions).filter(Permissions.code == code).first()
+        if row is None:
+            row = Permissions(code=code, label=label, section=section, description=description)
+            db.add(row)
+            db.flush()
+        else:
+            row.label = label
+            row.section = section
+            row.description = description
+        permission_by_code[code] = row
+
+    db.flush()
+
+    all_permission_ids = [p.id for p in permission_by_code.values()]
+    communicator_codes = {
+        "dashboard",
+        "communications",
+        "blog",
+        "settings",
+    }
+
+    def ensure_role_permissions(role: Roles, codes: set[str] | None = None) -> None:
+        wanted = (
+            all_permission_ids
+            if codes is None
+            else [permission_by_code[c].id for c in codes if c in permission_by_code]
+        )
+        existing = {
+            link.permission_id
+            for link in db.query(RolePermissions).filter(RolePermissions.role_id == role.id).all()
+        }
+        for permission_id in wanted:
+            if permission_id not in existing:
+                db.add(RolePermissions(role_id=role.id, permission_id=permission_id))
+
+    ensure_role_permissions(role_by_name["Administrador"])
+    ensure_role_permissions(role_by_name["admin"])
+    ensure_role_permissions(role_by_name["Comunicador"], communicator_codes)
+
+    admin_role = role_by_name.get(settings.admin_role_name) or role_by_name["Administrador"]
     admin = db.query(Users).filter(Users.email == settings.admin_email).first()
     if not admin:
         db.add(
             Users(
-                role_id=role_by_name[settings.admin_role_name].id,
+                role_id=admin_role.id,
                 email=settings.admin_email,
                 full_name=settings.admin_full_name,
                 password=hash_password(settings.admin_password),

@@ -28,7 +28,9 @@ from app.models import (  # noqa: F401
     Logs,
     MailAccounts,
     Medias,
+    Permissions,
     Posts,
+    RolePermissions,
     Roles,
     Rooms,
     Services,
@@ -192,6 +194,14 @@ def _ensure_schema_patches() -> None:
                     "ADD COLUMN sort_order INT NOT NULL DEFAULT 0"
                 )
             )
+        if not column_exists("roles", "updated_at"):
+            conn.execute(
+                text(
+                    "ALTER TABLE roles ADD COLUMN updated_at DATETIME NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                )
+            )
+
         def table_exists(table_name: str) -> bool:
             return bool(
                 conn.execute(

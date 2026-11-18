@@ -13,6 +13,7 @@ from app.models.hostel_info import CommonAnswers, HostelInfo
 from app.models.logs import Logs
 from app.models.mail_accounts import MailAccounts
 from app.models.medias import Medias
+from app.models.permissions import Permissions, RolePermissions
 from app.models.posts import Posts
 from app.models.roles import Roles
 from app.models.rooms import Rooms
@@ -33,6 +34,8 @@ __all__ = [
     "Suppliers",
     "Audits",
     "Logs",
+    "Permissions",
+    "RolePermissions",
     "AiSources",
     "AiGenerationRuns",
     "AiUsage",
