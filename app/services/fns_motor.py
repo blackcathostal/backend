@@ -548,7 +548,14 @@ async def create_booking(
         payload = {"raw": text[:800]}
 
     logger.info("FNS booking created external_id=%s status=%s", booking_id, response.status_code)
-    fns_id = _extract_fns_id(payload)
+    ota_id, fns_id = _extract_ota_and_fns_ids(payload)
+    if ota_id:
+        booking_id = ota_id
+    if not _motor_success(payload):
+        raise FnsMotorError(
+            _motor_error_text(payload) or "Motor no confirmó la reserva",
+            details=payload,
+        )
     result = {
         "ok": True,
         "booking_id": booking_id,
@@ -599,10 +606,46 @@ def _save_booking_index(data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _extract_fns_id(payload: Any) -> str:
+def _iter_reservation_ids(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    ids = (
+        ((payload.get("HotelReservationIDs") or {}).get("HotelReservationID"))
+        if isinstance(payload.get("HotelReservationIDs"), dict)
+        else payload.get("HotelReservationID")
+    )
+    if isinstance(ids, dict):
+        return [ids]
+    if isinstance(ids, list):
+        return [row for row in ids if isinstance(row, dict)]
+    return []
+
+
+def _extract_ota_and_fns_ids(payload: Any) -> tuple[str, str]:
+    """Return (ota_booking_id, fns_manager_id) from a Motor create/cancel payload."""
+    ota = ""
+    fns = ""
+    for row in _iter_reservation_ids(payload):
+        kind = str(row.get("ResID_Type") or row.get("Type") or "").strip()
+        value = str(row.get("ResID_Value") or row.get("ID") or "").strip()
+        if not value:
+            continue
+        if kind in {"5", "OTA"} or value.upper().startswith("BC-"):
+            ota = ota or value
+        if kind in {"14", "FNSMANAGER", "FNS"}:
+            fns = fns or value
+    if not fns:
+        fns = _extract_fns_id_legacy(payload)
+    if not ota and isinstance(payload, dict):
+        unique = payload.get("UniqueID")
+        if isinstance(unique, dict) and unique.get("ID"):
+            ota = str(unique.get("ID") or "")
+    return ota, fns
+
+
+def _extract_fns_id_legacy(payload: Any) -> str:
     if not isinstance(payload, dict):
         return ""
-    # Common shapes from Motor responses.
     for key in ("IDFNS", "idFNS", "fns_id", "reservation_id"):
         if payload.get(key):
             return str(payload.get(key))
@@ -615,6 +658,39 @@ def _extract_fns_id(payload: Any) -> str:
         if isinstance(unique, dict) and unique.get("IDFNS"):
             return str(unique.get("IDFNS"))
     return ""
+
+
+def _extract_fns_id(payload: Any) -> str:
+    _ota, fns = _extract_ota_and_fns_ids(payload)
+    return fns
+
+
+def _motor_success(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    success = str(payload.get("Success") or "").strip().lower()
+    if success in {"1", "true", "ok", "yes"}:
+        return True
+    # Some Motor replies omit Success but still return reservation ids.
+    ota, fns = _extract_ota_and_fns_ids(payload)
+    if ota or fns:
+        errors = payload.get("Errors")
+        if not errors:
+            return True
+    return False
+
+
+def _motor_error_text(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    errors = payload.get("Errors")
+    if isinstance(errors, dict):
+        err = errors.get("Error")
+        if isinstance(err, list) and err:
+            err = err[0]
+        if isinstance(err, dict):
+            return str(err.get("ShortText") or err.get("Code") or "").strip()
+    return str(payload.get("error") or "").strip()
 
 
 def remember_channel_booking(
@@ -1007,29 +1083,60 @@ async def cancel_booking(*, booking_id: str) -> dict[str, Any]:
     first = str((local or {}).get("guest_first_name") or "Guest")
     last = str((local or {}).get("guest_last_name") or "Guest")
 
-    if not start or not end:
-        # Look up near-term list for this UniqueID.
+    fns_id = str((local or {}).get("fns_id") or "").strip()
+    if not start or not end or (not fns_id and not room_code):
+        # Look up near-term list for this UniqueID (narrow window when we know dates).
         today = datetime.now(timezone.utc).date()
+        look_start = today - timedelta(days=7)
+        look_end = today + timedelta(days=120)
+        if start:
+            try:
+                look_start = min(
+                    look_start,
+                    datetime.strptime(start[:10], "%Y-%m-%d").date() - timedelta(days=2),
+                )
+            except ValueError:
+                pass
+        if end:
+            try:
+                look_end = max(
+                    look_end,
+                    datetime.strptime(end[:10], "%Y-%m-%d").date() + timedelta(days=2),
+                )
+            except ValueError:
+                pass
         listed = await list_bookings(
-            start_date=(today - timedelta(days=7)).isoformat(),
-            end_date=(today + timedelta(days=180)).isoformat(),
+            start_date=look_start.isoformat(),
+            end_date=look_end.isoformat(),
         )
         match = next(
             (
                 row
                 for row in listed.get("bookings") or []
                 if str(row.get("booking_id") or "") == bid
+                or str(row.get("fns_id") or "") == bid
             ),
             None,
         )
         if not match:
             raise FnsMotorError("No encontré esa reserva para cancelar", details=bid)
-        start = str(match.get("start_date") or "")[:10]
-        end = str(match.get("end_date") or "")[:10]
+        start = str(match.get("start_date") or start)[:10]
+        end = str(match.get("end_date") or end)[:10]
         total = str(match.get("amount_after_tax") or total)
         cur = str(match.get("currency") or cur)
         first = str(match.get("guest_first_name") or first)
         last = str(match.get("guest_last_name") or last)
+        fns_id = str(match.get("fns_id") or fns_id).strip()
+        room_code = str(match.get("room_type_code") or room_code).strip() or room_code
+
+    # OTA ids are Type 5 (BC-...). FNSMANAGER numeric ids are Type 14.
+    # Sending Type 14 with a BC- id makes Motor fail/confuse ("La reserva ya existe").
+    if fns_id:
+        unique_id: dict[str, str] = {"Type": "14", "ID": fns_id}
+    elif bid.upper().startswith("BC-"):
+        unique_id = {"Type": "5", "ID": bid}
+    else:
+        unique_id = {"Type": "14", "ID": bid}
 
     stamp = _now_stamp()
     body = {
@@ -1041,14 +1148,14 @@ async def cancel_booking(*, booking_id: str) -> dict[str, Any]:
                 "HotelReservation": {
                     "CreateDateTime": stamp,
                     "CancellationDateTime": stamp,
-                    "UniqueID": {"Type": "14", "ID": bid},
+                    "UniqueID": unique_id,
                     "RoomStays": {
                         "RoomStay": [
                             {
                                 "RoomTypes": {
                                     "RoomType": {
                                         "NumberOfUnits": "1",
-                                        "RoomTypeCode": room_code,
+                                        "RoomTypeCode": room_code or "0",
                                     }
                                 },
                                 "RatePlans": {"RatePlan": {"RatePlanCode": rate_code}},
@@ -1111,11 +1218,41 @@ async def cancel_booking(*, booking_id: str) -> dict[str, Any]:
     except Exception:
         payload = {"raw": text[:800]}
 
+    if not _motor_success(payload):
+        err = _motor_error_text(payload) or "Motor no confirmó la cancelación"
+        # Already cancelled / not found → treat as cancelled for the guest.
+        low = err.lower()
+        if any(
+            part in low
+            for part in (
+                "no existe",
+                "not found",
+                "ya cancel",
+                "already cancel",
+                "no encontr",
+            )
+        ):
+            _mark_local_booking_cancelled(bid)
+            return {
+                "ok": True,
+                "booking_id": bid,
+                "fns_id": fns_id,
+                "status": "Cancel",
+                "start_date": start,
+                "end_date": end,
+                "guest": f"{first} {last}".strip(),
+                "motor_response": payload,
+                "already_cancelled": True,
+                "message": f"La reserva {bid} ya estaba cancelada ({start} al {end}).",
+            }
+        raise FnsMotorError(err, details=payload)
+
     _mark_local_booking_cancelled(bid)
-    logger.info("FNS booking cancelled external_id=%s", bid)
+    logger.info("FNS booking cancelled external_id=%s fns_id=%s", bid, fns_id or "-")
     return {
         "ok": True,
         "booking_id": bid,
+        "fns_id": fns_id,
         "status": "Cancel",
         "start_date": start,
         "end_date": end,

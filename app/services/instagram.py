@@ -22,6 +22,7 @@ from app.services.deepseek_instagram import (
     DeepSeekError,
     deepseek_configured,
     generate_instagram_reply,
+    looks_like_cancel_intent,
     looks_like_hotel_inquiry,
 )
 
@@ -2749,6 +2750,153 @@ def _should_redirect_public_to_dm(item: dict[str, Any], inbound_text: str) -> bo
     return looks_like_hotel_inquiry(inbound_text)
 
 
+_RUT_IN_TEXT_RE = re.compile(
+    r"\b(\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK])\b",
+)
+_NAME_RUT_RE = re.compile(
+    r"([A-Za-zÁÉÍÓÚáéíóúÑñ]{2,})\s+([A-Za-zÁÉÍÓÚáéíóúÑñ]{2,}).{0,40}?"
+    r"(\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK])",
+    re.IGNORECASE,
+)
+
+
+def _identity_from_thread(item: dict[str, Any], inbound: str) -> dict[str, str]:
+    """Best-effort name/RUT from the current DM thread for cancel recovery."""
+    blob_parts = [str(inbound or "")]
+    for turn in conversation_turns(item):
+        blob_parts.append(str(turn.get("text") or ""))
+    blob = "\n".join(blob_parts)
+    first = ""
+    last = ""
+    document = ""
+    match = _NAME_RUT_RE.search(blob)
+    if match:
+        first, last, document = match.group(1), match.group(2), match.group(3)
+    if not document:
+        rut = _RUT_IN_TEXT_RE.search(blob)
+        if rut:
+            document = rut.group(1)
+    return {
+        "guest_first_name": first,
+        "guest_last_name": last,
+        "guest_document": document,
+        "username": _guest_handle_for_reply(item, item),
+    }
+
+
+async def _recover_cancel_after_soft_fail(
+    *,
+    latest: dict[str, Any],
+    item: dict[str, Any],
+    inbound: str,
+) -> dict[str, Any] | None:
+    """
+    If DeepSeek timed out while the guest asked to cancel, finish the cancel
+    with FNS directly instead of the generic «Se me complicó…» dead-end.
+    """
+    if not looks_like_cancel_intent(inbound):
+        return None
+    if str(latest.get("type") or item.get("type") or "") != "message":
+        return None
+    try:
+        from app.services.fns_motor import (
+            cancel_booking,
+            list_guest_active_bookings,
+        )
+        from app.services.reply_context import set_reply_context
+    except Exception:  # noqa: BLE001
+        logger.exception("Cancel recovery imports failed")
+        return None
+
+    identity = _identity_from_thread(latest, inbound)
+    username = identity.get("username") or ""
+    set_reply_context(channel="instagram", username=username)
+
+    # Prefer local channel index first (fast). Fall back to Motor list if empty.
+    active: list[dict[str, Any]] = []
+    try:
+        from app.services.fns_motor import _is_active_unused, _load_booking_index
+        from datetime import date as _date
+
+        today = _date.today()
+        handle = username.lower().lstrip("@")
+        for row in _load_booking_index().get("bookings") or []:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("username") or "").lower().lstrip("@") != handle:
+                continue
+            if not _is_active_unused(row, today=today):
+                continue
+            active.append(row)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Cancel recovery local index failed: %s", exc)
+
+    if not active:
+        try:
+            found = await list_guest_active_bookings(
+                username=username,
+                channel="instagram",
+                guest_first_name=identity.get("guest_first_name") or "",
+                guest_last_name=identity.get("guest_last_name") or "",
+                guest_document=identity.get("guest_document") or "",
+            )
+            active = [
+                row for row in (found.get("bookings") or []) if isinstance(row, dict)
+            ]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cancel recovery list failed: %s", exc)
+            return None
+    if not active:
+        return await send_inbox_reply(
+            str(latest.get("id") or item.get("id") or ""),
+            "No me aparece una reserva activa a tu nombre; si tienes el código BC- me lo pasas y la anulo.",
+            source="deepseek",
+        )
+
+    cancelled: list[str] = []
+    errors: list[str] = []
+    for row in active:
+        bid = str(row.get("booking_id") or "").strip()
+        if not bid:
+            continue
+        try:
+            result = await cancel_booking(booking_id=bid)
+            if result.get("ok"):
+                start = str(result.get("start_date") or row.get("start_date") or "")[:10]
+                end = str(result.get("end_date") or row.get("end_date") or "")[:10]
+                cancelled.append(f"{bid} ({start} al {end})" if start and end else bid)
+            else:
+                errors.append(bid)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cancel recovery failed for %s: %s", bid, exc)
+            errors.append(bid)
+
+    if cancelled and not errors:
+        msg = (
+            f"Listo, cancelé tu reserva {cancelled[0]}."
+            if len(cancelled) == 1
+            else "Listo, cancelé tus reservas: " + "; ".join(cancelled) + "."
+        )
+        return await send_inbox_reply(
+            str(latest.get("id") or item.get("id") or ""),
+            msg,
+            source="deepseek",
+        )
+    if cancelled and errors:
+        return await send_inbox_reply(
+            str(latest.get("id") or item.get("id") or ""),
+            "Cancelé "
+            + "; ".join(cancelled)
+            + ". Me faltó anular otra; escríbeme el código BC- y lo cierro.",
+            source="deepseek",
+        )
+    return await send_inbox_reply(
+        str(latest.get("id") or item.get("id") or ""),
+        "Intenté cancelar y FNS no respondió bien. Pásame el código BC- de la reserva y la anulo al tiro.",
+        source="deepseek",
+    )
+
+
 async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
     item = get_inbox_item(item_id)
     if not item:
@@ -2880,11 +3028,20 @@ async def _run_auto_reply_locked(item_id: str) -> dict[str, Any]:
                 row["updated_at"] = _now_iso()
                 upsert_inbox_item(row)
             try:
+                # Cancel asks must finish via FNS, not the vague «Se me complicó…».
+                recovered = await _recover_cancel_after_soft_fail(
+                    latest=latest,
+                    item=item,
+                    inbound=inbound,
+                )
+                if recovered:
+                    return recovered
                 return await send_inbox_reply(
                     str(latest.get("id") or item_id),
                     (
-                        "Se me complicó un segundo al revisar tu reserva/cupo. "
-                        "Escríbeme de nuevo y lo retomo al tiro."
+                        "Se me trabó un segundo el sistema. "
+                        "Repíteme en una frase qué necesitas (cancelar, fechas o reserva) "
+                        "y lo retomo al tiro."
                     ),
                     source="deepseek",
                 )

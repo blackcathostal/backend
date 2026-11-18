@@ -1443,10 +1443,26 @@ _GUEST_DATE_INTENT_RE = re.compile(
     r"septiembre|octubre|noviembre|diciembre|"
     r"january|february|march|april|june|july|august|"
     r"september|october|november|december)\b|"
-    r"disponib|cupo|compartida|reserv"
+    r"disponib|cupo|compartida"
     r")",
     re.IGNORECASE,
 )
+_CANCEL_INTENT_RE = re.compile(
+    r"(?:"
+    r"cancel[aáe]?r?(?:la|lo|las|los)?"
+    r"|anul[aáe]?r?(?:la|lo)?"
+    r"|borra(?:r)?(?:la|lo)?"
+    r"|elimina(?:r)?(?:la|lo)?"
+    r"|ya\s+no\s+la\s+necesito"
+    r"|ya\s+no\s+necesito"
+    r"|no\s+la\s+quiero"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def looks_like_cancel_intent(text: str) -> bool:
+    return bool(_CANCEL_INTENT_RE.search(str(text or "")))
 
 
 def _fns_availability_snapshot(result: dict[str, Any]) -> dict[str, Any]:
@@ -1603,14 +1619,54 @@ async def _run_reply_loop(
 
             # Hard stop: never invent FNS availability. Must call MCP
             # search_room_availability (FNS Motor) before yes/no cupo.
+            # Cancel intents must NOT be redirected to availability.
             guest_blob = _guest_blob_from_messages(messages)
-            guest_wants_dates = bool(_GUEST_DATE_INTENT_RE.search(guest_blob))
+            # Prefer the latest guest turn for intent (avoid stale dates in history).
+            latest_guest = ""
+            for turn in reversed(messages):
+                if turn.get("role") == "user":
+                    latest_guest = _guest_raw_text(str(turn.get("content") or ""))
+                    if latest_guest.strip():
+                        break
+            cancel_intent = bool(_CANCEL_INTENT_RE.search(latest_guest or guest_blob))
+            guest_wants_dates = bool(
+                _GUEST_DATE_INTENT_RE.search(latest_guest or "")
+            ) and not cancel_intent
             claims_availability = bool(
                 _AVAILABILITY_CLAIM_RE.search(reply_message or "")
             )
             if (
                 enforce_fns_availability
                 and action == "reply"
+                and cancel_intent
+                and not any(
+                    (call.get("function") or {}).get("name") == "cancel_room_booking"
+                    for msg in messages
+                    if msg.get("role") == "assistant"
+                    for call in (msg.get("tool_calls") or [])
+                )
+                and not availability_nudge_sent
+            ):
+                # Reuse nudge flag so we only force tools once per loop.
+                availability_nudge_sent = True
+                messages.append({"role": "assistant", "content": content})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "STOP: el huésped pidió CANCELAR su reserva. "
+                            "NO ofrezcas cupo ni habitaciones. "
+                            "Llama check_guest_bookings y luego cancel_room_booking "
+                            "(booking_id + guest_document o guest_confirmed=true). "
+                            "Confirma solo la cancelación."
+                        ),
+                    }
+                )
+                continue
+            if (
+                enforce_fns_availability
+                and action == "reply"
+                and not cancel_intent
                 and (claims_availability or guest_wants_dates)
             ):
                 today = datetime.now(SANTIAGO).date().isoformat()
@@ -1864,6 +1920,9 @@ async def generate_instagram_reply(
         "solo si dice sí, cancel/change con guest_confirmed=true. "
         "Orden tipico: identidad → check_guest_bookings → "
         "search_room_availability → create_room_booking. "
+        "Si pide cancelar/anular/borrar la reserva («cancélala», «ya no la necesito»): "
+        "OBLIGATORIO check_guest_bookings + cancel_room_booking. "
+        "NUNCA respondas con cupo, precios ni tipos de habitación en ese turno. "
         "Eliminar → cancel_room_booking. "
         "Cambiar → change_room_booking (OBLIGATORIO: cancela vieja + crea nueva). "
         "REGLA ANTI-INVENCIÓN (crítica): "
