@@ -1,5 +1,5 @@
 from app.models.accounting_accounts import AccountingAccounts
-from app.models.accounting_track import AccountingTrackDocuments
+from app.models.accounting_track import AccountingTrackDocuments, DteStatuses, DteTypes
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_sources import AiSources
 from app.models.ai_usage import AiUsage
@@ -23,6 +23,8 @@ from app.models.visitor_analytics import VisitorEvents, VisitorSessions
 __all__ = [
     "AccountingAccounts",
     "AccountingTrackDocuments",
+    "DteTypes",
+    "DteStatuses",
     "AiSources",
     "AiGenerationRuns",
     "AiUsage",

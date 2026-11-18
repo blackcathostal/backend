@@ -2,6 +2,15 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.models.accounting_track import (
+    DTE_STATUS_PAID,
+    DTE_STATUS_PENDING_PAYMENT,
+    DTE_TYPE_ISSUED,
+    DTE_TYPE_RECEIVED,
+    AccountingTrackDocuments,
+    DteStatuses,
+    DteTypes,
+)
 from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
 from app.models.hostel_info import CommonAnswers
@@ -396,6 +405,49 @@ def seed_database(db: Session) -> None:
                 row.question = updated["question"]
                 row.answer_guide = updated["answer_guide"]
                 row.keywords = updated["keywords"]
+
+    dte_types = (
+        (DTE_TYPE_ISSUED, "issued", "Emitido"),
+        (DTE_TYPE_RECEIVED, "received", "Recibido"),
+    )
+    for type_id, code, name in dte_types:
+        row = db.query(DteTypes).filter(DteTypes.id == type_id).first()
+        if row is None:
+            db.add(DteTypes(id=type_id, code=code, name=name))
+        else:
+            row.code = code
+            row.name = name
+
+    dte_statuses = (
+        (DTE_STATUS_PENDING_PAYMENT, "pending_payment", "Imputada por Pagar", "red"),
+        (DTE_STATUS_PAID, "paid", "Imputada Pagada", "green"),
+    )
+    for status_id, code, name, tip_color in dte_statuses:
+        row = db.query(DteStatuses).filter(DteStatuses.id == status_id).first()
+        if row is None:
+            db.add(
+                DteStatuses(
+                    id=status_id,
+                    code=code,
+                    name=name,
+                    tip_color=tip_color,
+                )
+            )
+        else:
+            row.code = code
+            row.name = name
+            row.tip_color = tip_color
+
+    # Backfill type/status on existing DTEs; period stays empty unless already set.
+    for doc in db.query(AccountingTrackDocuments).all():
+        direction = str(doc.direction or "").strip().lower()
+        wanted_type = DTE_TYPE_RECEIVED if direction == "recibida" else DTE_TYPE_ISSUED
+        if not doc.dte_type_id:
+            doc.dte_type_id = wanted_type
+        if not doc.status_id:
+            doc.status_id = DTE_STATUS_PENDING_PAYMENT
+        if doc.period is None:
+            doc.period = ""
 
     db.commit()
     ensure_default_terms(db)

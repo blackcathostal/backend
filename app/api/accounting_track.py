@@ -5,16 +5,24 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.accounting_track import AccountingTrackDocuments
+from app.models.accounting_track import (
+    DTE_STATUS_PENDING_PAYMENT,
+    DTE_TYPE_ISSUED,
+    DTE_TYPE_RECEIVED,
+    AccountingTrackDocuments,
+    DteStatuses,
+)
 from app.models.users import Users
 from app.schemas.accounting_track import (
     AccountingTrackDocumentOut,
+    AccountingTrackDocumentPatch,
     AccountingTrackListResult,
     AccountingTrackRefreshResult,
+    DteStatusOut,
 )
 from app.services.facturacion_client import FacturacionClient, FacturacionError
 from app.services.facturacion_web import FacturacionWebClient
@@ -85,6 +93,15 @@ def _pdf_token(row: AccountingTrackDocuments) -> str:
     return _extract_pdf_token(payload)
 
 
+def _dte_type_id_for_direction(direction: str) -> int:
+    return DTE_TYPE_RECEIVED if direction == "recibida" else DTE_TYPE_ISSUED
+
+
+def _list_statuses(db: Session) -> list[DteStatusOut]:
+    rows = db.query(DteStatuses).order_by(DteStatuses.id.asc()).all()
+    return [DteStatusOut.model_validate(row) for row in rows]
+
+
 def _serialize_doc(row: AccountingTrackDocuments) -> AccountingTrackDocumentOut:
     item = AccountingTrackDocumentOut.model_validate(row)
     item.has_pdf = _has_pdf(row)
@@ -92,6 +109,11 @@ def _serialize_doc(row: AccountingTrackDocuments) -> AccountingTrackDocumentOut:
         str(row.direction or "").strip().lower(),
         str(row.direction or ""),
     )
+    status = row.status
+    if status is not None:
+        item.status_name = status.name or ""
+        item.status_code = status.code or ""
+        item.status_tip_color = status.tip_color or "red"
     return item
 
 
@@ -163,15 +185,25 @@ def _upsert_docs(
             )
             .first()
         )
-        if row is None:
+        is_new = row is None
+        if is_new:
             row = AccountingTrackDocuments(
                 direction=direction,
                 doc_type=doc_type,
                 folio=folio,
                 counterpart_rut=counterpart_rut,
+                dte_type_id=_dte_type_id_for_direction(direction),
+                status_id=DTE_STATUS_PENDING_PAYMENT,
+                period="",
             )
             db.add(row)
 
+        row.dte_type_id = _dte_type_id_for_direction(direction)
+        # period is manual — never fill from refresh; keep existing or empty for new rows
+        if is_new or row.period is None:
+            row.period = ""
+        if not row.status_id:
+            row.status_id = DTE_STATUS_PENDING_PAYMENT
         row.counterpart_name = str(item.get("counterpart_name") or "")[:220]
         row.issued_at = issued_at
         row.net_amount = float(item.get("net_amount") or 0)
@@ -199,8 +231,10 @@ def _list_direction(
     date_from: date,
     date_to: date,
 ) -> AccountingTrackListResult:
-    query = db.query(AccountingTrackDocuments).filter(
-        AccountingTrackDocuments.direction == direction
+    query = (
+        db.query(AccountingTrackDocuments)
+        .options(joinedload(AccountingTrackDocuments.status))
+        .filter(AccountingTrackDocuments.direction == direction)
     )
     query = query.filter(
         AccountingTrackDocuments.issued_at.isnot(None),
@@ -216,6 +250,7 @@ def _list_direction(
         total=len(rows),
         from_date=date_from,
         to_date=date_to,
+        statuses=_list_statuses(db),
     )
 
 
@@ -282,6 +317,50 @@ def list_received_legacy(
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
+
+
+@router.get("/statuses", response_model=list[DteStatusOut])
+def list_dte_statuses(
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> list[DteStatusOut]:
+    return _list_statuses(db)
+
+
+@router.patch("/documents/{doc_id}", response_model=AccountingTrackDocumentOut)
+def patch_document(
+    doc_id: int,
+    payload: AccountingTrackDocumentPatch,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> AccountingTrackDocumentOut:
+    row = (
+        db.query(AccountingTrackDocuments)
+        .options(joinedload(AccountingTrackDocuments.status))
+        .filter(AccountingTrackDocuments.id == doc_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    if payload.status_id is not None:
+        status = db.query(DteStatuses).filter(DteStatuses.id == payload.status_id).first()
+        if status is None:
+            raise HTTPException(status_code=400, detail="status_id inválido")
+        row.status_id = payload.status_id
+
+    if payload.period is not None:
+        row.period = str(payload.period or "").strip()[:40]
+
+    db.add(row)
+    db.commit()
+    row = (
+        db.query(AccountingTrackDocuments)
+        .options(joinedload(AccountingTrackDocuments.status))
+        .filter(AccountingTrackDocuments.id == doc_id)
+        .first()
+    )
+    return _serialize_doc(row)
 
 
 def _persist_pdf_token(db: Session, row: AccountingTrackDocuments, token: str) -> None:

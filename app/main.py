@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.models import (  # noqa: F401
     AccountingAccounts,
+    AccountingTrackDocuments,
     AiGenerationRuns,
     AiSources,
     AiUsage,
@@ -20,6 +21,8 @@ from app.models import (  # noqa: F401
     ContactGroups,
     ContactInquiries,
     Contacts,
+    DteStatuses,
+    DteTypes,
     MailAccounts,
     Medias,
     Posts,
@@ -182,6 +185,27 @@ def _ensure_schema_patches() -> None:
                 text(
                     "ALTER TABLE accounting_accounts "
                     "ADD COLUMN sort_order INT NOT NULL DEFAULT 0"
+                )
+            )
+        if not column_exists("accounting_track_documents", "dte_type_id"):
+            conn.execute(
+                text(
+                    "ALTER TABLE accounting_track_documents "
+                    "ADD COLUMN dte_type_id INT NULL"
+                )
+            )
+        if not column_exists("accounting_track_documents", "status_id"):
+            conn.execute(
+                text(
+                    "ALTER TABLE accounting_track_documents "
+                    "ADD COLUMN status_id INT NULL"
+                )
+            )
+        if not column_exists("accounting_track_documents", "period"):
+            conn.execute(
+                text(
+                    "ALTER TABLE accounting_track_documents "
+                    "ADD COLUMN period VARCHAR(40) NOT NULL DEFAULT ''"
                 )
             )
 

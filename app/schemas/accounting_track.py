@@ -1,11 +1,34 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class DteStatusOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    tip_color: str = "red"
+
+    model_config = {"from_attributes": True}
+
+
+class DteTypeOut(BaseModel):
+    id: int
+    code: str
+    name: str
+
+    model_config = {"from_attributes": True}
 
 
 class AccountingTrackDocumentOut(BaseModel):
     id: int
     direction: str
+    dte_type_id: int | None = None
+    status_id: int | None = None
+    status_name: str = ""
+    status_code: str = ""
+    status_tip_color: str = "red"
+    period: str = ""
     doc_type: str
     folio: str
     counterpart_rut: str
@@ -26,6 +49,11 @@ class AccountingTrackDocumentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AccountingTrackDocumentPatch(BaseModel):
+    status_id: int | None = None
+    period: str | None = Field(default=None, max_length=40)
+
+
 class AccountingTrackRefreshResult(BaseModel):
     direction: str
     fetched: int
@@ -39,3 +67,4 @@ class AccountingTrackListResult(BaseModel):
     total: int
     from_date: date | None = None
     to_date: date | None = None
+    statuses: list[DteStatusOut] = []

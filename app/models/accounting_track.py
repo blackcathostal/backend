@@ -1,9 +1,43 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+DTE_TYPE_ISSUED = 1
+DTE_TYPE_RECEIVED = 2
+DTE_STATUS_PENDING_PAYMENT = 1
+DTE_STATUS_PAID = 2
+
+
+class DteTypes(Base):
+    __tablename__ = "dte_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+
+
+class DteStatuses(Base):
+    """Payment/imputation statuses for issued and received DTEs."""
+
+    __tablename__ = "dte_statuses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    tip_color: Mapped[str] = mapped_column(String(20), nullable=False, default="red")
 
 
 class AccountingTrackDocuments(Base):
@@ -20,6 +54,19 @@ class AccountingTrackDocuments(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     direction: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    dte_type_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("dte_types.id"),
+        nullable=True,
+        index=True,
+    )
+    status_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("dte_statuses.id"),
+        nullable=True,
+        index=True,
+    )
+    period: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     doc_type: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     folio: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
     counterpart_rut: Mapped[str] = mapped_column(String(40), nullable=False, default="")
@@ -40,3 +87,6 @@ class AccountingTrackDocuments(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+    dte_type = relationship("DteTypes")
+    status = relationship("DteStatuses")
