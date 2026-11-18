@@ -5,10 +5,13 @@ from app.core.security import hash_password
 from app.models.tax_documents import (
     DTE_STATUS_PAID,
     DTE_STATUS_PENDING_PAYMENT,
-    DTE_TYPE_ISSUED,
-    DTE_TYPE_RECEIVED,
+    DTE_TYPE_INVOICE,
+    DTE_TYPE_RECEIPT,
+    DTE_VERSION_ISSUED,
+    DTE_VERSION_RECEIVED,
     DteStatuses,
     DteTypes,
+    DteVersions,
     TaxDocuments,
 )
 from app.models.contact_groups import ContactGroups
@@ -406,9 +409,21 @@ def seed_database(db: Session) -> None:
                 row.answer_guide = updated["answer_guide"]
                 row.keywords = updated["keywords"]
 
+    dte_versions = (
+        (DTE_VERSION_ISSUED, "issued", "Emitida"),
+        (DTE_VERSION_RECEIVED, "received", "Recibida"),
+    )
+    for version_id, code, name in dte_versions:
+        row = db.query(DteVersions).filter(DteVersions.id == version_id).first()
+        if row is None:
+            db.add(DteVersions(id=version_id, code=code, name=name))
+        else:
+            row.code = code
+            row.name = name
+
     dte_types = (
-        (DTE_TYPE_ISSUED, "issued", "Emitido"),
-        (DTE_TYPE_RECEIVED, "received", "Recibido"),
+        (DTE_TYPE_INVOICE, "33", "Factura"),
+        (DTE_TYPE_RECEIPT, "39", "Boleta"),
     )
     for type_id, code, name in dte_types:
         row = db.query(DteTypes).filter(DteTypes.id == type_id).first()
@@ -438,16 +453,34 @@ def seed_database(db: Session) -> None:
             row.name = name
             row.tip_color = tip_color
 
-    # Backfill type/status on existing DTEs; period stays empty unless already set.
+    db.flush()
+
+    # Backfill version/type/status; period stays empty unless already set.
     for doc in db.query(TaxDocuments).all():
-        direction = str(doc.direction or "").strip().lower()
-        wanted_type = DTE_TYPE_RECEIVED if direction == "recibida" else DTE_TYPE_ISSUED
-        if not doc.dte_type_id:
-            doc.dte_type_id = wanted_type
+        direction = str(getattr(doc, "direction", "") or "").strip().lower()
+        if not getattr(doc, "dte_version_id", None):
+            doc.dte_version_id = (
+                DTE_VERSION_RECEIVED if direction in {"recibida", "received"} else DTE_VERSION_ISSUED
+            )
+        raw_type = str(getattr(doc, "doc_type", "") or "").strip().lower()
+        type_id = getattr(doc, "dte_type_id", None)
+        if type_id not in {DTE_TYPE_INVOICE, DTE_TYPE_RECEIPT}:
+            if "boleta" in raw_type or str(type_id) == "39":
+                doc.dte_type_id = DTE_TYPE_RECEIPT
+            else:
+                doc.dte_type_id = DTE_TYPE_INVOICE
         if not doc.status_id:
             doc.status_id = DTE_STATUS_PENDING_PAYMENT
         if doc.period is None:
             doc.period = ""
+
+    db.flush()
+
+    # Remove legacy issued/received rows mistakenly stored in dte_types.
+    for legacy_id in (1, 2):
+        legacy = db.query(DteTypes).filter(DteTypes.id == legacy_id).first()
+        if legacy and legacy.code in {"issued", "received", "emitido", "recibido"}:
+            db.delete(legacy)
 
     db.commit()
     ensure_default_terms(db)

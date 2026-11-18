@@ -20,16 +20,27 @@ class DteTypeOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DteVersionOut(BaseModel):
+    id: int
+    code: str
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class TaxDocumentOut(BaseModel):
     id: int
-    direction: str
+    dte_version_id: int
+    dte_version_code: str = ""
+    dte_version_name: str = ""
     dte_type_id: int | None = None
+    dte_type_code: str = ""
+    dte_type_name: str = ""
     status_id: int | None = None
     status_name: str = ""
     status_code: str = ""
     status_tip_color: str = "red"
     period: str = ""
-    doc_type: str
     folio: str
     counterpart_rut: str
     counterpart_name: str
@@ -55,7 +66,7 @@ class TaxDocumentPatch(BaseModel):
 
 
 class TaxDocumentRefreshResult(BaseModel):
-    direction: str
+    dte_version_id: int
     fetched: int
     upserted: int
     classified: int

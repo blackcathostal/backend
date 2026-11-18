@@ -11,18 +11,20 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.tax_documents import (
     DTE_STATUS_PENDING_PAYMENT,
-    DTE_TYPE_ISSUED,
-    DTE_TYPE_RECEIVED,
-    TaxDocuments,
+    DTE_TYPE_INVOICE,
+    DTE_TYPE_RECEIPT,
+    DTE_VERSION_ISSUED,
+    DTE_VERSION_RECEIVED,
     DteStatuses,
+    TaxDocuments,
 )
 from app.models.users import Users
 from app.schemas.tax_documents import (
+    DteStatusOut,
+    TaxDocumentListResult,
     TaxDocumentOut,
     TaxDocumentPatch,
-    TaxDocumentListResult,
     TaxDocumentRefreshResult,
-    DteStatusOut,
 )
 from app.services.facturacion_client import FacturacionClient, FacturacionError
 from app.services.facturacion_web import FacturacionWebClient
@@ -30,33 +32,23 @@ from app.services.fns_accounting import classify_document, fetch_pms_production
 
 router = APIRouter(tags=["tax-documents"])
 
-# API uses English; DB still stores legacy Spanish direction values.
-_DIRECTION_TO_DB = {
-    "issued": "emitida",
-    "emitida": "emitida",
-    "received": "recibida",
-    "recibida": "recibida",
-}
-_DIRECTION_TO_API = {
-    "emitida": "issued",
-    "issued": "issued",
-    "recibida": "received",
-    "received": "received",
+_VERSION_ALIASES = {
+    "issued": DTE_VERSION_ISSUED,
+    "emitida": DTE_VERSION_ISSUED,
+    "1": DTE_VERSION_ISSUED,
+    str(DTE_VERSION_ISSUED): DTE_VERSION_ISSUED,
+    "received": DTE_VERSION_RECEIVED,
+    "recibida": DTE_VERSION_RECEIVED,
+    "2": DTE_VERSION_RECEIVED,
+    str(DTE_VERSION_RECEIVED): DTE_VERSION_RECEIVED,
 }
 
 
-def _normalize_direction(value: str | None, *, default: str = "issued") -> str:
-    key = (value or default).strip().lower()
-    if key not in _DIRECTION_TO_DB:
-        raise HTTPException(
-            status_code=400,
-            detail="direction must be issued or received",
-        )
-    return key
-
-
-def _db_direction(value: str | None, *, default: str = "issued") -> str:
-    return _DIRECTION_TO_DB[_normalize_direction(value, default=default)]
+def _normalize_version(value: str | int | None, *, default: int = DTE_VERSION_ISSUED) -> int:
+    key = str(value if value is not None else default).strip().lower()
+    if key not in _VERSION_ALIASES:
+        raise HTTPException(status_code=400, detail="version must be issued/received or 1/2")
+    return _VERSION_ALIASES[key]
 
 
 def _extract_pdf_token(payload: object) -> str:
@@ -93,8 +85,13 @@ def _pdf_token(row: TaxDocuments) -> str:
     return _extract_pdf_token(payload)
 
 
-def _dte_type_id_for_direction(direction: str) -> int:
-    return DTE_TYPE_RECEIVED if direction == "recibida" else DTE_TYPE_ISSUED
+def _resolve_type_id(item: dict) -> int:
+    raw = item.get("dte_type_id")
+    if raw in {DTE_TYPE_INVOICE, DTE_TYPE_RECEIPT, str(DTE_TYPE_INVOICE), str(DTE_TYPE_RECEIPT)}:
+        return int(raw)
+    return FacturacionClient.resolve_dte_type_id(
+        item.get("doc_type") or item.get("dte_type_id") or "",
+    )
 
 
 def _list_statuses(db: Session) -> list[DteStatusOut]:
@@ -105,15 +102,16 @@ def _list_statuses(db: Session) -> list[DteStatusOut]:
 def _serialize_doc(row: TaxDocuments) -> TaxDocumentOut:
     item = TaxDocumentOut.model_validate(row)
     item.has_pdf = _has_pdf(row)
-    item.direction = _DIRECTION_TO_API.get(
-        str(row.direction or "").strip().lower(),
-        str(row.direction or ""),
-    )
-    status = row.status
-    if status is not None:
-        item.status_name = status.name or ""
-        item.status_code = status.code or ""
-        item.status_tip_color = status.tip_color or "red"
+    if row.dte_type is not None:
+        item.dte_type_code = row.dte_type.code or ""
+        item.dte_type_name = row.dte_type.name or ""
+    if row.dte_version is not None:
+        item.dte_version_code = row.dte_version.code or ""
+        item.dte_version_name = row.dte_version.name or ""
+    if row.status is not None:
+        item.status_name = row.status.name or ""
+        item.status_code = row.status.code or ""
+        item.status_tip_color = row.status.tip_color or "red"
     return item
 
 
@@ -127,15 +125,13 @@ def _parse_bound(value: str | None, *, fallback: date) -> date:
 
 
 def _default_range() -> tuple[date, date]:
-    """Default window: from the 1st day two months ago through today."""
     today = date.today()
     year = today.year
     month = today.month - 2
     while month <= 0:
         month += 12
         year -= 1
-    start = date(year, month, 1)
-    return start, today
+    return date(year, month, 1), today
 
 
 def _upsert_docs(
@@ -143,16 +139,17 @@ def _upsert_docs(
     docs: list[dict],
     *,
     source: str,
+    dte_version_id: int,
     pms_rows: list[dict] | None = None,
     match_fns: bool = True,
 ) -> tuple[int, int]:
     upserted = 0
     classified = 0
     for item in docs:
-        direction = str(item.get("direction") or "").strip().lower()
-        if direction not in {"emitida", "recibida"}:
-            continue
-        doc_type = str(item.get("doc_type") or "").strip()
+        version_id = int(item.get("dte_version_id") or dte_version_id or 0)
+        if version_id not in {DTE_VERSION_ISSUED, DTE_VERSION_RECEIVED}:
+            version_id = dte_version_id
+        type_id = _resolve_type_id(item)
         folio = str(item.get("folio") or "").strip()
         counterpart_rut = str(item.get("counterpart_rut") or "").strip()
         if not folio and not counterpart_rut:
@@ -178,8 +175,8 @@ def _upsert_docs(
         row = (
             db.query(TaxDocuments)
             .filter(
-                TaxDocuments.direction == direction,
-                TaxDocuments.doc_type == doc_type,
+                TaxDocuments.dte_version_id == version_id,
+                TaxDocuments.dte_type_id == type_id,
                 TaxDocuments.folio == folio,
                 TaxDocuments.counterpart_rut == counterpart_rut,
             )
@@ -188,18 +185,17 @@ def _upsert_docs(
         is_new = row is None
         if is_new:
             row = TaxDocuments(
-                direction=direction,
-                doc_type=doc_type,
+                dte_version_id=version_id,
+                dte_type_id=type_id,
                 folio=folio,
                 counterpart_rut=counterpart_rut,
-                dte_type_id=_dte_type_id_for_direction(direction),
                 status_id=DTE_STATUS_PENDING_PAYMENT,
                 period="",
             )
             db.add(row)
 
-        row.dte_type_id = _dte_type_id_for_direction(direction)
-        # period is manual — never fill from refresh; keep existing or empty for new rows
+        row.dte_version_id = version_id
+        row.dte_type_id = type_id
         if is_new or row.period is None:
             row.period = ""
         if not row.status_id:
@@ -224,17 +220,21 @@ def _upsert_docs(
     return upserted, classified
 
 
-def _list_direction(
+def _list_version(
     db: Session,
     *,
-    direction: str,
+    dte_version_id: int,
     date_from: date,
     date_to: date,
 ) -> TaxDocumentListResult:
     query = (
         db.query(TaxDocuments)
-        .options(joinedload(TaxDocuments.status))
-        .filter(TaxDocuments.direction == direction)
+        .options(
+            joinedload(TaxDocuments.status),
+            joinedload(TaxDocuments.dte_type),
+            joinedload(TaxDocuments.dte_version),
+        )
+        .filter(TaxDocuments.dte_version_id == dte_version_id)
     )
     query = query.filter(
         TaxDocuments.issued_at.isnot(None),
@@ -262,9 +262,9 @@ def list_issued(
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentListResult:
     start, end = _default_range()
-    return _list_direction(
+    return _list_version(
         db,
-        direction=_db_direction("issued"),
+        dte_version_id=DTE_VERSION_ISSUED,
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
@@ -278,15 +278,14 @@ def list_received(
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentListResult:
     start, end = _default_range()
-    return _list_direction(
+    return _list_version(
         db,
-        direction=_db_direction("received"),
+        dte_version_id=DTE_VERSION_RECEIVED,
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
 
 
-# Legacy Spanish paths (keep working bookmarks/clients)
 @router.get("/emitidas", response_model=TaxDocumentListResult, include_in_schema=False)
 def list_issued_legacy(
     from_date: str | None = None,
@@ -295,9 +294,9 @@ def list_issued_legacy(
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentListResult:
     start, end = _default_range()
-    return _list_direction(
+    return _list_version(
         db,
-        direction=_db_direction("issued"),
+        dte_version_id=DTE_VERSION_ISSUED,
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
@@ -311,9 +310,9 @@ def list_received_legacy(
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentListResult:
     start, end = _default_range()
-    return _list_direction(
+    return _list_version(
         db,
-        direction=_db_direction("received"),
+        dte_version_id=DTE_VERSION_RECEIVED,
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
@@ -336,7 +335,11 @@ def patch_document(
 ) -> TaxDocumentOut:
     row = (
         db.query(TaxDocuments)
-        .options(joinedload(TaxDocuments.status))
+        .options(
+            joinedload(TaxDocuments.status),
+            joinedload(TaxDocuments.dte_type),
+            joinedload(TaxDocuments.dte_version),
+        )
         .filter(TaxDocuments.id == doc_id)
         .first()
     )
@@ -356,7 +359,11 @@ def patch_document(
     db.commit()
     row = (
         db.query(TaxDocuments)
-        .options(joinedload(TaxDocuments.status))
+        .options(
+            joinedload(TaxDocuments.status),
+            joinedload(TaxDocuments.dte_type),
+            joinedload(TaxDocuments.dte_version),
+        )
         .filter(TaxDocuments.id == doc_id)
         .first()
     )
@@ -430,9 +437,7 @@ async def refresh_tax_documents(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> TaxDocumentRefreshResult:
-    api_direction = _normalize_direction(direction, default="issued")
-    db_direction = _DIRECTION_TO_DB[api_direction]
-
+    version_id = _normalize_version(direction, default=DTE_VERSION_ISSUED)
     start, end = _default_range()
     date_from = _parse_bound(from_date, fallback=start)
     date_to = _parse_bound(to_date, fallback=end)
@@ -443,8 +448,7 @@ async def refresh_tax_documents(
     pms_rows: list[dict] = []
 
     try:
-        if db_direction == "recibida":
-            # Purchase ledger: no SOAP contract → Plano scrape. No FNS match.
+        if version_id == DTE_VERSION_RECEIVED:
             source = "web"
             with FacturacionWebClient() as web:
                 docs = web.fetch_recibidas(date_from, date_to)
@@ -456,15 +460,20 @@ async def refresh_tax_documents(
     except FacturacionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    for doc in docs:
+        doc["dte_version_id"] = version_id
+        doc["dte_type_id"] = _resolve_type_id(doc)
+
     upserted, classified = _upsert_docs(
         db,
         docs,
         source=source,
+        dte_version_id=version_id,
         pms_rows=pms_rows,
-        match_fns=db_direction == "emitida",
+        match_fns=version_id == DTE_VERSION_ISSUED,
     )
     return TaxDocumentRefreshResult(
-        direction=api_direction,
+        dte_version_id=version_id,
         fetched=len(docs),
         upserted=upserted,
         classified=classified,

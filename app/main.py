@@ -22,6 +22,7 @@ from app.models import (  # noqa: F401
     Contacts,
     DteStatuses,
     DteTypes,
+    DteVersions,
     TaxDocuments,
     MailAccounts,
     Medias,
@@ -205,18 +206,96 @@ def _ensure_schema_patches() -> None:
         # Rename legacy accounting_track_documents → tax_documents
         if table_exists("accounting_track_documents") and not table_exists("tax_documents"):
             conn.execute(text("RENAME TABLE accounting_track_documents TO tax_documents"))
+        if table_exists("accounting_track_documents") and table_exists("tax_documents"):
+            conn.execute(text("DROP TABLE accounting_track_documents"))
 
-        if not column_exists("tax_documents", "dte_type_id"):
-            conn.execute(text("ALTER TABLE tax_documents ADD COLUMN dte_type_id INT NULL"))
-        if not column_exists("tax_documents", "status_id"):
-            conn.execute(text("ALTER TABLE tax_documents ADD COLUMN status_id INT NULL"))
-        if not column_exists("tax_documents", "period"):
-            conn.execute(
-                text(
-                    "ALTER TABLE tax_documents "
-                    "ADD COLUMN period VARCHAR(40) NOT NULL DEFAULT ''"
+        if table_exists("tax_documents"):
+            if not column_exists("tax_documents", "dte_type_id"):
+                conn.execute(text("ALTER TABLE tax_documents ADD COLUMN dte_type_id INT NULL"))
+            if not column_exists("tax_documents", "status_id"):
+                conn.execute(text("ALTER TABLE tax_documents ADD COLUMN status_id INT NULL"))
+            if not column_exists("tax_documents", "period"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "ADD COLUMN period VARCHAR(40) NOT NULL DEFAULT ''"
+                    )
                 )
-            )
+            if not column_exists("tax_documents", "dte_version_id"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "ADD COLUMN dte_version_id INT NOT NULL DEFAULT 1"
+                    )
+                )
+                # Backfill from legacy direction when present
+                if column_exists("tax_documents", "direction"):
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE tax_documents
+                            SET dte_version_id = CASE
+                              WHEN LOWER(direction) IN ('recibida', 'received') THEN 2
+                              ELSE 1
+                            END
+                            """
+                        )
+                    )
+            if column_exists("tax_documents", "doc_type"):
+                conn.execute(
+                    text(
+                        """
+                        UPDATE tax_documents
+                        SET dte_type_id = CASE
+                          WHEN dte_type_id IN (33, 39) THEN dte_type_id
+                          WHEN LOWER(doc_type) LIKE '%boleta%' OR doc_type = '39' THEN 39
+                          ELSE 33
+                        END
+                        WHERE dte_type_id IS NULL OR dte_type_id NOT IN (33, 39)
+                        """
+                    )
+                )
+            # Drop legacy unique indexes if present, then recreate English unique key
+            for index_name in ("uq_accounting_track_doc", "uq_tax_documents_doc"):
+                exists = conn.execute(
+                    text(
+                        """
+                        SELECT COUNT(*)
+                        FROM information_schema.STATISTICS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'tax_documents'
+                          AND INDEX_NAME = :index_name
+                        """
+                    ),
+                    {"index_name": index_name},
+                ).scalar()
+                if exists and index_name == "uq_accounting_track_doc":
+                    conn.execute(text(f"ALTER TABLE tax_documents DROP INDEX {index_name}"))
+            has_new_uq = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'tax_documents'
+                      AND INDEX_NAME = 'uq_tax_documents_doc'
+                    """
+                )
+            ).scalar()
+            if not has_new_uq:
+                conn.execute(
+                    text(
+                        """
+                        ALTER TABLE tax_documents
+                        ADD UNIQUE KEY uq_tax_documents_doc
+                        (dte_version_id, dte_type_id, folio, counterpart_rut)
+                        """
+                    )
+                )
+            if column_exists("tax_documents", "direction"):
+                conn.execute(text("ALTER TABLE tax_documents DROP COLUMN direction"))
+            if column_exists("tax_documents", "doc_type"):
+                conn.execute(text("ALTER TABLE tax_documents DROP COLUMN doc_type"))
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

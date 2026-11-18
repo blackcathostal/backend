@@ -15,8 +15,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
-DTE_TYPE_ISSUED = 1
-DTE_TYPE_RECEIVED = 2
+# SII DTE type codes
+DTE_TYPE_INVOICE = 33  # Factura
+DTE_TYPE_RECEIPT = 39  # Boleta
+
+# Issued vs received
+DTE_VERSION_ISSUED = 1
+DTE_VERSION_RECEIVED = 2
+
 DTE_STATUS_PENDING_PAYMENT = 1
 DTE_STATUS_PAID = 2
 
@@ -29,8 +35,16 @@ class DteTypes(Base):
     name: Mapped[str] = mapped_column(String(80), nullable=False, default="")
 
 
+class DteVersions(Base):
+    __tablename__ = "dte_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+
+
 class DteStatuses(Base):
-    """Payment/imputation statuses for issued and received tax documents."""
+    """Payment/imputation statuses for tax documents."""
 
     __tablename__ = "dte_statuses"
 
@@ -46,8 +60,8 @@ class TaxDocuments(Base):
     __tablename__ = "tax_documents"
     __table_args__ = (
         UniqueConstraint(
-            "direction",
-            "doc_type",
+            "dte_version_id",
+            "dte_type_id",
             "folio",
             "counterpart_rut",
             name="uq_tax_documents_doc",
@@ -55,7 +69,13 @@ class TaxDocuments(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    direction: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    dte_version_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("dte_versions.id"),
+        nullable=False,
+        index=True,
+        default=DTE_VERSION_ISSUED,
+    )
     dte_type_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("dte_types.id"),
@@ -69,7 +89,6 @@ class TaxDocuments(Base):
         index=True,
     )
     period: Mapped[str] = mapped_column(String(40), nullable=False, default="")
-    doc_type: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     folio: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
     counterpart_rut: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     counterpart_name: Mapped[str] = mapped_column(String(220), nullable=False, default="")
@@ -91,4 +110,5 @@ class TaxDocuments(Base):
     )
 
     dte_type = relationship("DteTypes")
+    dte_version = relationship("DteVersions")
     status = relationship("DteStatuses")

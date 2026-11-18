@@ -199,7 +199,39 @@ class FacturacionClient:
                 return (node.text or "").strip()
         return ""
 
-    def _normalize_doc(self, raw: dict[str, Any], *, direction: str) -> dict[str, Any]:
+    @staticmethod
+    def resolve_dte_type_id(raw_type: object, *, tipolibro: str | None = None) -> int:
+        """Map SII/facturacion labels to dte_types.id (33 Factura, 39 Boleta)."""
+        text = str(raw_type or "").strip().lower()
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if digits.startswith("39") or digits == "39":
+            return 39
+        if digits.startswith("33") or digits == "33":
+            return 33
+        if "39" in digits:
+            return 39
+        if "33" in digits:
+            return 33
+        if "boleta" in text or (tipolibro or "").strip().upper() == "B":
+            return 39
+        if "factura" in text or (tipolibro or "").strip().upper() == "V":
+            return 33
+        return 33
+
+    @staticmethod
+    def resolve_dte_version_id(direction: str | None) -> int:
+        value = str(direction or "").strip().lower()
+        if value in {"recibida", "received", "2"}:
+            return 2
+        return 1
+
+    def _normalize_doc(
+        self,
+        raw: dict[str, Any],
+        *,
+        direction: str,
+        tipolibro: str | None = None,
+    ) -> dict[str, Any]:
         keys = {str(k).strip().lower(): v for k, v in raw.items()}
 
         def pick(*names: str) -> Any:
@@ -211,11 +243,15 @@ class FacturacionClient:
         issued_at = _parse_date(
             pick("fecha", "fechadocumento", "fecha_documento", "fechaemision", "fecha_emision")
         )
+        raw_type = pick("tipodte", "tipo_dte", "tipo", "tipo documento", "tipodocumento") or ""
+        dte_type_id = self.resolve_dte_type_id(raw_type, tipolibro=tipolibro)
+        dte_version_id = self.resolve_dte_version_id(direction)
         return {
-            "direction": direction,
-            "doc_type": str(
-                pick("tipodte", "tipo_dte", "tipo", "tipo documento", "tipodocumento") or ""
-            ).strip(),
+            "dte_type_id": dte_type_id,
+            "dte_version_id": dte_version_id,
+            # Legacy keys kept for older callers during transition
+            "direction": "recibida" if dte_version_id == 2 else "emitida",
+            "doc_type": "Boleta" if dte_type_id == 39 else "Factura",
             "folio": str(pick("folio", "nro", "numero", "n°", "nº") or "").strip(),
             "counterpart_rut": str(
                 pick("rut", "rutcliente", "rut_cliente", "rut proveedor", "rutproveedor") or ""
@@ -284,7 +320,9 @@ class FacturacionClient:
                         for c in children
                     }
                     if raw.get("Folio") or raw.get("folio") or raw.get("TipoDTE") or raw.get("tipodte"):
-                        rows.append(self._normalize_doc(raw, direction=direction))
+                        rows.append(
+                            self._normalize_doc(raw, direction=direction, tipolibro=None)
+                        )
                 if rows:
                     return rows
 
@@ -311,7 +349,14 @@ class FacturacionClient:
         )
         xml_text = self._soap_call("ConsultaLibroVentas", inner)
         payload = self._extract_soap_result(xml_text, "ConsultaLibroVentasResult")
-        return self._parse_libro_payload(payload, direction="emitida")
+        docs = self._parse_libro_payload(payload, direction="emitida")
+        for doc in docs:
+            doc["dte_type_id"] = self.resolve_dte_type_id(
+                doc.get("doc_type") or doc.get("dte_type_id"),
+                tipolibro=tipo,
+            )
+            doc["doc_type"] = "Boleta" if doc["dte_type_id"] == 39 else "Factura"
+        return docs
 
     def fetch_emitidas(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """Pull emitidas month-by-month via SOAP (B + V)."""
@@ -331,7 +376,7 @@ class FacturacionClient:
                     if issued and (issued < date_from or issued > date_to):
                         continue
                     key = (
-                        str(doc.get("doc_type") or ""),
+                        str(doc.get("dte_type_id") or ""),
                         str(doc.get("folio") or ""),
                         str(doc.get("counterpart_rut") or ""),
                     )

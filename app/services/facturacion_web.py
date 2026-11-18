@@ -543,7 +543,7 @@ class FacturacionWebClient:
                 if issued and (issued < date_from or issued > date_to):
                     continue
                 key = (
-                    str(doc.get("doc_type") or ""),
+                    str(doc.get("dte_type_id") or ""),
                     str(doc.get("folio") or ""),
                     str(doc.get("counterpart_rut") or ""),
                 )
