@@ -34,7 +34,7 @@ Everything that is **not** end-user visible text must be **English**:
 ## Correct examples
 
 ```text
-OK file:    room_photos.py / accounting_track.py / facturacion_web.py
+OK file:    room_photos.py / tax_documents.py / billing_portal_web.py
 OK symbol:  upload_room_photo, has_pdf, counterpart_name
 OK UI:      "Habitaciones", "Descargar PDF", "Actualizar Recibidas"
 BAD file:   fotos_habitacion.py

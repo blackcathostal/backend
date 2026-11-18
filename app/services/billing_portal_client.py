@@ -1,4 +1,4 @@
-"""facturacion.cl DTE REST + SOAP libro client."""
+"""Billing portal (facturacion.cl) DTE REST + SOAP sales-ledger client."""
 from __future__ import annotations
 
 import base64
@@ -16,8 +16,8 @@ from app.core.config import settings
 SOAP_URL = "https://wss.facturacion.cl/WSDS/wsplano.asmx"
 
 
-class FacturacionError(Exception):
-    """Raised when facturacion.cl credentials or API calls fail."""
+class BillingPortalError(Exception):
+    """Raised when billing portal credentials or API calls fail."""
 
 
 def _b64(value: str) -> str:
@@ -66,37 +66,37 @@ def _parse_date(value: Any) -> date | None:
     return None
 
 
-class FacturacionClient:
+class BillingPortalClient:
     def __init__(
         self,
         *,
         base_url: str | None = None,
-        usuario: str | None = None,
+        user: str | None = None,
         rut: str | None = None,
-        clave: str | None = None,
+        password: str | None = None,
         timeout: float = 60.0,
     ) -> None:
-        self.base_url = (base_url or settings.facturacion_base_url or "").rstrip("/")
-        self.usuario = (usuario if usuario is not None else settings.facturacion_user or "").strip()
-        self.rut = (rut if rut is not None else settings.facturacion_rut or "").strip()
-        self.clave = (clave if clave is not None else settings.facturacion_clave or "").strip()
+        self.base_url = (base_url or settings.billing_portal_base_url or "").rstrip("/")
+        self.user = (user if user is not None else settings.billing_portal_user or "").strip()
+        self.rut = (rut if rut is not None else settings.billing_portal_rut or "").strip()
+        self.password = (password if password is not None else settings.billing_portal_password or "").strip()
         self.timeout = timeout
         self._token: str | None = None
 
     def require_credentials(self) -> None:
-        env_label = "PROD" if settings.facturacion_is_prod else "DES"
+        env_label = "PROD" if settings.billing_portal_is_prod else "DES"
         missing = [
             name
             for name, value in (
-                ("FACTURACION_BASE_URL", self.base_url),
-                ("FACTURACION_USER", self.usuario),
-                (f"FACTURACION_{env_label}_RUT", self.rut),
-                (f"FACTURACION_{env_label}_CLAVE", self.clave),
+                ("BILLING_PORTAL_BASE_URL", self.base_url),
+                ("BILLING_PORTAL_USER", self.user),
+                (f"BILLING_PORTAL_{env_label}_RUT", self.rut),
+                (f"BILLING_PORTAL_{env_label}_PASSWORD", self.password),
             )
             if not value
         ]
         if missing:
-            raise FacturacionError(
+            raise BillingPortalError(
                 "Faltan credenciales de facturacion.cl: " + ", ".join(missing)
             )
 
@@ -108,26 +108,26 @@ class FacturacionClient:
                 response = client.post(
                     url,
                     json={
-                        "usuario": self.usuario,
+                        "usuario": self.user,
                         "rut": self.rut,
-                        "clave": self.clave,
+                        "clave": self.password,
                     },
                 )
         except httpx.HTTPError as exc:
-            raise FacturacionError(f"No se pudo conectar a facturacion.cl: {exc}") from exc
+            raise BillingPortalError(f"No se pudo conectar a facturacion.cl: {exc}") from exc
 
         if response.status_code >= 400:
             detail = (response.text or "").strip()[:200] or f"HTTP {response.status_code}"
-            raise FacturacionError(f"Login facturacion.cl falló: {detail}")
+            raise BillingPortalError(f"Login facturacion.cl falló: {detail}")
 
         try:
             payload = response.json()
         except ValueError as exc:
-            raise FacturacionError("Respuesta de login facturacion.cl inválida") from exc
+            raise BillingPortalError("Respuesta de login facturacion.cl inválida") from exc
 
         token = str(payload.get("token") or "").strip()
         if not token:
-            raise FacturacionError("facturacion.cl no devolvió token de acceso")
+            raise BillingPortalError("facturacion.cl no devolvió token de acceso")
         self._token = token
         return token
 
@@ -139,9 +139,9 @@ class FacturacionClient:
         self.require_credentials()
         return f"""
       <login>
-        <Usuario>{_b64(self.usuario)}</Usuario>
+        <Usuario>{_b64(self.user)}</Usuario>
         <Rut>{_b64(self.rut)}</Rut>
-        <Clave>{_b64(self.clave)}</Clave>
+        <Clave>{_b64(self.password)}</Clave>
         <Puerto>{_b64("0")}</Puerto>
       </login>
         """
@@ -169,7 +169,7 @@ class FacturacionClient:
                     headers=headers,
                 )
         except httpx.HTTPError as exc:
-            raise FacturacionError(f"SOAP facturacion.cl falló: {exc}") from exc
+            raise BillingPortalError(f"SOAP facturacion.cl falló: {exc}") from exc
 
         text = response.text or ""
         if response.status_code >= 400 or "soap:Fault" in text or "Fault>" in text:
@@ -179,12 +179,12 @@ class FacturacionClient:
                 fault = match.group(1).strip()
             fault_l = fault.lower()
             if "servicio adicional" in fault_l or "contraten" in fault_l or "object reference" in fault_l:
-                raise FacturacionError(
+                raise BillingPortalError(
                     "ConsultaLibroVentas no está contratado en facturacion.cl. "
                     "Pediles activar el servicio adicional de libro de ventas/boletas "
                     "para poder usar Actualizar en Track."
                 )
-            raise FacturacionError(
+            raise BillingPortalError(
                 fault or "Error SOAP en facturacion.cl al consultar el libro de ventas."
             )
         return text
@@ -193,31 +193,31 @@ class FacturacionClient:
         try:
             root = ET.fromstring(xml_text)
         except ET.ParseError as exc:
-            raise FacturacionError("Respuesta SOAP inválida") from exc
+            raise BillingPortalError("Respuesta SOAP inválida") from exc
         for node in root.iter():
             if node.tag.endswith(result_tag):
                 return (node.text or "").strip()
         return ""
 
     @staticmethod
-    def resolve_dte_type_code(raw_type: object, *, tipolibro: str | None = None) -> str:
-        """Map SII/facturacion labels to dte_types.code (resolved to id in API via DB)."""
+    def resolve_dte_type_code(raw_type: object, *, book_type: str | None = None) -> str:
+        """Map SII/billing-portal labels to dte_types.code (resolved to id in API via DB)."""
         text = str(raw_type or "").strip().lower()
         digits = "".join(ch for ch in text if ch.isdigit())
         if digits.startswith("39") or digits == "39" or "39" in digits:
             return "39"
         if digits.startswith("33") or digits == "33" or "33" in digits:
             return "33"
-        if "boleta" in text or "receipt" in text or (tipolibro or "").strip().upper() == "B":
+        if "boleta" in text or "receipt" in text or (book_type or "").strip().upper() == "B":
             return "39"
-        if "factura" in text or "invoice" in text or (tipolibro or "").strip().upper() == "V":
+        if "factura" in text or "invoice" in text or (book_type or "").strip().upper() == "V":
             return "33"
         return "33"
 
     @staticmethod
-    def resolve_dte_type_id(raw_type: object, *, tipolibro: str | None = None) -> int:
+    def resolve_dte_type_id(raw_type: object, *, book_type: str | None = None) -> int:
         """Legacy helper: returns SII type code as int; prefer resolve_dte_type_code."""
-        return int(FacturacionClient.resolve_dte_type_code(raw_type, tipolibro=tipolibro))
+        return int(BillingPortalClient.resolve_dte_type_code(raw_type, book_type=book_type))
 
     @staticmethod
     def resolve_dte_version_code(direction: str | None) -> str:
@@ -231,7 +231,7 @@ class FacturacionClient:
         raw: dict[str, Any],
         *,
         direction: str,
-        tipolibro: str | None = None,
+        book_type: str | None = None,
     ) -> dict[str, Any]:
         keys = {str(k).strip().lower(): v for k, v in raw.items()}
 
@@ -245,7 +245,7 @@ class FacturacionClient:
             pick("fecha", "fechadocumento", "fecha_documento", "fechaemision", "fecha_emision")
         )
         raw_type = pick("tipodte", "tipo_dte", "tipo", "tipo documento", "tipodocumento") or ""
-        dte_type_code = self.resolve_dte_type_code(raw_type, tipolibro=tipolibro)
+        dte_type_code = self.resolve_dte_type_code(raw_type, book_type=book_type)
         dte_version_code = self.resolve_dte_version_code(direction)
         identification_number = str(
             pick("rut", "rutcliente", "rut_cliente", "rut proveedor", "rutproveedor") or ""
@@ -282,7 +282,7 @@ class FacturacionClient:
             "raw": raw,
         }
 
-    def _parse_libro_payload(self, payload: str, *, direction: str) -> list[dict[str, Any]]:
+    def _parse_ledger_payload(self, payload: str, *, direction: str) -> list[dict[str, Any]]:
         text = (payload or "").strip()
         if not text:
             return []
@@ -327,7 +327,7 @@ class FacturacionClient:
                     }
                     if raw.get("Folio") or raw.get("folio") or raw.get("TipoDTE") or raw.get("tipodte"):
                         rows.append(
-                            self._normalize_doc(raw, direction=direction, tipolibro=None)
+                            self._normalize_doc(raw, direction=direction, book_type=None)
                         )
                 if rows:
                     return rows
@@ -343,11 +343,11 @@ class FacturacionClient:
             rows.append(self._normalize_doc(item, direction=direction))
         return rows
 
-    def consulta_libro_ventas(self, issued_on: date, tipolibro: str = "B") -> list[dict[str, Any]]:
-        """Emitidas: tipolibro B=boletas, V=facturas/otros (servicio adicional SOAP)."""
-        tipo = (tipolibro or "B").strip().upper()
+    def query_sales_ledger(self, issued_on: date, book_type: str = "B") -> list[dict[str, Any]]:
+        """Issued sales ledger: book_type B=receipts, V=invoices (SOAP add-on)."""
+        tipo = (book_type or "B").strip().upper()
         if tipo not in {"B", "V"}:
-            raise FacturacionError("tipolibro debe ser B (boletas) o V (ventas)")
+            raise BillingPortalError("tipolibro debe ser B (boletas) o V (ventas)")
         inner = (
             self._soap_login_xml()
             + f"<fechadocumento>{_b64(issued_on.isoformat())}</fechadocumento>"
@@ -355,27 +355,26 @@ class FacturacionClient:
         )
         xml_text = self._soap_call("ConsultaLibroVentas", inner)
         payload = self._extract_soap_result(xml_text, "ConsultaLibroVentasResult")
-        docs = self._parse_libro_payload(payload, direction="emitida")
+        docs = self._parse_ledger_payload(payload, direction="issued")
         for doc in docs:
             doc["dte_type_id"] = self.resolve_dte_type_id(
-                doc.get("doc_type") or doc.get("dte_type_id"),
-                tipolibro=tipo,
+                doc.get("dte_type_code") or doc.get("dte_type_id"),
+                book_type=tipo,
             )
-            doc["doc_type"] = "Boleta" if doc["dte_type_id"] == 39 else "Factura"
         return docs
 
-    def fetch_emitidas(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        """Pull emitidas month-by-month via SOAP (B + V)."""
+    def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
+        """Pull issued documents month-by-month via SOAP (B + V)."""
         if date_to < date_from:
-            raise FacturacionError("Rango de fechas inválido")
+            raise BillingPortalError("Rango de fechas inválido")
         docs: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
         cursor = date(date_from.year, date_from.month, 1)
         while cursor <= date_to:
-            for tipolibro in ("B", "V"):
+            for book_type in ("B", "V"):
                 try:
-                    batch = self.consulta_libro_ventas(cursor, tipolibro=tipolibro)
-                except FacturacionError:
+                    batch = self.query_sales_ledger(cursor, book_type=book_type)
+                except BillingPortalError:
                     raise
                 for doc in batch:
                     issued = _parse_date(doc.get("issued_at"))
@@ -396,20 +395,20 @@ class FacturacionClient:
                 cursor = date(cursor.year, cursor.month + 1, 1)
         return docs
 
-    def parse_libro_file(
+    def parse_ledger_file(
         self,
         content: bytes,
         *,
         direction: str,
         filename: str = "",
     ) -> list[dict[str, Any]]:
-        """Parse Excel/CSV libro export from facturacion.cl web UI."""
+        """Parse Excel/CSV ledger export from the billing portal web UI."""
         name = (filename or "").lower()
         if name.endswith((".xlsx", ".xls")):
             try:
                 import openpyxl
             except ImportError as exc:
-                raise FacturacionError("Falta openpyxl para leer Excel") from exc
+                raise BillingPortalError("Falta openpyxl para leer Excel") from exc
             workbook = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
             sheet = workbook.active
             rows_iter = sheet.iter_rows(values_only=True)
@@ -430,4 +429,4 @@ class FacturacionClient:
             return docs
 
         text = content.decode("utf-8-sig", errors="ignore")
-        return self._parse_libro_payload(text, direction=direction)
+        return self._parse_ledger_payload(text, direction=direction)

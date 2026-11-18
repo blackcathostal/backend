@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -160,40 +161,110 @@ class Settings(BaseSettings):
     fns_booking_fb_allowlist: str = ""
     # Optional hard override CLP per 1 USD (0 = auto: FNS Maestros_Cambio, then public FX).
     fns_usd_clp_rate: float = 0.0
-    # facturacion.cl DTE API — FACTURACION_ENV=des|prod
-    facturacion_env: str = "des"
-    facturacion_base_url: str = "https://rest.facturacion.cl"
-    facturacion_user: str = ""
-    facturacion_prod_rut: str = ""
-    facturacion_prod_clave: str = ""
-    facturacion_des_rut: str = ""
-    facturacion_des_clave: str = ""
-    facturacion_web_test_url: str = "https://www.facturacion.cl/plano/"
-    facturacion_web_test_user: str = ""
-    facturacion_web_test_clave: str = ""
-    # Portal web real (Libro de Compras / Track recibidas)
-    facturacion_web_empresa: str = ""
-    facturacion_web_user: str = ""
-    facturacion_web_clave: str = ""
+    # Billing portal (facturacion.cl) DTE API — BILLING_PORTAL_ENV=des|prod
+    # Legacy FACTURACION_* env names still accepted.
+    billing_portal_env: str = Field(
+        default="des",
+        validation_alias=AliasChoices("BILLING_PORTAL_ENV", "FACTURACION_ENV"),
+    )
+    billing_portal_base_url: str = Field(
+        default="https://rest.facturacion.cl",
+        validation_alias=AliasChoices("BILLING_PORTAL_BASE_URL", "FACTURACION_BASE_URL"),
+    )
+    billing_portal_user: str = Field(
+        default="",
+        validation_alias=AliasChoices("BILLING_PORTAL_USER", "FACTURACION_USER"),
+    )
+    billing_portal_prod_rut: str = Field(
+        default="",
+        validation_alias=AliasChoices("BILLING_PORTAL_PROD_RUT", "FACTURACION_PROD_RUT"),
+    )
+    billing_portal_prod_password: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "BILLING_PORTAL_PROD_PASSWORD",
+            "FACTURACION_PROD_CLAVE",
+            "FACTURACION_PROD_PASSWORD",
+        ),
+    )
+    billing_portal_des_rut: str = Field(
+        default="",
+        validation_alias=AliasChoices("BILLING_PORTAL_DES_RUT", "FACTURACION_DES_RUT"),
+    )
+    billing_portal_des_password: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "BILLING_PORTAL_DES_PASSWORD",
+            "FACTURACION_DES_CLAVE",
+            "FACTURACION_DES_PASSWORD",
+        ),
+    )
+    billing_portal_web_test_url: str = Field(
+        default="https://www.facturacion.cl/plano/",
+        validation_alias=AliasChoices(
+            "BILLING_PORTAL_WEB_TEST_URL",
+            "FACTURACION_WEB_TEST_URL",
+        ),
+    )
+    billing_portal_web_test_user: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "BILLING_PORTAL_WEB_TEST_USER",
+            "FACTURACION_WEB_TEST_USER",
+        ),
+    )
+    billing_portal_web_test_password: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "BILLING_PORTAL_WEB_TEST_PASSWORD",
+            "FACTURACION_WEB_TEST_CLAVE",
+            "FACTURACION_WEB_TEST_PASSWORD",
+        ),
+    )
+    # Real web portal (purchase ledger / received tax documents)
+    billing_portal_web_company: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "BILLING_PORTAL_WEB_COMPANY",
+            "FACTURACION_WEB_EMPRESA",
+            "FACTURACION_WEB_COMPANY",
+        ),
+    )
+    billing_portal_web_user: str = Field(
+        default="",
+        validation_alias=AliasChoices("BILLING_PORTAL_WEB_USER", "FACTURACION_WEB_USER"),
+    )
+    billing_portal_web_password: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "BILLING_PORTAL_WEB_PASSWORD",
+            "FACTURACION_WEB_CLAVE",
+            "FACTURACION_WEB_PASSWORD",
+        ),
+    )
 
     @property
-    def facturacion_is_prod(self) -> bool:
-        return str(self.facturacion_env or "").strip().lower() in {"prod", "production", "prd"}
+    def billing_portal_is_prod(self) -> bool:
+        return str(self.billing_portal_env or "").strip().lower() in {
+            "prod",
+            "production",
+            "prd",
+        }
 
     @property
-    def facturacion_rut(self) -> str:
+    def billing_portal_rut(self) -> str:
         return (
-            self.facturacion_prod_rut
-            if self.facturacion_is_prod
-            else self.facturacion_des_rut
+            self.billing_portal_prod_rut
+            if self.billing_portal_is_prod
+            else self.billing_portal_des_rut
         )
 
     @property
-    def facturacion_clave(self) -> str:
+    def billing_portal_password(self) -> str:
         return (
-            self.facturacion_prod_clave
-            if self.facturacion_is_prod
-            else self.facturacion_des_clave
+            self.billing_portal_prod_password
+            if self.billing_portal_is_prod
+            else self.billing_portal_des_password
         )
 
     model_config = SettingsConfigDict(

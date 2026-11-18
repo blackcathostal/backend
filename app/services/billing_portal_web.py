@@ -1,4 +1,4 @@
-"""Scrape facturacion.cl web Libro de Compras (recibidas).
+"""Scrape billing portal purchase ledger (received tax documents).
 
 Uses the real company portal (e.g. /blackcat), not Plano test (/plano/).
 SOAP ObtenerCompra requires an uncontracted add-on.
@@ -14,34 +14,34 @@ from urllib.parse import unquote, urljoin
 import httpx
 
 from app.core.config import settings
-from app.services.facturacion_client import FacturacionClient, FacturacionError, _parse_amount, _parse_date
+from app.services.billing_portal_client import BillingPortalClient, BillingPortalError, _parse_amount, _parse_date
 
 
-class FacturacionWebClient:
+class BillingPortalWebClient:
     def __init__(
         self,
         *,
-        empresa: str | None = None,
-        usuario: str | None = None,
-        clave: str | None = None,
+        company: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
         timeout: float = 90.0,
     ) -> None:
-        self.empresa = (
-            empresa
-            if empresa is not None
+        self.company = (
+            company
+            if company is not None
             else (
-                settings.facturacion_web_empresa
-                or settings.facturacion_prod_rut
+                settings.billing_portal_web_company
+                or settings.billing_portal_prod_rut
                 or ""
             )
         ).strip()
-        self.usuario = (
-            usuario
-            if usuario is not None
-            else (settings.facturacion_web_user or "")
+        self.user = (
+            user
+            if user is not None
+            else (settings.billing_portal_web_user or "")
         ).strip()
-        self.clave = (
-            clave if clave is not None else (settings.facturacion_web_clave or "")
+        self.password = (
+            password if password is not None else (settings.billing_portal_web_password or "")
         ).strip()
         self.timeout = timeout
         self._client: httpx.Client | None = None
@@ -51,14 +51,14 @@ class FacturacionWebClient:
         missing = [
             name
             for name, value in (
-                ("FACTURACION_WEB_EMPRESA", self.empresa),
-                ("FACTURACION_WEB_USER", self.usuario),
-                ("FACTURACION_WEB_CLAVE", self.clave),
+                ("BILLING_PORTAL_WEB_COMPANY", self.company),
+                ("BILLING_PORTAL_WEB_USER", self.user),
+                ("BILLING_PORTAL_WEB_PASSWORD", self.password),
             )
             if not value
         ]
         if missing:
-            raise FacturacionError(
+            raise BillingPortalError(
                 "Faltan credenciales web de facturacion.cl: " + ", ".join(missing)
             )
 
@@ -80,7 +80,7 @@ class FacturacionWebClient:
             self._client.close()
             self._client = None
 
-    def __enter__(self) -> "FacturacionWebClient":
+    def __enter__(self) -> "BillingPortalWebClient":
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -103,21 +103,22 @@ class FacturacionWebClient:
         client = self._ensure_client()
         client.get("https://www.facturacion.cl/")
 
-        empresa = self.empresa.upper()
-        usuario = self.usuario.upper()
+        empresa = self.company.upper()
+        usuario = self.user.upper()
         text = self._acceso_send(
-            f"&cmd=post&empresa=+{empresa}&usuario={usuario}&password={self.clave}"
+            f"&cmd=post&empresa=+{empresa}&usuario={usuario}&password={self.password}"
         )
         fault = re.search(r'error="([^"]*)"', text, re.I)
         if fault and fault.group(1).strip():
-            raise FacturacionError(
+            raise BillingPortalError(
                 f"Login web facturacion.cl falló: {fault.group(1).strip()}"
             )
         web_match = re.search(r"<web[^>]*>([^<]*)</web>", text, re.I)
         if not web_match or not web_match.group(1).strip():
-            raise FacturacionError(
+            raise BillingPortalError(
                 "Login web facturacion.cl no devolvió el host del sistema. "
-                "Revisá FACTURACION_WEB_EMPRESA / USER / CLAVE."
+                "Check BILLING_PORTAL_WEB_COMPANY / USER / PASSWORD "
+                "(or legacy FACTURACION_WEB_*)."
             )
         host = unquote(web_match.group(1).strip()).rstrip("/")
         self.base_url = f"https://{host}/"
@@ -126,12 +127,12 @@ class FacturacionWebClient:
             data={
                 "empresa": empresa,
                 "user": usuario,
-                "pass": self.clave,
+                "pass": self.password,
             },
         )
         text = response.text or ""
         if "Libro" not in text and "contabilidad" not in text.lower():
-            raise FacturacionError(
+            raise BillingPortalError(
                 "Login web facturacion.cl no abrió el sistema de la empresa."
             )
 
@@ -179,7 +180,7 @@ class FacturacionWebClient:
         )
         html = response.text or ""
         if "Libro de Compras" not in html and "indice" not in html.lower():
-            raise FacturacionError(
+            raise BillingPortalError(
                 "No se pudo abrir Libro de Compras en facturacion.cl"
             )
         return html, self._extract_fields(html)
@@ -295,7 +296,7 @@ class FacturacionWebClient:
         return None
 
     @staticmethod
-    def _parse_spanish_date(value: str) -> str | None:
+    def _parse_local_date(value: str) -> str | None:
         text = " ".join(str(value or "").split())
         if not text:
             return None
@@ -393,7 +394,7 @@ class FacturacionWebClient:
             rut = cells.get("RUT") or ""
             if not folio and not rut:
                 continue
-            fecha = self._parse_spanish_date(cells.get("FECHA") or "") or cells.get("FECHA")
+            fecha = self._parse_local_date(cells.get("FECHA") or "") or cells.get("FECHA")
             rows.append(
                 {
                     "folio": folio,
@@ -411,14 +412,14 @@ class FacturacionWebClient:
         """Fetch PDF bytes for a Libro de Compras document token."""
         token = (pdf_data or "").strip()
         if not token:
-            raise FacturacionError("Documento sin token PDF")
+            raise BillingPortalError("Documento sin token PDF")
         self.login()
         client = self._ensure_client()
         response = client.get(urljoin(self.base_url, f"vistaprevia.php?data={token}"))
         body = response.content or b""
         content_type = (response.headers.get("content-type") or "").lower()
         if response.status_code >= 400 or not body.startswith(b"%PDF"):
-            raise FacturacionError(
+            raise BillingPortalError(
                 f"No se pudo descargar el PDF (HTTP {response.status_code}, {content_type})"
             )
         return body
@@ -434,7 +435,7 @@ class FacturacionWebClient:
         rut: str = "",
         issued_at: date | None = None,
     ) -> str:
-        """Locate vistaprevia token for a recibida by folio (and optional RUT/month)."""
+        """Locate preview token for a received document by folio (and optional RUT/month)."""
         folio_key = self._norm_key(folio)
         if not folio_key:
             return ""
@@ -481,14 +482,14 @@ class FacturacionWebClient:
                     return token
         return ""
 
-    def fetch_recibidas(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
+    def fetch_received(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """Pull Libro de Compras month-by-month from company web UI."""
         if date_to < date_from:
-            raise FacturacionError("Rango de fechas inválido")
+            raise BillingPortalError("Rango de fechas inválido")
 
         self.login()
         _, base_fields = self._load_compras_form()
-        normalizer = FacturacionClient()
+        normalizer = BillingPortalClient()
         docs: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
 
@@ -513,7 +514,7 @@ class FacturacionWebClient:
                     "rut": raw.get("rut") or raw.get("rutproveedor"),
                     "pdf_data": raw.get("pdf_data") or "",
                 }
-                doc = normalizer._normalize_doc(payload, direction="recibida")
+                doc = normalizer._normalize_doc(payload, direction="received")
                 if not doc["total_amount"] and raw.get("montototal") is not None:
                     doc["total_amount"] = _parse_amount(raw.get("montototal"))
                 month_docs.append(doc)
@@ -532,10 +533,10 @@ class FacturacionWebClient:
                         "libro_compras.xlsx" if excel[:2] == b"PK" else "libro_compras.xls"
                     )
                     try:
-                        month_docs = normalizer.parse_libro_file(
-                            excel, direction="recibida", filename=filename
+                        month_docs = normalizer.parse_ledger_file(
+                            excel, direction="received", filename=filename
                         )
-                    except FacturacionError:
+                    except BillingPortalError:
                         month_docs = []
 
             for doc in month_docs:

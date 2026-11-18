@@ -110,12 +110,12 @@ def list_accounting_accounts(
     return rows
 
 
-@router.post("/import-facturacion", response_model=AccountingAccountsImportResult)
-def import_accounting_accounts_from_facturacion(
+@router.post("/import-billing-portal", response_model=AccountingAccountsImportResult)
+def import_accounting_accounts_from_billing_portal(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> AccountingAccountsImportResult:
-    """Import EERR BlackCat chart into admin only (no push to facturacion.cl)."""
+    """Import EERR BlackCat chart into admin only (no push to billing portal)."""
     catalog = _load_coa_catalog()
     existing = {
         row.code: row
@@ -171,6 +171,18 @@ def import_accounting_accounts_from_facturacion(
         updated=updated,
         total=len(catalog),
     )
+
+
+@router.post(
+    "/import-facturacion",
+    response_model=AccountingAccountsImportResult,
+    include_in_schema=False,
+)
+def import_accounting_accounts_from_billing_portal_legacy(
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+) -> AccountingAccountsImportResult:
+    return import_accounting_accounts_from_billing_portal(db=db, _=current_user)
 
 
 @router.get("/{account_id}", response_model=AccountingAccountsOut)

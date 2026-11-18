@@ -20,8 +20,8 @@ from app.schemas.tax_documents import (
     TaxDocumentRefreshResult,
 )
 from app.services import dte_catalog
-from app.services.facturacion_client import FacturacionClient, FacturacionError
-from app.services.facturacion_web import FacturacionWebClient
+from app.services.billing_portal_client import BillingPortalClient, BillingPortalError
+from app.services.billing_portal_web import BillingPortalWebClient
 from app.services.fns_accounting import classify_document, fetch_pms_production
 
 router = APIRouter(tags=["tax-documents"])
@@ -432,7 +432,7 @@ def download_document_pdf(
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     token = _pdf_token(row)
     try:
-        with FacturacionWebClient() as web:
+        with BillingPortalWebClient() as web:
             if not token:
                 token = web.find_pdf_data(
                     folio=row.folio or "",
@@ -449,7 +449,7 @@ def download_document_pdf(
             pdf_bytes = web.download_pdf(token)
     except HTTPException:
         raise
-    except FacturacionError as exc:
+    except BillingPortalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     filename = f"DTE_{row.folio or doc_id}.pdf"
@@ -488,14 +488,14 @@ async def refresh_tax_documents(
     try:
         if version_id == received_id:
             source = "web"
-            with FacturacionWebClient() as web:
-                docs = web.fetch_recibidas(date_from, date_to)
+            with BillingPortalWebClient() as web:
+                docs = web.fetch_received(date_from, date_to)
         else:
-            client = FacturacionClient()
+            client = BillingPortalClient()
             client.login()
-            docs = client.fetch_emitidas(date_from, date_to)
+            docs = client.fetch_issued(date_from, date_to)
             pms_rows = await fetch_pms_production(date_from, date_to)
-    except FacturacionError as exc:
+    except BillingPortalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     for doc in docs:
