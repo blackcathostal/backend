@@ -5,6 +5,7 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -129,21 +130,44 @@ def _upsert_supplier(db: Session, identification_number: str, company_name: str)
     if not identification_number:
         return False
     company_name = str(company_name or "").strip()[:220]
-    row = (
-        db.query(Suppliers)
-        .filter(Suppliers.identification_number == identification_number)
-        .first()
-    )
+    # Same RUT appears many times in a Libro de Compras refresh. Pending inserts are
+    # invisible to later SELECTs until flush, which caused Duplicate entry 500s.
+    cache: dict[str, Suppliers] = db.info.setdefault("supplier_by_id", {})
+    row = cache.get(identification_number)
     if row is None:
-        db.add(
-            Suppliers(
-                identification_number=identification_number,
-                company_name=company_name,
-            )
+        row = (
+            db.query(Suppliers)
+            .filter(Suppliers.identification_number == identification_number)
+            .first()
         )
-        return True
+    if row is None:
+        created = False
+        try:
+            with db.begin_nested():
+                row = Suppliers(
+                    identification_number=identification_number,
+                    company_name=company_name,
+                )
+                db.add(row)
+                db.flush()
+                created = True
+        except IntegrityError:
+            # Concurrent insert for the same RUT; keep the outer transaction.
+            row = (
+                db.query(Suppliers)
+                .filter(Suppliers.identification_number == identification_number)
+                .first()
+            )
+            if row is None:
+                raise
+            created = False
+        cache[identification_number] = row
+        if company_name and row.company_name != company_name:
+            row.company_name = company_name
+        return created
     if company_name and row.company_name != company_name:
         row.company_name = company_name
+    cache[identification_number] = row
     return False
 
 
@@ -504,14 +528,24 @@ async def refresh_tax_documents(
         if resolved_type is not None:
             doc["dte_type_id"] = resolved_type
 
-    upserted, classified, suppliers_upserted = _upsert_docs(
-        db,
-        docs,
-        source=source,
-        dte_version_id=version_id,
-        pms_rows=pms_rows,
-        match_fns=version_id == issued_id,
-    )
+    try:
+        upserted, classified, suppliers_upserted = _upsert_docs(
+            db,
+            docs,
+            source=source,
+            dte_version_id=version_id,
+            pms_rows=pms_rows,
+            match_fns=version_id == issued_id,
+        )
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No se pudieron guardar los documentos (conflicto de proveedores/DTE). "
+                "Reintentá Actualizar."
+            ),
+        ) from exc
     return TaxDocumentRefreshResult(
         dte_version_id=version_id,
         fetched=len(docs),
