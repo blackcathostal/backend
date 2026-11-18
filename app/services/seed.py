@@ -2,14 +2,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_password
-from app.models.accounting_track import (
+from app.models.tax_documents import (
     DTE_STATUS_PAID,
     DTE_STATUS_PENDING_PAYMENT,
     DTE_TYPE_ISSUED,
     DTE_TYPE_RECEIVED,
-    AccountingTrackDocuments,
     DteStatuses,
     DteTypes,
+    TaxDocuments,
 )
 from app.models.contact_groups import ContactGroups
 from app.models.contacts import Contacts
@@ -439,7 +439,7 @@ def seed_database(db: Session) -> None:
             row.tip_color = tip_color
 
     # Backfill type/status on existing DTEs; period stays empty unless already set.
-    for doc in db.query(AccountingTrackDocuments).all():
+    for doc in db.query(TaxDocuments).all():
         direction = str(doc.direction or "").strip().lower()
         wanted_type = DTE_TYPE_RECEIVED if direction == "recibida" else DTE_TYPE_ISSUED
         if not doc.dte_type_id:

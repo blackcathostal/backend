@@ -20,7 +20,7 @@ class DteTypeOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class AccountingTrackDocumentOut(BaseModel):
+class TaxDocumentOut(BaseModel):
     id: int
     direction: str
     dte_type_id: int | None = None
@@ -49,12 +49,12 @@ class AccountingTrackDocumentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class AccountingTrackDocumentPatch(BaseModel):
+class TaxDocumentPatch(BaseModel):
     status_id: int | None = None
     period: str | None = Field(default=None, max_length=40)
 
 
-class AccountingTrackRefreshResult(BaseModel):
+class TaxDocumentRefreshResult(BaseModel):
     direction: str
     fetched: int
     upserted: int
@@ -62,8 +62,8 @@ class AccountingTrackRefreshResult(BaseModel):
     warning: str = ""
 
 
-class AccountingTrackListResult(BaseModel):
-    items: list[AccountingTrackDocumentOut]
+class TaxDocumentListResult(BaseModel):
+    items: list[TaxDocumentOut]
     total: int
     from_date: date | None = None
     to_date: date | None = None

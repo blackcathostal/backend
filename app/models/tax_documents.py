@@ -30,7 +30,7 @@ class DteTypes(Base):
 
 
 class DteStatuses(Base):
-    """Payment/imputation statuses for issued and received DTEs."""
+    """Payment/imputation statuses for issued and received tax documents."""
 
     __tablename__ = "dte_statuses"
 
@@ -40,15 +40,17 @@ class DteStatuses(Base):
     tip_color: Mapped[str] = mapped_column(String(20), nullable=False, default="red")
 
 
-class AccountingTrackDocuments(Base):
-    __tablename__ = "accounting_track_documents"
+class TaxDocuments(Base):
+    """Tax document (documento tributario): boleta/factura issued or received."""
+
+    __tablename__ = "tax_documents"
     __table_args__ = (
         UniqueConstraint(
             "direction",
             "doc_type",
             "folio",
             "counterpart_rut",
-            name="uq_accounting_track_doc",
+            name="uq_tax_documents_doc",
         ),
     )
 

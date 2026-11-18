@@ -9,26 +9,26 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.accounting_track import (
+from app.models.tax_documents import (
     DTE_STATUS_PENDING_PAYMENT,
     DTE_TYPE_ISSUED,
     DTE_TYPE_RECEIVED,
-    AccountingTrackDocuments,
+    TaxDocuments,
     DteStatuses,
 )
 from app.models.users import Users
-from app.schemas.accounting_track import (
-    AccountingTrackDocumentOut,
-    AccountingTrackDocumentPatch,
-    AccountingTrackListResult,
-    AccountingTrackRefreshResult,
+from app.schemas.tax_documents import (
+    TaxDocumentOut,
+    TaxDocumentPatch,
+    TaxDocumentListResult,
+    TaxDocumentRefreshResult,
     DteStatusOut,
 )
 from app.services.facturacion_client import FacturacionClient, FacturacionError
 from app.services.facturacion_web import FacturacionWebClient
 from app.services.fns_accounting import classify_document, fetch_pms_production
 
-router = APIRouter(prefix="/accounting-track", tags=["accounting-track"])
+router = APIRouter(tags=["tax-documents"])
 
 # API uses English; DB still stores legacy Spanish direction values.
 _DIRECTION_TO_DB = {
@@ -71,7 +71,7 @@ def _extract_pdf_token(payload: object) -> str:
     return ""
 
 
-def _has_pdf(row: AccountingTrackDocuments) -> bool:
+def _has_pdf(row: TaxDocuments) -> bool:
     raw = row.raw_json or ""
     if not raw:
         return False
@@ -82,7 +82,7 @@ def _has_pdf(row: AccountingTrackDocuments) -> bool:
     return bool(_extract_pdf_token(payload))
 
 
-def _pdf_token(row: AccountingTrackDocuments) -> str:
+def _pdf_token(row: TaxDocuments) -> str:
     raw = row.raw_json or ""
     if not raw:
         return ""
@@ -102,8 +102,8 @@ def _list_statuses(db: Session) -> list[DteStatusOut]:
     return [DteStatusOut.model_validate(row) for row in rows]
 
 
-def _serialize_doc(row: AccountingTrackDocuments) -> AccountingTrackDocumentOut:
-    item = AccountingTrackDocumentOut.model_validate(row)
+def _serialize_doc(row: TaxDocuments) -> TaxDocumentOut:
+    item = TaxDocumentOut.model_validate(row)
     item.has_pdf = _has_pdf(row)
     item.direction = _DIRECTION_TO_API.get(
         str(row.direction or "").strip().lower(),
@@ -176,18 +176,18 @@ def _upsert_docs(
             class_info = {"pms_class": "—", "pms_ref": ""}
 
         row = (
-            db.query(AccountingTrackDocuments)
+            db.query(TaxDocuments)
             .filter(
-                AccountingTrackDocuments.direction == direction,
-                AccountingTrackDocuments.doc_type == doc_type,
-                AccountingTrackDocuments.folio == folio,
-                AccountingTrackDocuments.counterpart_rut == counterpart_rut,
+                TaxDocuments.direction == direction,
+                TaxDocuments.doc_type == doc_type,
+                TaxDocuments.folio == folio,
+                TaxDocuments.counterpart_rut == counterpart_rut,
             )
             .first()
         )
         is_new = row is None
         if is_new:
-            row = AccountingTrackDocuments(
+            row = TaxDocuments(
                 direction=direction,
                 doc_type=doc_type,
                 folio=folio,
@@ -230,22 +230,22 @@ def _list_direction(
     direction: str,
     date_from: date,
     date_to: date,
-) -> AccountingTrackListResult:
+) -> TaxDocumentListResult:
     query = (
-        db.query(AccountingTrackDocuments)
-        .options(joinedload(AccountingTrackDocuments.status))
-        .filter(AccountingTrackDocuments.direction == direction)
+        db.query(TaxDocuments)
+        .options(joinedload(TaxDocuments.status))
+        .filter(TaxDocuments.direction == direction)
     )
     query = query.filter(
-        AccountingTrackDocuments.issued_at.isnot(None),
-        AccountingTrackDocuments.issued_at >= date_from,
-        AccountingTrackDocuments.issued_at <= date_to,
+        TaxDocuments.issued_at.isnot(None),
+        TaxDocuments.issued_at >= date_from,
+        TaxDocuments.issued_at <= date_to,
     )
     rows = query.order_by(
-        AccountingTrackDocuments.issued_at.desc(),
-        AccountingTrackDocuments.id.desc(),
+        TaxDocuments.issued_at.desc(),
+        TaxDocuments.id.desc(),
     ).all()
-    return AccountingTrackListResult(
+    return TaxDocumentListResult(
         items=[_serialize_doc(row) for row in rows],
         total=len(rows),
         from_date=date_from,
@@ -254,13 +254,13 @@ def _list_direction(
     )
 
 
-@router.get("/issued", response_model=AccountingTrackListResult)
+@router.get("/issued", response_model=TaxDocumentListResult)
 def list_issued(
     from_date: str | None = None,
     to_date: str | None = None,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
-) -> AccountingTrackListResult:
+) -> TaxDocumentListResult:
     start, end = _default_range()
     return _list_direction(
         db,
@@ -270,13 +270,13 @@ def list_issued(
     )
 
 
-@router.get("/received", response_model=AccountingTrackListResult)
+@router.get("/received", response_model=TaxDocumentListResult)
 def list_received(
     from_date: str | None = None,
     to_date: str | None = None,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
-) -> AccountingTrackListResult:
+) -> TaxDocumentListResult:
     start, end = _default_range()
     return _list_direction(
         db,
@@ -287,13 +287,13 @@ def list_received(
 
 
 # Legacy Spanish paths (keep working bookmarks/clients)
-@router.get("/emitidas", response_model=AccountingTrackListResult, include_in_schema=False)
+@router.get("/emitidas", response_model=TaxDocumentListResult, include_in_schema=False)
 def list_issued_legacy(
     from_date: str | None = None,
     to_date: str | None = None,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
-) -> AccountingTrackListResult:
+) -> TaxDocumentListResult:
     start, end = _default_range()
     return _list_direction(
         db,
@@ -303,13 +303,13 @@ def list_issued_legacy(
     )
 
 
-@router.get("/recibidas", response_model=AccountingTrackListResult, include_in_schema=False)
+@router.get("/recibidas", response_model=TaxDocumentListResult, include_in_schema=False)
 def list_received_legacy(
     from_date: str | None = None,
     to_date: str | None = None,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
-) -> AccountingTrackListResult:
+) -> TaxDocumentListResult:
     start, end = _default_range()
     return _list_direction(
         db,
@@ -327,17 +327,17 @@ def list_dte_statuses(
     return _list_statuses(db)
 
 
-@router.patch("/documents/{doc_id}", response_model=AccountingTrackDocumentOut)
+@router.patch("/documents/{doc_id}", response_model=TaxDocumentOut)
 def patch_document(
     doc_id: int,
-    payload: AccountingTrackDocumentPatch,
+    payload: TaxDocumentPatch,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
-) -> AccountingTrackDocumentOut:
+) -> TaxDocumentOut:
     row = (
-        db.query(AccountingTrackDocuments)
-        .options(joinedload(AccountingTrackDocuments.status))
-        .filter(AccountingTrackDocuments.id == doc_id)
+        db.query(TaxDocuments)
+        .options(joinedload(TaxDocuments.status))
+        .filter(TaxDocuments.id == doc_id)
         .first()
     )
     if row is None:
@@ -355,15 +355,15 @@ def patch_document(
     db.add(row)
     db.commit()
     row = (
-        db.query(AccountingTrackDocuments)
-        .options(joinedload(AccountingTrackDocuments.status))
-        .filter(AccountingTrackDocuments.id == doc_id)
+        db.query(TaxDocuments)
+        .options(joinedload(TaxDocuments.status))
+        .filter(TaxDocuments.id == doc_id)
         .first()
     )
     return _serialize_doc(row)
 
 
-def _persist_pdf_token(db: Session, row: AccountingTrackDocuments, token: str) -> None:
+def _persist_pdf_token(db: Session, row: TaxDocuments, token: str) -> None:
     token = (token or "").strip()
     if not token:
         return
@@ -389,7 +389,7 @@ def download_document_pdf(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> Response:
-    row = db.query(AccountingTrackDocuments).filter(AccountingTrackDocuments.id == doc_id).first()
+    row = db.query(TaxDocuments).filter(TaxDocuments.id == doc_id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     token = _pdf_token(row)
@@ -422,14 +422,14 @@ def download_document_pdf(
     )
 
 
-@router.post("/refresh", response_model=AccountingTrackRefreshResult)
-async def refresh_track(
+@router.post("/refresh", response_model=TaxDocumentRefreshResult)
+async def refresh_tax_documents(
     direction: str = "issued",
     from_date: str | None = None,
     to_date: str | None = None,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
-) -> AccountingTrackRefreshResult:
+) -> TaxDocumentRefreshResult:
     api_direction = _normalize_direction(direction, default="issued")
     db_direction = _DIRECTION_TO_DB[api_direction]
 
@@ -463,7 +463,7 @@ async def refresh_track(
         pms_rows=pms_rows,
         match_fns=db_direction == "emitida",
     )
-    return AccountingTrackRefreshResult(
+    return TaxDocumentRefreshResult(
         direction=api_direction,
         fetched=len(docs),
         upserted=upserted,

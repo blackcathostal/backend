@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.api import (
     accounting_accounts,
-    accounting_track,
+    tax_documents,
     ai,
     analytics,
     auth,
@@ -51,4 +51,6 @@ api_router.include_router(facebook.router)
 api_router.include_router(analytics.router)
 api_router.include_router(terms.router)
 api_router.include_router(accounting_accounts.router)
-api_router.include_router(accounting_track.router)
+api_router.include_router(tax_documents.router, prefix="/tax-documents")
+# Legacy path for older admin builds
+api_router.include_router(tax_documents.router, prefix="/accounting-track")

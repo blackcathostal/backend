@@ -1,5 +1,4 @@
 from app.models.accounting_accounts import AccountingAccounts
-from app.models.accounting_track import AccountingTrackDocuments, DteStatuses, DteTypes
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_sources import AiSources
 from app.models.ai_usage import AiUsage
@@ -16,13 +15,14 @@ from app.models.roles import Roles
 from app.models.rooms import Rooms
 from app.models.services import Services
 from app.models.sliders import Sliders
+from app.models.tax_documents import DteStatuses, DteTypes, TaxDocuments
 from app.models.terms import TermsAndConditions
 from app.models.users import Users
 from app.models.visitor_analytics import VisitorEvents, VisitorSessions
 
 __all__ = [
     "AccountingAccounts",
-    "AccountingTrackDocuments",
+    "TaxDocuments",
     "DteTypes",
     "DteStatuses",
     "AiSources",

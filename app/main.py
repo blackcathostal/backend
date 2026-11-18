@@ -12,7 +12,6 @@ from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.models import (  # noqa: F401
     AccountingAccounts,
-    AccountingTrackDocuments,
     AiGenerationRuns,
     AiSources,
     AiUsage,
@@ -23,6 +22,7 @@ from app.models import (  # noqa: F401
     Contacts,
     DteStatuses,
     DteTypes,
+    TaxDocuments,
     MailAccounts,
     Medias,
     Posts,
@@ -187,24 +187,33 @@ def _ensure_schema_patches() -> None:
                     "ADD COLUMN sort_order INT NOT NULL DEFAULT 0"
                 )
             )
-        if not column_exists("accounting_track_documents", "dte_type_id"):
-            conn.execute(
-                text(
-                    "ALTER TABLE accounting_track_documents "
-                    "ADD COLUMN dte_type_id INT NULL"
-                )
+        def table_exists(table_name: str) -> bool:
+            return bool(
+                conn.execute(
+                    text(
+                        """
+                        SELECT COUNT(*)
+                        FROM information_schema.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = :table_name
+                        """
+                    ),
+                    {"table_name": table_name},
+                ).scalar()
             )
-        if not column_exists("accounting_track_documents", "status_id"):
+
+        # Rename legacy accounting_track_documents → tax_documents
+        if table_exists("accounting_track_documents") and not table_exists("tax_documents"):
+            conn.execute(text("RENAME TABLE accounting_track_documents TO tax_documents"))
+
+        if not column_exists("tax_documents", "dte_type_id"):
+            conn.execute(text("ALTER TABLE tax_documents ADD COLUMN dte_type_id INT NULL"))
+        if not column_exists("tax_documents", "status_id"):
+            conn.execute(text("ALTER TABLE tax_documents ADD COLUMN status_id INT NULL"))
+        if not column_exists("tax_documents", "period"):
             conn.execute(
                 text(
-                    "ALTER TABLE accounting_track_documents "
-                    "ADD COLUMN status_id INT NULL"
-                )
-            )
-        if not column_exists("accounting_track_documents", "period"):
-            conn.execute(
-                text(
-                    "ALTER TABLE accounting_track_documents "
+                    "ALTER TABLE tax_documents "
                     "ADD COLUMN period VARCHAR(40) NOT NULL DEFAULT ''"
                 )
             )
