@@ -476,8 +476,10 @@ def seed_database(db: Session) -> None:
             row.name = name
 
     dte_types = (
-        (33, dte_catalog.TYPE_CODE_INVOICE, "Invoice"),
-        (39, dte_catalog.TYPE_CODE_RECEIPT, "Receipt"),
+        (33, dte_catalog.TYPE_CODE_INVOICE, "Factura"),
+        (34, dte_catalog.TYPE_CODE_EXEMPT_INVOICE, "Factura Exenta"),
+        (39, dte_catalog.TYPE_CODE_RECEIPT, "Boleta"),
+        (61, dte_catalog.TYPE_CODE_CREDIT_NOTE, "Nota de crédito"),
     )
     for type_id, code, name in dte_types:
         row = db.query(DteTypes).filter(DteTypes.code == code).first()
@@ -492,6 +494,7 @@ def seed_database(db: Session) -> None:
     dte_statuses = (
         (1, dte_catalog.STATUS_CODE_PENDING_PAYMENT, "Imputada por Pagar", "red"),
         (2, dte_catalog.STATUS_CODE_PAID, "Imputada Pagada", "green"),
+        (3, dte_catalog.STATUS_CODE_WAITING, "En espera", "amber"),
     )
     for status_id, code, name, tip_color in dte_statuses:
         row = db.query(DteStatuses).filter(DteStatuses.code == code).first()
@@ -517,7 +520,7 @@ def seed_database(db: Session) -> None:
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
     invoice_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_INVOICE)
     receipt_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_RECEIPT)
-    pending_id = dte_catalog.pending_payment_status_id(db)
+    default_status_id = dte_catalog.default_new_document_status_id(db)
     known_type_ids = dte_catalog.all_type_ids(db)
 
     # Backfill version/type/status; period stays empty unless already set.
@@ -530,12 +533,15 @@ def seed_database(db: Session) -> None:
         raw_type = str(getattr(doc, "doc_type", "") or "").strip().lower()
         type_id = getattr(doc, "dte_type_id", None)
         if type_id not in known_type_ids:
-            if "boleta" in raw_type or "receipt" in raw_type or str(type_id) == dte_catalog.TYPE_CODE_RECEIPT:
+            resolved = dte_catalog.type_id_from_raw(db, raw_type or type_id)
+            if resolved:
+                doc.dte_type_id = resolved
+            elif "boleta" in raw_type or "receipt" in raw_type or str(type_id) == dte_catalog.TYPE_CODE_RECEIPT:
                 doc.dte_type_id = receipt_id
             else:
                 doc.dte_type_id = invoice_id
-        if not doc.status_id and pending_id:
-            doc.status_id = pending_id
+        if not doc.status_id and default_status_id:
+            doc.status_id = default_status_id
         if doc.period is None:
             doc.period = ""
 

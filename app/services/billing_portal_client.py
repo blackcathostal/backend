@@ -204,10 +204,18 @@ class BillingPortalClient:
         """Map SII/billing-portal labels to dte_types.code (resolved to id in API via DB)."""
         text = str(raw_type or "").strip().lower()
         digits = "".join(ch for ch in text if ch.isdigit())
+        if digits.startswith("61") or digits == "61" or "61" in digits:
+            return "61"
+        if digits.startswith("34") or digits == "34" or "34" in digits:
+            return "34"
         if digits.startswith("39") or digits == "39" or "39" in digits:
             return "39"
         if digits.startswith("33") or digits == "33" or "33" in digits:
             return "33"
+        if "nota de credito" in text or "nota de crédito" in text or "credit note" in text:
+            return "61"
+        if "exenta" in text or "exempt" in text:
+            return "34"
         if "boleta" in text or "receipt" in text or (book_type or "").strip().upper() == "B":
             return "39"
         if "factura" in text or "invoice" in text or (book_type or "").strip().upper() == "V":

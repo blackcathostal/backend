@@ -148,6 +148,14 @@ class Settings(BaseSettings):
     fns_pms_password: str = ""
     fns_pms_base_url: str = "https://adminchile1.fnsmanager.com"
     fns_hotel_pms_id: str = ""
+    # FNSrooms web extranet (scraping / session login) — not the PMS API Basic Auth user
+    fns_web_user: str = ""
+    fns_web_password: str = ""
+    fns_web_base_url: str = "https://adminchile1.fnsmanager.com"
+    fns_imap_host: str = "imap.gmail.com"
+    fns_imap_port: int = 993
+    fns_imap_user: str = ""
+    fns_imap_password: str = ""
     # FNSrooms Maestros (tipo de cambio) — https://ms.fnsmanager.com/api-doc/pms/#/Datos%20Maestros/Maestros_Cambio
     fns_ms_base_url: str = "https://ms.fnsmanager.com"
     fns_central_id: str = ""

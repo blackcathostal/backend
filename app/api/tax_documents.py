@@ -184,7 +184,7 @@ def _upsert_docs(
     classified = 0
     suppliers_upserted = 0
     version_ids = dte_catalog.all_version_ids(db)
-    pending_status_id = dte_catalog.pending_payment_status_id(db)
+    default_status_id = dte_catalog.default_new_document_status_id(db)
 
     for item in docs:
         version_id = int(item.get("dte_version_id") or dte_version_id or 0)
@@ -246,7 +246,7 @@ def _upsert_docs(
                 dte_type_id=type_id,
                 folio=folio,
                 identification_number=identification_number,
-                status_id=pending_status_id,
+                status_id=default_status_id,
                 period="",
             )
             db.add(row)
@@ -255,8 +255,8 @@ def _upsert_docs(
         row.dte_type_id = type_id
         if is_new or row.period is None:
             row.period = ""
-        if not row.status_id and pending_status_id:
-            row.status_id = pending_status_id
+        if not row.status_id and default_status_id:
+            row.status_id = default_status_id
         row.identification_number = identification_number
         row.issued_at = issued_at
         row.net_amount = float(item.get("net_amount") or 0)

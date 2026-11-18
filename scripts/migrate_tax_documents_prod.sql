@@ -66,13 +66,16 @@ INSERT INTO dte_versions (id, code, name) VALUES
 ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name);
 
 INSERT INTO dte_types (id, code, name) VALUES
-  (33, '33', 'Invoice'),
-  (39, '39', 'Receipt')
+  (33, '33', 'Factura'),
+  (34, '34', 'Factura Exenta'),
+  (39, '39', 'Boleta'),
+  (61, '61', 'Nota de crédito')
 ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name);
 
 INSERT INTO dte_statuses (id, code, name, tip_color) VALUES
   (1, 'pending_payment', 'Imputada por Pagar', 'red'),
-  (2, 'paid', 'Imputada Pagada', 'green')
+  (2, 'paid', 'Imputada Pagada', 'green'),
+  (3, 'waiting', 'En espera', 'amber')
 ON DUPLICATE KEY UPDATE
   code = VALUES(code),
   name = VALUES(name),

@@ -8,9 +8,12 @@ from app.models.tax_documents import DteStatuses, DteTypes, DteVersions
 
 # Stable catalog codes stored in DB (seed). Runtime always looks up by these.
 TYPE_CODE_INVOICE = "33"
+TYPE_CODE_EXEMPT_INVOICE = "34"
 TYPE_CODE_RECEIPT = "39"
+TYPE_CODE_CREDIT_NOTE = "61"
 VERSION_CODE_ISSUED = "issued"
 VERSION_CODE_RECEIVED = "received"
+STATUS_CODE_WAITING = "waiting"
 STATUS_CODE_PENDING_PAYMENT = "pending_payment"
 STATUS_CODE_PAID = "paid"
 
@@ -36,13 +39,23 @@ def type_id_from_raw(db: Session, raw: object) -> int | None:
             return by_code
 
     invoice_id = type_id_by_code(db, TYPE_CODE_INVOICE)
+    exempt_id = type_id_by_code(db, TYPE_CODE_EXEMPT_INVOICE)
     receipt_id = type_id_by_code(db, TYPE_CODE_RECEIPT)
+    credit_note_id = type_id_by_code(db, TYPE_CODE_CREDIT_NOTE)
 
     digits = "".join(ch for ch in text if ch.isdigit())
+    if digits.startswith(TYPE_CODE_CREDIT_NOTE) or TYPE_CODE_CREDIT_NOTE in digits:
+        return credit_note_id or invoice_id
+    if digits.startswith(TYPE_CODE_EXEMPT_INVOICE) or TYPE_CODE_EXEMPT_INVOICE in digits:
+        return exempt_id or invoice_id
     if digits.startswith(TYPE_CODE_RECEIPT) or TYPE_CODE_RECEIPT in digits:
         return receipt_id
     if digits.startswith(TYPE_CODE_INVOICE) or TYPE_CODE_INVOICE in digits:
         return invoice_id
+    if "nota de credito" in text or "nota de crédito" in text or "credit note" in text:
+        return credit_note_id or invoice_id
+    if "exenta" in text or "exempt" in text:
+        return exempt_id or invoice_id
     if "boleta" in text or "receipt" in text:
         return receipt_id
     if "factura" in text or "invoice" in text:
@@ -84,8 +97,17 @@ def status_id_by_code(db: Session, code: str) -> int | None:
     return int(row.id) if row else None
 
 
+def waiting_status_id(db: Session) -> int | None:
+    return status_id_by_code(db, STATUS_CODE_WAITING)
+
+
 def pending_payment_status_id(db: Session) -> int | None:
     return status_id_by_code(db, STATUS_CODE_PENDING_PAYMENT)
+
+
+def default_new_document_status_id(db: Session) -> int | None:
+    """New documents start as waiting until the user classifies payment."""
+    return waiting_status_id(db) or pending_payment_status_id(db)
 
 
 def all_type_ids(db: Session) -> set[int]:
