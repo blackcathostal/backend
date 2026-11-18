@@ -22,6 +22,34 @@ from app.services.fns_accounting import classify_document, fetch_pms_production
 
 router = APIRouter(prefix="/accounting-track", tags=["accounting-track"])
 
+# API uses English; DB still stores legacy Spanish direction values.
+_DIRECTION_TO_DB = {
+    "issued": "emitida",
+    "emitida": "emitida",
+    "received": "recibida",
+    "recibida": "recibida",
+}
+_DIRECTION_TO_API = {
+    "emitida": "issued",
+    "issued": "issued",
+    "recibida": "received",
+    "received": "received",
+}
+
+
+def _normalize_direction(value: str | None, *, default: str = "issued") -> str:
+    key = (value or default).strip().lower()
+    if key not in _DIRECTION_TO_DB:
+        raise HTTPException(
+            status_code=400,
+            detail="direction must be issued or received",
+        )
+    return key
+
+
+def _db_direction(value: str | None, *, default: str = "issued") -> str:
+    return _DIRECTION_TO_DB[_normalize_direction(value, default=default)]
+
 
 def _extract_pdf_token(payload: object) -> str:
     if not isinstance(payload, dict):
@@ -60,6 +88,10 @@ def _pdf_token(row: AccountingTrackDocuments) -> str:
 def _serialize_doc(row: AccountingTrackDocuments) -> AccountingTrackDocumentOut:
     item = AccountingTrackDocumentOut.model_validate(row)
     item.has_pdf = _has_pdf(row)
+    item.direction = _DIRECTION_TO_API.get(
+        str(row.direction or "").strip().lower(),
+        str(row.direction or ""),
+    )
     return item
 
 
@@ -187,8 +219,8 @@ def _list_direction(
     )
 
 
-@router.get("/emitidas", response_model=AccountingTrackListResult)
-def list_emitidas(
+@router.get("/issued", response_model=AccountingTrackListResult)
+def list_issued(
     from_date: str | None = None,
     to_date: str | None = None,
     db: Session = Depends(get_db),
@@ -197,14 +229,14 @@ def list_emitidas(
     start, end = _default_range()
     return _list_direction(
         db,
-        direction="emitida",
+        direction=_db_direction("issued"),
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
 
 
-@router.get("/recibidas", response_model=AccountingTrackListResult)
-def list_recibidas(
+@router.get("/received", response_model=AccountingTrackListResult)
+def list_received(
     from_date: str | None = None,
     to_date: str | None = None,
     db: Session = Depends(get_db),
@@ -213,7 +245,40 @@ def list_recibidas(
     start, end = _default_range()
     return _list_direction(
         db,
-        direction="recibida",
+        direction=_db_direction("received"),
+        date_from=_parse_bound(from_date, fallback=start),
+        date_to=_parse_bound(to_date, fallback=end),
+    )
+
+
+# Legacy Spanish paths (keep working bookmarks/clients)
+@router.get("/emitidas", response_model=AccountingTrackListResult, include_in_schema=False)
+def list_issued_legacy(
+    from_date: str | None = None,
+    to_date: str | None = None,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> AccountingTrackListResult:
+    start, end = _default_range()
+    return _list_direction(
+        db,
+        direction=_db_direction("issued"),
+        date_from=_parse_bound(from_date, fallback=start),
+        date_to=_parse_bound(to_date, fallback=end),
+    )
+
+
+@router.get("/recibidas", response_model=AccountingTrackListResult, include_in_schema=False)
+def list_received_legacy(
+    from_date: str | None = None,
+    to_date: str | None = None,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> AccountingTrackListResult:
+    start, end = _default_range()
+    return _list_direction(
+        db,
+        direction=_db_direction("received"),
         date_from=_parse_bound(from_date, fallback=start),
         date_to=_parse_bound(to_date, fallback=end),
     )
@@ -280,15 +345,14 @@ def download_document_pdf(
 
 @router.post("/refresh", response_model=AccountingTrackRefreshResult)
 async def refresh_track(
-    direction: str = "emitida",
+    direction: str = "issued",
     from_date: str | None = None,
     to_date: str | None = None,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> AccountingTrackRefreshResult:
-    direction = (direction or "emitida").strip().lower()
-    if direction not in {"emitida", "recibida"}:
-        raise HTTPException(status_code=400, detail="direction debe ser emitida o recibida")
+    api_direction = _normalize_direction(direction, default="issued")
+    db_direction = _DIRECTION_TO_DB[api_direction]
 
     start, end = _default_range()
     date_from = _parse_bound(from_date, fallback=start)
@@ -300,8 +364,8 @@ async def refresh_track(
     pms_rows: list[dict] = []
 
     try:
-        if direction == "recibida":
-            # Libro de compras: no SOAP contratado → scrape Plano. Sin cruce FNS.
+        if db_direction == "recibida":
+            # Purchase ledger: no SOAP contract → Plano scrape. No FNS match.
             source = "web"
             with FacturacionWebClient() as web:
                 docs = web.fetch_recibidas(date_from, date_to)
@@ -318,10 +382,10 @@ async def refresh_track(
         docs,
         source=source,
         pms_rows=pms_rows,
-        match_fns=direction == "emitida",
+        match_fns=db_direction == "emitida",
     )
     return AccountingTrackRefreshResult(
-        direction=direction,
+        direction=api_direction,
         fetched=len(docs),
         upserted=upserted,
         classified=classified,
