@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
+from zoneinfo import ZoneInfo
 
 import httpx
 import jwt
@@ -35,6 +36,8 @@ from app.services.instagram_knowledge import hostel_info_dict, search_common_ans
 from app.services.ai_source_fetcher import SourceFetchError, fetch_source_content
 from app.services.reply_context import get_reply_channel, get_reply_username
 
+SANTIAGO = ZoneInfo("America/Santiago")
+
 mcp = FastMCP(
     "Black Cat Tourism Sources",
     instructions=(
@@ -45,12 +48,77 @@ mcp = FastMCP(
         "cancel_room_booking y change_room_booking. Siempre pide RUT/pasaporte. "
         "Para cambiar reserva: documento → cupo nuevas fechas → change_room_booking "
         "(cancela la vieja y crea la nueva). "
+        "Fechas: usa año actual o futuro (America/Santiago); nunca un año pasado "
+        "para una reserva próxima. "
         "Si no, usa get_hostel_info y envíalos al WhatsApp. "
         "Sé vendedor: combina el dato con un beneficio real e invita a quedarse. "
         "Si falta algo, busca en la web. No inventes datos ni promociones."
     ),
     streamable_http_path="/",
 )
+
+
+def _parse_ymd(value: str) -> date | None:
+    try:
+        return datetime.strptime(str(value or "").strip()[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _same_month_day(year: int, month: int, day: int) -> date:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        # Feb 29 → Feb 28 on non-leap years
+        return date(year, month, min(day, 28))
+
+
+def _normalize_future_stay_dates(
+    start_date: str, end_date: str
+) -> tuple[str, str, dict[str, Any]]:
+    """Roll past/wrong-year stays forward to current or next year (Santiago)."""
+    today = datetime.now(SANTIAGO).date()
+    start = _parse_ymd(start_date)
+    end = _parse_ymd(end_date)
+    meta: dict[str, Any] = {
+        "date_normalized": False,
+        "today_santiago": today.isoformat(),
+        "original_start_date": str(start_date or ""),
+        "original_end_date": str(end_date or ""),
+    }
+    if not start or not end:
+        return str(start_date or ""), str(end_date or ""), {
+            **meta,
+            "error": "invalid_dates",
+        }
+    nights = (end - start).days
+    if nights <= 0:
+        nights = 1
+        end = start + timedelta(days=1)
+    if start >= today:
+        return start.isoformat(), end.isoformat(), meta
+
+    candidate = _same_month_day(today.year, start.month, start.day)
+    if candidate < today:
+        candidate = _same_month_day(today.year + 1, start.month, start.day)
+    while candidate < today:
+        candidate = _same_month_day(candidate.year + 1, start.month, start.day)
+    end_candidate = candidate + timedelta(days=nights)
+    meta.update(
+        {
+            "date_normalized": True,
+            "normalized_from": f"{start.isoformat()}->{end.isoformat()}",
+            "normalized_to": f"{candidate.isoformat()}->{end_candidate.isoformat()}",
+            "note": (
+                "Dates were in the past or used a wrong past year. "
+                f"Auto-corrected using Santiago today={today.isoformat()}. "
+                "Tell the guest the year you are checking "
+                f"(e.g. {candidate.strftime('%d/%m/%Y')} al "
+                f"{end_candidate.strftime('%d/%m/%Y')})."
+            ),
+        }
+    )
+    return candidate.isoformat(), end_candidate.isoformat(), meta
 
 
 def _booking_gate() -> dict[str, Any] | None:
@@ -599,6 +667,8 @@ async def _attach_guest_pricing(
     description=(
         "Consulta cupo real en FNSrooms (Motor) para Black Cat Hostal. "
         "Úsala para huéspedes autorizados que quieren reservar. "
+        "Fechas YYYY-MM-DD en año actual o futuro (America/Santiago). "
+        "Si mandas un año pasado, se corrige solo al año actual/próximo. "
         "Devuelve room_type_code, rate_plan_code y montos CLP para create_room_booking "
         "(booking_amount_after_tax + booking_day_rates_json). "
         "Al huésped cotiza SOLO CLP (guest_price_*_clp / guest_total_clp)."
@@ -615,6 +685,7 @@ async def search_room_availability_tool(
     blocked = _booking_gate()
     if blocked:
         return blocked
+    start_date, end_date, date_meta = _normalize_future_stay_dates(start_date, end_date)
     try:
         payload = await search_availability(
             start_date=start_date,
@@ -624,7 +695,7 @@ async def search_room_availability_tool(
             currency=currency or "USD",
         )
         if not payload.get("ok"):
-            return payload
+            return {**payload, "start_date": start_date, "end_date": end_date, **date_meta}
         priced = await _attach_guest_pricing(
             payload, start_date=start_date, end_date=end_date
         )
@@ -672,10 +743,9 @@ async def search_room_availability_tool(
             "Si available=false / rooms vacío: di que no hay cupo para esas fechas. "
             "Si el huésped pide otras fechas, llama OTRA VEZ search_room_availability "
             "con esas fechas antes de afirmar nada. "
-            "Si hay compartida: ANTES de reservar pregunta en cuál se siente cómodo/a "
-            "(hombres o mujeres). No preguntes orientación sexual ni fuerces "
-            "«¿eres hombre o mujer?». Frase guía: "
-            "«Hay compartida de hombres y de mujeres; indícame en cuál te sientes cómodo/a». "
+            "Si hay compartida: ANTES de reservar di exactamente: "
+            "«Tenemos compartidas solo para hombres y solo para mujeres; ¿cuál requieres?». "
+            "No preguntes orientación sexual ni fuerces «¿eres hombre o mujer?». "
             "Luego pasa shared_dorm_preference=men|women en create_room_booking."
         )
         if shared:
@@ -687,8 +757,9 @@ async def search_room_availability_tool(
             priced["availability_summary"] = (
                 f"HAY CUPO en compartida {start_date}→{end_date}: "
                 + "; ".join(bits)
-                + ". Di que SÍ hay compartida y pregunta en cuál se siente cómodo/a "
-                "(hombres/mujeres), sin forzar identidad. No inventes otras fechas."
+                + ". Di que SÍ hay compartida y di exactamente: "
+                "«Tenemos compartidas solo para hombres y solo para mujeres; "
+                "¿cuál requieres?». No inventes otras fechas."
             )
         elif rooms:
             priced["availability_summary"] = (
@@ -703,9 +774,19 @@ async def search_room_availability_tool(
                 "sin volver a llamar search_room_availability."
             )
         priced["message"] = priced["availability_summary"]
+        priced["start_date"] = start_date
+        priced["end_date"] = end_date
+        priced.update(date_meta)
         return priced
     except FnsMotorError as exc:
-        return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
+        return {
+            "ok": False,
+            "error": str(exc),
+            "details": getattr(exc, "details", None),
+            "start_date": start_date,
+            "end_date": end_date,
+            **date_meta,
+        }
 
 
 def _identity_gate(
@@ -950,8 +1031,8 @@ def _shared_dorm_preference_gate(
         "shared_dorm_options": ["men", "women"],
         "message": (
             "Compartida requiere preferencia de dormitorio. "
-            "Pregunta: «Hay compartida de hombres y de mujeres; "
-            "indícame en cuál te sientes cómodo/a». "
+            "Di: «Tenemos compartidas solo para hombres y solo para mujeres; "
+            "¿cuál requieres?». "
             "No preguntes orientación sexual ni fuerces «¿eres hombre o mujer?». "
             "Luego reintenta con shared_dorm_preference=men o women."
         ),
@@ -966,7 +1047,7 @@ def _remarks_with_shared_dorm_preference(
     if not preference:
         return base
     label = "mujeres" if preference == "women" else "hombres"
-    note = f"Compartida: se siente cómodo/a en dormitorio de {label}"
+    note = f"Compartida solo para {label}"
     if note.lower() in base.lower():
         return base
     return f"{base}. {note}".strip(". ").strip()
@@ -978,7 +1059,8 @@ def _remarks_with_shared_dorm_preference(
         "Crea una reserva real en FNSrooms Motor. Solo para huéspedes autorizados. "
         "Antes: check_guest_bookings y search_room_availability. "
         "Si la habitación es compartida (22851/22853): OBLIGATORIO "
-        "shared_dorm_preference=men|women (en cuál se siente cómodo/a). "
+        "shared_dorm_preference=men|women "
+        "(«Tenemos compartidas solo para hombres y solo para mujeres; ¿cuál requieres?»). "
         "No asumas género ni preguntes orientación sexual. "
         "Si ya tiene reserva activa: NO uses confirm_extra_booking para 'cambiar'. "
         "Para CAMBIAR fechas usa change_room_booking (o replace_existing=true, "
@@ -1014,6 +1096,7 @@ async def create_room_booking_tool(
     blocked = _booking_gate()
     if blocked:
         return blocked
+    start_date, end_date, _date_meta = _normalize_future_stay_dates(start_date, end_date)
     identity_err = _identity_gate(
         guest_document=guest_document,
         guest_document_type=guest_document_type,
@@ -1172,7 +1255,7 @@ async def create_room_booking_tool(
         "Si no hay documento y se buscó por nombre, el huésped debió confirmar "
         "«sí, esa es mi reserva» → guest_confirmed=true. "
         "Si la nueva es compartida: shared_dorm_preference=men|women "
-        "(en cuál se siente cómodo/a; no fuerces identidad). "
+        "(«solo para hombres / solo para mujeres; ¿cuál requieres?»; no fuerces identidad). "
         "Antes: search_room_availability y pasar códigos/montos CLP."
     ),
     structured_output=True,
@@ -1201,6 +1284,7 @@ async def change_room_booking_tool(
     blocked = _booking_gate()
     if blocked:
         return blocked
+    start_date, end_date, _date_meta = _normalize_future_stay_dates(start_date, end_date)
     document = str(guest_document or "").strip()
     identity_err = _identity_gate(
         guest_document=guest_document,

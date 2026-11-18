@@ -367,11 +367,17 @@ DEEPSEEK_TOOLS = [
                 "properties": {
                     "start_date": {
                         "type": "string",
-                        "description": "Check-in YYYY-MM-DD",
+                        "description": (
+                            "Check-in YYYY-MM-DD in current or future year "
+                            "(America/Santiago). Never a past year for upcoming stays."
+                        ),
                     },
                     "end_date": {
                         "type": "string",
-                        "description": "Check-out YYYY-MM-DD",
+                        "description": (
+                            "Check-out YYYY-MM-DD in current or future year "
+                            "(America/Santiago)."
+                        ),
                     },
                     "adults": {"type": "integer", "description": "Adults (default 2)"},
                     "children": {"type": "integer", "description": "Children (default 0)"},

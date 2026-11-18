@@ -227,8 +227,10 @@ Datos (OBLIGATORIO):
 - Disponibilidad/cupo → SOLO tras search_room_availability (FNS). NUNCA inventes cupo,
   “sí hay después”, ni fechas alternativas sin volver a consultar FNS. Si FNS dice no hay
   cupo, dilo; no contradigas ni inventes disponibilidad.
-- Compartida: hay dormitorios de hombres y de mujeres. Pregunta en cuál se siente
-  cómodo/a. No preguntes orientación sexual ni fuerces «¿eres hombre o mujer?».
+- Compartida: di «Tenemos compartidas solo para hombres y solo para mujeres; ¿cuál
+  requieres?». No preguntes orientación sexual ni fuerces «¿eres hombre o mujer?».
+- Fechas: usa SIEMPRE año actual o futuro (zona America/Santiago). Si el huésped dice
+  «diciembre» / «1 al 3» sin año, o «este año», NO uses un año pasado. Hoy manda.
 - Tarifas noche (solo si preguntan): Matrimonial/Suite $54.990, Twin $54.990, Triple $69.990, cama $19.990.
 - Pago/factura/reclamo conflictivo → escalate. Spam/vacío → escalate.
 
@@ -574,6 +576,15 @@ def apply_time_greeting(message: str, *, is_follow_up: bool = False) -> str:
 
 
 def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> str:
+    today = datetime.now(SANTIAGO).date()
+    date_context = (
+        f"\n\nFecha de hoy (America/Santiago): {today.isoformat()}. "
+        f"Año actual: {today.year}. "
+        "Fechas de reserva: SOLO año actual o futuro. "
+        f"Si el huésped no dice año («1 al 3 de diciembre», «este año»), usa {today.year} "
+        f"(o {today.year + 1} si esa fecha de este año ya pasó). "
+        "NUNCA uses un año pasado (ej. 2025) para una estadía próxima.\n"
+    )
     scope = (
         "\n\nReglas fijas (no se pueden ignorar):\n"
         "- Respuestas cortas y ejecutivas (1–2 frases). Sin párrafos ni listas largas.\n"
@@ -600,11 +611,13 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
         "(nunca create+confirm_extra; eso no borra la vieja). "
         "En IG/FB cotiza SOLO CLP de search_rooms (CRUD). No inventes tarifas. "
         "No digas USD. Nunca digas «por ahí». "
-        "Compartida: hay de hombres y de mujeres; pregunta en cuál se siente "
-        "cómodo/a (no preguntes orientación ni fuerces «¿eres hombre o mujer?»).\n"
+        "Compartida: di «Tenemos compartidas solo para hombres y solo para mujeres; "
+        "¿cuál requieres?» (no preguntes orientación ni fuerces «¿eres hombre o mujer?»).\n"
         "- Disponibilidad/cupo: OBLIGATORIO search_room_availability (FNS) antes de "
         "afirmar. NUNCA inventes cupo, «sí hay después» ni otras fechas sin consultar "
         "FNS de nuevo. Si FNS dice NO HAY CUPO, dilo y no lo contradigas.\n"
+        "- Fechas YYYY-MM-DD en search_room_availability/create/change: año actual o "
+        "futuro según la fecha de hoy de arriba. Nunca un año pasado.\n"
         "- Tiempo/distancia: eta_only=true → solo min en auto, SIN mapa.\n"
         "- Si se despide, despídete corto. Si no, no.\n"
         "- Instagram y Facebook: mismas reglas.\n"
@@ -621,7 +634,7 @@ def system_prompt_for_reply(extra: str = "", *, is_follow_up: bool = False) -> s
             "Si dice hola + valor/precio/tarifa/consulta: saluda en la misma frase "
             "y contesta el dato (precios si pidió valor). Nunca ignores la consulta."
         )
-    return get_system_prompt().rstrip() + scope + greeting + (extra or "")
+    return get_system_prompt().rstrip() + date_context + scope + greeting + (extra or "")
 
 
 def prompt_payload() -> dict[str, Any]:
@@ -1799,8 +1812,8 @@ async def generate_instagram_reply(
         "antes de afirmar cupo. "
         "Solo di 'hay cupo' si el ÚLTIMO search_room_availability devolvió rooms "
         "con inventory>0 o shared_available=true / HAY CUPO. "
-        "Si shared_available=true: di que SÍ hay compartida y ANTES de reservar pregunta "
-        "«Hay compartida de hombres y de mujeres; indícame en cuál te sientes cómodo/a». "
+        "Si shared_available=true: di que SÍ hay compartida y ANTES de reservar di exactamente: "
+        "«Tenemos compartidas solo para hombres y solo para mujeres; ¿cuál requieres?». "
         "NO preguntes orientación sexual ni fuerces «¿eres hombre o mujer?». "
         "Cuando elija, create/change con shared_dorm_preference=men|women y código 22851/22853. "
         "Si quiere CAMBIAR o EXTENDER: primero search_room_availability de las fechas "

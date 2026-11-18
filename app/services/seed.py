@@ -269,8 +269,8 @@ DEFAULT_COMMON_ANSWERS = [
         "answer_guide": (
             "Dormitorio compartido: se cobra $19.990 CLP por cama (por persona), "
             "no por la habitación completa. "
-            "Hay compartidas de hombres y de mujeres. "
-            "Pregunta en cuál se siente cómodo/a (no preguntes orientación sexual "
+            "Tenemos compartidas solo para hombres y solo para mujeres; "
+            "pregunta cuál requiere (no preguntes orientación sexual "
             "ni fuerces «¿eres hombre o mujer?»). "
             "Para reservar una cama, escribir por WhatsApp con fechas."
         ),

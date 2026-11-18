@@ -2422,9 +2422,13 @@ async def send_inbox_reply(
                 else:
                     raise
         else:
-            recipient_id = item.get("author_id") or item.get("peer_id")
+            # peer_id is always the guest; author_id on outbound bubbles is our page.
+            recipient_id = item.get("peer_id") or item.get("author_id")
+            own_ids = _own_instagram_ids()
+            if recipient_id and str(recipient_id) in own_ids:
+                recipient_id = item.get("peer_id") or ""
             if not recipient_id:
-                raise InstagramError("Falta author_id (IGSID) para DM")
+                raise InstagramError("Falta peer_id (IGSID del huésped) para DM")
             # Text first (no URL). Then photos / Google map card.
             meta_result = await send_dm(recipient_id, text)
             if send_images:
