@@ -15,6 +15,7 @@ from app.models import (  # noqa: F401
     AiGenerationRuns,
     AiSources,
     AiUsage,
+    CampaignDeliveries,
     Campaigns,
     Complaints,
     ContactGroups,

@@ -2,6 +2,7 @@ from app.models.accounting_accounts import AccountingAccounts
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.ai_sources import AiSources
 from app.models.ai_usage import AiUsage
+from app.models.campaign_deliveries import CampaignDeliveries
 from app.models.campaigns import Campaigns
 from app.models.complaints import Complaints
 from app.models.contact_groups import ContactGroups
@@ -38,6 +39,7 @@ __all__ = [
     "Contacts",
     "MailAccounts",
     "Campaigns",
+    "CampaignDeliveries",
     "Complaints",
     "ContactInquiries",
     "Services",

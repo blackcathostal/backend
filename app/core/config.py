@@ -95,6 +95,8 @@ class Settings(BaseSettings):
     tripadvisor_reviews_cache_seconds: int = 1800
     tripadvisor_photos_cache_seconds: int = 1800
     public_site_url: str = "https://blackcathostal.com"
+    public_api_base_url: str = "https://api.blackcathostal.com/api"
+    tax_documents_lookback_months: int = 12
     reddit_client_id: str = ""
     reddit_client_secret: str = ""
     reddit_username: str = ""

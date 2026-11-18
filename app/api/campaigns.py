@@ -6,22 +6,56 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.campaign_deliveries import (
+    DELIVERY_STATUS_BOUNCED,
+    DELIVERY_STATUS_ERROR,
+    DELIVERY_STATUS_OPENED,
+    DELIVERY_STATUS_SENT,
+    CampaignDeliveries,
+)
 from app.models.campaigns import Campaigns
 from app.models.mail_accounts import MailAccounts
 from app.models.users import Users
 from app.schemas.campaigns import (
     CampaignAttachment,
+    CampaignDeliveriesResult,
+    CampaignDeliveryOut,
     CampaignsCreate,
     CampaignsOut,
     CampaignsUpdate,
 )
 from app.services.mailer import MailSendError, iter_campaign_emails, validate_attachments
+
+# 1x1 transparent GIF
+_TRACKING_PIXEL = (
+    b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00"
+    b"\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+)
+
+
+def _public_api_base() -> str:
+    return str(getattr(settings, "public_api_base_url", "") or "").rstrip("/")
+
+
+def _inject_open_pixel(html_body: str, tracking_token: str) -> str:
+    base = _public_api_base()
+    if not base or not tracking_token:
+        return html_body
+    pixel_url = f"{base}/campaigns/track/{tracking_token}.gif"
+    pixel = (
+        f'<img src="{pixel_url}" width="1" height="1" alt="" '
+        'style="display:block;width:1px;height:1px;border:0;" />'
+    )
+    body = html_body or ""
+    if re.search(r"</body\s*>", body, flags=re.IGNORECASE):
+        return re.sub(r"</body\s*>", pixel + "</body>", body, count=1, flags=re.IGNORECASE)
+    return f"{body}{pixel}"
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -184,6 +218,56 @@ def update_campaign(
     return campaign
 
 
+@router.get("/{campaign_id}/deliveries", response_model=CampaignDeliveriesResult)
+def list_campaign_deliveries(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> CampaignDeliveriesResult:
+    campaign = db.query(Campaigns).filter(Campaigns.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    rows = (
+        db.query(CampaignDeliveries)
+        .filter(CampaignDeliveries.campaign_id == campaign_id)
+        .order_by(CampaignDeliveries.id.desc())
+        .all()
+    )
+    return CampaignDeliveriesResult(
+        campaign_id=campaign.id,
+        campaign_name=campaign.name,
+        total=len(rows),
+        items=[CampaignDeliveryOut.model_validate(row) for row in rows],
+    )
+
+
+@router.get("/track/{token}.gif", include_in_schema=False)
+@router.get("/track/{token}", include_in_schema=False)
+def track_campaign_open(token: str, db: Session = Depends(get_db)) -> Response:
+    clean = (token or "").strip().removesuffix(".gif")
+    if not clean:
+        return Response(content=_TRACKING_PIXEL, media_type="image/gif")
+    row = (
+        db.query(CampaignDeliveries)
+        .filter(CampaignDeliveries.tracking_token == clean)
+        .first()
+    )
+    if row and row.status in {DELIVERY_STATUS_SENT, DELIVERY_STATUS_OPENED}:
+        if row.status != DELIVERY_STATUS_OPENED:
+            row.status = DELIVERY_STATUS_OPENED
+            row.opened_at = datetime.now(timezone.utc)
+            db.add(row)
+            db.commit()
+    return Response(
+        content=_TRACKING_PIXEL,
+        media_type="image/gif",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 @router.post("/{campaign_id}/send")
 def send_campaign(
     campaign_id: int,
@@ -230,14 +314,72 @@ def send_campaign(
     except MailSendError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # Fresh delivery rows for this send wave
+    prepared: list[dict] = []
+    for item in recipients:
+        email = str((item or {}).get("email") or "").strip().lower()
+        full_name = str((item or {}).get("full_name") or "").strip()
+        token = uuid4().hex
+        delivery = CampaignDeliveries(
+            campaign_id=campaign_id,
+            email=email or "",
+            full_name=full_name,
+            status=DELIVERY_STATUS_ERROR if not email else DELIVERY_STATUS_SENT,
+            error_message="" if email else "Sin correo",
+            tracking_token=token,
+        )
+        db.add(delivery)
+        db.flush()
+        prepared.append(
+            {
+                **dict(item or {}),
+                "email": email,
+                "full_name": full_name,
+                "delivery_id": delivery.id,
+                "tracking_token": token,
+            }
+        )
+    db.commit()
+
+    token_by_delivery = {int(item["delivery_id"]): item["tracking_token"] for item in prepared}
+
+    def html_for_recipient(item: dict) -> str:
+        token = str(item.get("tracking_token") or token_by_delivery.get(int(item.get("delivery_id") or 0)) or "")
+        return _inject_open_pixel(html_body, token)
+
     def event_stream():
         for event in iter_campaign_emails(
             account_data,
             subject=subject,
             html_body=html_body,
-            recipients=recipients,
+            recipients=prepared,
             attachments=attachments,
+            html_for_recipient=html_for_recipient,
         ):
+            if event["type"] == "progress":
+                delivery_id = event.get("delivery_id")
+                if delivery_id:
+                    row = (
+                        db.query(CampaignDeliveries)
+                        .filter(CampaignDeliveries.id == int(delivery_id))
+                        .first()
+                    )
+                    if row:
+                        if event.get("ok"):
+                            row.status = DELIVERY_STATUS_SENT
+                            row.error_message = ""
+                            row.sent_at = datetime.now(timezone.utc)
+                        else:
+                            kind = event.get("failure_kind") or DELIVERY_STATUS_ERROR
+                            row.status = (
+                                DELIVERY_STATUS_BOUNCED
+                                if kind == DELIVERY_STATUS_BOUNCED
+                                else DELIVERY_STATUS_ERROR
+                            )
+                            row.error_message = str(event.get("failure_error") or "")[:2000]
+                        db.add(row)
+                        db.commit()
+
             if event["type"] == "error":
                 yield json.dumps(event, ensure_ascii=False) + "\n"
                 return

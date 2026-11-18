@@ -56,3 +56,24 @@ class CampaignsOut(BaseModel):
     updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CampaignDeliveryOut(BaseModel):
+    id: int
+    campaign_id: int
+    email: str
+    full_name: str = ""
+    status: str
+    error_message: str = ""
+    sent_at: datetime | None = None
+    opened_at: datetime | None = None
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CampaignDeliveriesResult(BaseModel):
+    campaign_id: int
+    campaign_name: str
+    total: int
+    items: list[CampaignDeliveryOut] = Field(default_factory=list)

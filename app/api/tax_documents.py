@@ -125,9 +125,12 @@ def _parse_bound(value: str | None, *, fallback: date) -> date:
 
 
 def _default_range() -> tuple[date, date]:
+    from app.core.config import settings
+
     today = date.today()
+    months = max(1, int(getattr(settings, "tax_documents_lookback_months", 12) or 12))
     year = today.year
-    month = today.month - 2
+    month = today.month - months
     while month <= 0:
         month += 12
         year -= 1

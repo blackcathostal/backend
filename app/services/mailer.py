@@ -323,6 +323,25 @@ def send_html_email(
         raise MailSendError(f"Error de conexión SMTP: {exc}") from exc
 
 
+def classify_delivery_failure(message: str) -> str:
+    text = (message or "").lower()
+    bounce_markers = (
+        "550",
+        "551",
+        "552",
+        "553",
+        "user unknown",
+        "mailbox unavailable",
+        "does not exist",
+        "recipient rejected",
+        "address rejected",
+        "undeliverable",
+    )
+    if any(marker in text for marker in bounce_markers):
+        return "bounced"
+    return "error"
+
+
 def iter_campaign_emails(
     account: MailAccounts,
     *,
@@ -330,6 +349,7 @@ def iter_campaign_emails(
     html_body: str,
     recipients: list[dict[str, Any]] | None,
     attachments: list[dict[str, Any]] | None = None,
+    html_for_recipient: Any | None = None,
 ) -> Iterator[dict[str, Any]]:
     items = recipients or []
     total = len(items)
@@ -353,15 +373,23 @@ def iter_campaign_emails(
         with open_smtp(account) as smtp:
             for index, item in enumerate(items, start=1):
                 email = str(item.get("email") or "").strip().lower()
+                delivery_id = item.get("delivery_id")
+                failure_kind = ""
+                failure_error = ""
                 if not email:
-                    failed.append({"email": "", "error": "Sin correo"})
+                    failed.append({"email": "", "error": "Sin correo", "kind": "error"})
+                    failure_kind = "error"
+                    failure_error = "Sin correo"
                 else:
                     try:
+                        body = html_body
+                        if callable(html_for_recipient):
+                            body = html_for_recipient(item) or html_body
                         send_html_email(
                             account,
                             to_email=email,
                             subject=subject,
-                            html_body=html_body,
+                            html_body=body,
                             attachments=attachments,
                             smtp=smtp,
                         )
@@ -378,7 +406,10 @@ def iter_campaign_emails(
                                 "remaining": total - index + 1,
                             }
                             return
-                        failed.append({"email": email, "error": message})
+                        kind = classify_delivery_failure(message)
+                        failed.append({"email": email, "error": message, "kind": kind})
+                        failure_kind = kind
+                        failure_error = message
 
                 yield {
                     "type": "progress",
@@ -388,6 +419,10 @@ def iter_campaign_emails(
                     "failed": len(failed),
                     "remaining": max(total - index, 0),
                     "email": email,
+                    "delivery_id": delivery_id,
+                    "ok": not failure_kind,
+                    "failure_kind": failure_kind,
+                    "failure_error": failure_error,
                     "percent": int(round((index / total) * 100)),
                 }
     except MailSendError as exc:
