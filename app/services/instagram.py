@@ -638,10 +638,58 @@ def _require_comment_item(item: dict[str, Any], action: str) -> None:
         raise InstagramError(f"No se puede {action} este elemento en Instagram")
 
 
-async def delete_inbox_item(item_id: str) -> None:
+def delete_dm_thread_local(*, peer_id: str | None = None, item_id: str | None = None) -> dict[str, Any]:
+    """Remove a DM conversation from the admin inbox only (never calls Instagram)."""
+    target = get_inbox_item(item_id) if item_id else None
+    if item_id and not target:
+        raise InstagramError("Item de inbox no encontrado")
+    if target and target.get("type") != "message":
+        raise InstagramError("Solo se puede borrar un hilo DM con esta acción")
+
+    guest = str(peer_id or "").strip()
+    if not guest and target:
+        guest = _guest_id(target, _own_instagram_ids())
+    if not guest and target:
+        related = _related_dm_items(target)
+        remove_ids = {str(row.get("id") or "") for row in related if row.get("id")}
+    elif guest:
+        own_ids = _own_instagram_ids()
+        remove_ids = {
+            str(row.get("id") or "")
+            for row in list_inbox(item_type="message")
+            if row.get("id") and _guest_id(row, own_ids) == guest
+        }
+    else:
+        raise InstagramError("Falta peer_id o item_id del hilo")
+
+    if not remove_ids:
+        raise InstagramError("Conversación no encontrada")
+
+    data = _load_inbox_raw()
+    items = list(data.get("items") or [])
+    kept = [row for row in items if str(row.get("id") or "") not in remove_ids]
+    data["items"] = kept
+    _save_inbox_raw(data)
+    return {"ok": True, "deleted": len(remove_ids), "peer_id": guest or None}
+
+
+async def delete_inbox_item(item_id: str, *, local_only: bool = False) -> None:
     item = get_inbox_item(item_id)
     if not item:
         raise InstagramError("Item de inbox no encontrado")
+    # DMs: admin cache only — Instagram does not allow deleting private messages via API.
+    if item.get("type") == "message":
+        delete_dm_thread_local(item_id=item_id)
+        return
+    if local_only:
+        data = _load_inbox_raw()
+        items = list(data.get("items") or [])
+        kept = [row for row in items if row.get("id") != item_id]
+        if len(kept) == len(items):
+            raise InstagramError("Item de inbox no encontrado")
+        data["items"] = kept
+        _save_inbox_raw(data)
+        return
     _require_comment_item(item, "borrar")
     for reply in list(item.get("replies") or []):
         reply_id = await _instagram_reply_id(item, reply)

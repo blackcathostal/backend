@@ -187,6 +187,15 @@ def get_inbox_thread(peer_id: str, _: Users = Depends(get_current_user)) -> dict
     return payload
 
 
+@router.delete("/inbox/thread/{peer_id}")
+def remove_inbox_thread(peer_id: str, _: Users = Depends(get_current_user)) -> dict[str, Any]:
+    """Delete one DM thread from the admin inbox only (does not call Instagram)."""
+    try:
+        return ig.delete_dm_thread_local(peer_id=peer_id)
+    except ig.InstagramError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/inbox/{item_id}")
 def get_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[str, Any]:
     item = ig.get_inbox_item(item_id)
@@ -210,9 +219,13 @@ def edit_inbox_item(
 
 
 @router.delete("/inbox/{item_id}")
-async def remove_inbox_item(item_id: str, _: Users = Depends(get_current_user)) -> dict[str, bool]:
+async def remove_inbox_item(
+    item_id: str,
+    local_only: bool = Query(default=False),
+    _: Users = Depends(get_current_user),
+) -> dict[str, bool]:
     try:
-        await ig.delete_inbox_item(item_id)
+        await ig.delete_inbox_item(item_id, local_only=local_only)
     except ig.InstagramConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ig.InstagramError as exc:
