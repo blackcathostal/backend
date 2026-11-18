@@ -1,0 +1,1195 @@
+
+<!DOCTYPE html>
+<!--[if IE 8]> <html lang="en" class="ie8"> <![endif]-->
+<!--[if !IE]><!-->
+<html lang="es">
+    <!--<![endif]-->
+    <head>
+        <meta charset="utf-8" />
+        <title>fnsManager - Zona de Propietarios</title>
+        <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
+        <meta content="Sistema de gestión para hoteles donde gestionar cómodamente toda tu venta online. Ten actualizado en tiempo real el inventario y la estrategia de tarifas para todos tus canales." name="description" />
+        <meta content="FNSRooms" name="author" />
+        <meta content="svrInd" name="SRVAPPLATAM101"/>
+        <!-- <meta http-equiv="Cache-Control" content="no-cache, mustrevalidate"> -->
+       <base href="https://adminchile1.fnsmanager.com/" />
+<form method="post" name="form_datos">
+	<input type='hidden' name='accion' value="ComprobarUser"> 
+	<input type='hidden' name='usuario' value=""> 
+	<input type='hidden' name='error' value="">
+	<input type='hidden' name='channel_id' value="">
+	<input type='hidden' name='tipo_habitacion_id' value="">    
+	<input type='hidden' name='password' value=""> 
+	<input type='hidden' name='usuario_id' value=""> 
+	<input type='hidden' name='var1' value="">  
+	<input type='hidden' name='var2' value=""> 
+	<input type='hidden' name='var3' value=""> 
+	<input type='hidden' name='var4' value=""> 
+	<input type='hidden' name='var5' value=""> 
+	<input type='hidden' name='var6' value=""> 
+	<input type='hidden' name='var7' value=""> 
+	<input type='hidden' name='var8' value=""> 
+	<input type='hidden' name='var9' value=""> 
+	<input type='hidden' name='accion_sig' value="">
+	<input type='hidden' name='estoy_sig' value=""> 
+	<input type='hidden' name='estoy' value="Entrada"> 
+	<input type='hidden' name='dia_inicio' value=""> 
+	<input type='hidden' name='mes_inicio' value="">
+	<input type='hidden' name='ano_inicio' value=""> 
+	<input type='hidden' name='dia_fin' value=""> 
+	<input type='hidden' name='mes_fin' value=""> 
+	<input type='hidden' name='ano_fin' value="">
+	<input type='hidden' name='f_inicio' value=""> 
+	<input type='hidden' name='f_fin' value="">
+	<input type='hidden' name='alert' value=""> 
+	<input type='hidden' name='nombre' value=""> 
+	<input type='hidden' name='cif' value=""> 
+	<input type='hidden' name='encargado' value=""> 
+	<input type='hidden' name='mail' value=""> 
+	<input type='hidden' name='telefono1' value=""> 
+	<input type='hidden' name='telefono2' value=""> 
+	<input type='hidden' name='fax' value=""> 
+	<input type='hidden' name='direccion' value=""> 
+	<input type='hidden' name='cp' value=""> 
+	<input type='hidden' name='ciudad_id' value=""> 
+	<input type='hidden' name='transaccion_id' value="">
+	<input type='hidden' name='reserva_id' value="">
+	<input type='hidden' name='cod_res' value="">
+	<input type='hidden' name='habitacion_id' value="">
+	<input type='hidden' name='desglose_id' value="">
+	<input type='hidden' name='portal_id' value="">
+	<input type='hidden' name='noticia_id' value="">
+	<input type='hidden' name='factura_id' value="">
+	<input type='hidden' name='cliente_id' value="">
+	<input type='hidden' name='empresa_id' value="">
+	<input type='hidden' name='estado_reserva' value="">
+	<input type='hidden' name='oferta_id' value="">
+	<input type='hidden' name='actividad_id' value="">
+	<input type='hidden' name='categoria_id' value="">
+	<input type='hidden' name='galeria_id' value="">
+	<input type='hidden' name='imagen_id' value="">
+	<input type='hidden' name='adjunto_id' value="">
+	<input type='hidden' name='fact_cliente_id' value="">
+	
+	<input type='hidden' name='regimen_id' value="">
+	<input type='hidden' name='valor_mapeo' value="">
+	<input type='hidden' name='capacidad_minima' value="">
+	<input type='hidden' name='capacidad_maxima' value="">
+	<input type='hidden' name='num_habitaciones' value="">
+	<input type='hidden' name='tipo_mensaje_mapeo' value="">
+	<input type='hidden' name='mensaje_mapeo' value="">
+	<input type='hidden' name='tarifas_ocupacion' value="">
+	<input type='hidden' name='tarifas_encoded' value="">
+	<input type='hidden' name='rate_ch_id' value="">
+	
+	<input type='hidden' name='tipo_mensaje' value="">
+	<input type='hidden' name='mensaje' value="">
+	<input type='hidden' name='nombre_tipo_habitacion' value="">
+	<input type='hidden' name='nombre_habitacion' value="">
+	<input type='hidden' name='nuevo_tipo_habitacion_id' value="">
+	
+	<input type='hidden' name='b_estado' value="1">
+	<input type='hidden' name='b_prioridad' value="2">
+	
+	<input type='hidden' name='recalcular' value="">
+	<input type='hidden' name='quincena_inicio' value="">
+	
+	<input type='hidden' name='peticion_alojamiento_id' value="">
+	<input type='hidden' name='peticion_estado' value="">
+	<input type='hidden' name='peticion_channel' value="">
+	<input type='hidden' name='peticion_fecha_inicio' value="">
+	<input type='hidden' name='peticion_fecha_fin' value="">
+	<input type='hidden' name='peticion_fecha_filtro' value="">
+	<input type='hidden' name='peticion_campo_ordenacion' value="">
+	<input type='hidden' name='peticion_orden' value="">
+	
+	<input type='hidden' name='peticion_reserva_id' value="">
+	<input type='hidden' name='moneda_tarifa_id' value="">
+	
+	<input type='hidden' name='idioma_contrato_id' value="">
+	
+	<input type='hidden' name='edi_th_nombre_tipo_habitacion_prop' value="">
+	<input type='hidden' name='edi_th_numero_habitaciones' value="">
+	<input type='hidden' name='edi_th_capacidad_minima' value="">
+	<input type='hidden' name='edi_th_capacidad_maxima' value="">
+	<input type='hidden' name='edi_th_capacidad_estandar' value="">
+	<input type='hidden' name='edi_th_orden' value="">
+	<input type='hidden' name='edi_th_array_lang' value="">
+	<input type='hidden' name='bRecargarResultados' value="">
+	<input type='hidden' name='partner_id' value="">
+	<input type='hidden' name='multihotel_alojamientos' value="" id="hidden-multihotel-alojamientos">
+	<input type='hidden' name='multihotel_aplicar' value="" id="hidden-multihotel-aplicar">
+</form>		<link href="https://adminchile1.fnsmanager.com/css/libraries/bootstrap.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/jquery-ui.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/dataTables.bootstrap.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/jquery-ui.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/style.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/style-responsive.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/animate.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/portal.css?v=1795040561" rel="stylesheet" id="theme" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/print.css?v=1795040561" rel=stylesheet type="text/css" media="print">
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/modales/modales.css" rel="stylesheet" type="text/css" />
+<script src="https://adminchile1.fnsmanager.com/js/libraries/jquery-1.9.1.min.js"></script>
+
+
+<script type='text/javascript'>
+
+/**
+ * Función que ejecuta vuelve a la acción indicada mostrando el mensaje indicado.
+ *
+ * @param String 	estoy_siguiente		Módulo al que se debe redirigir.
+ * @param String 	accion_siguiente  	Acción a la que se debe redirigir.
+ * @param Inteher	tipo				Tipo de mensaje: 0 = Error | 1 = Éxito.
+ * @param String	mensaje				Mensaje a mostrar al usuario en la pantalla destino.
+ */
+ 
+function redirige_limpiando( estoy_siguiente, accion_siguiente, tipo, mensaje )
+	{
+		document.form_datos.action							= estoy_siguiente;
+		document.form_datos.accion.value					= accion_siguiente;
+		document.form_datos.tipo_habitacion_id.value 		= "";
+		document.form_datos.habitacion_id.value				= "";
+		document.form_datos.nombre_tipo_habitacion.value	= "";
+		document.form_datos.nombre_habitacion.value			= "";
+		document.form_datos.nuevo_tipo_habitacion_id.value	= "";
+		document.form_datos.tipo_mensaje.value 				= tipo;
+		document.form_datos.mensaje.value 					= mensaje;
+		document.form_datos.submit();										
+	}
+
+</script>        
+    </head>
+	<style>
+/* Funcionalidad para ver concepto contraido y al pasar raton por encima expandir */
+.truncate-text-chars-20 { max-width:20ch}
+.truncate-text-chars-30 { max-width:30ch}
+.truncate-text-chars-50 { max-width:50ch}
+.truncate-text-chars-100 { max-width:100ch}
+
+.truncate-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; position:relative; padding-right:1.6em; }
+.truncate-full { display:none; background:#fff; white-space:normal; }
+.truncate-wrapper {  display:inline-block; }
+/* icono + sutil cuando el texto está truncado */
+.truncate-text::after{
+  content: "+";
+  position: absolute;
+  right: 0.25em;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 700;
+  font-size: 0.95em;
+  color: #000;
+  opacity: 0.18;
+  transition: opacity .12s ease;
+  pointer-events: none;
+}
+/* al hacer hover desaparece el + (porque se muestra el texto completo)*/
+/*
+.truncate-wrapper:hover .truncate-text::after { opacity: 0; }
+.truncate-wrapper:hover .truncate-full { display:block; }
+.truncate-wrapper:hover .truncate-text { display:none; } */
+
+/* Hacemos qeu valga tanto hover como click para que  sirva tb para movil */
+.truncate-toggle { position: absolute; left: -9999px; }
+/* hover sigue funcionando */
+.truncate-wrapper:hover .truncate-full { display:block; }
+.truncate-wrapper:hover .truncate-text { display:none; }
+/* click: cuando el checkbox está checked */
+.truncate-toggle:checked + .truncate-label .truncate-full { display:block; }
+.truncate-toggle:checked + .truncate-label .truncate-text { display:none; }
+/* ocultar el + en hover o cuando esté abierto por click */
+.truncate-wrapper:hover .truncate-text::after,
+.truncate-toggle:checked + .truncate-label .truncate-text::after { opacity: 0; }
+</style>    <body class='page-loguin' id="general">
+		<!-- begin #page-loader -->
+		<div id="page-loader" class="fade in"><span class="spinner"></span></div>
+		<!-- end #page-loader -->
+	
+    				<!-- begin #page-container -->
+    				<div id="page-container" class="fade  ">
+		<div class="login login-with-news-feed">
+	<!-- begin news-feed -->
+    <div class="news-feed">
+    	<div class="news-image">
+			<img src="https://adminchile1.fnsmanager.com/img/recursos/fondologuin_v3.jpg" data-id="login-cover-image" alt="" />
+        </div>
+        <div class="news-caption">
+        	<h4 class="caption-title">Bienvenido a FNSrooms</h4>
+            <p>
+            	La plataforma de gestión que te permitirá controlar tu alojamiento desde un único punto.            </p>
+        </div>
+	</div>
+
+					<script type='text/javascript'>						 
+						document.form_datos.action 			= "es/MenuAdmin";
+						document.form_datos.accion.value 	= "";
+						document.form_datos.var1.value 		= "";
+						document.form_datos.var8.value 		= "";
+						document.form_datos.error.value 	= "";
+						document.form_datos.submit();					
+					</script>
+</div>	
+			<div class="modal"></div>
+			
+					<a href="javascript:;" class="btn btn-icon btn-circle btn-success btn-scroll-to-top fade" data-click="scroll-top"><i class="fa fa-angle-up"></i></a>
+				</div>
+
+
+<link href="https://adminchile1.fnsmanager.com/css/libraries/nuevas-funcionalidades.css?v=1795040562" rel="stylesheet" />
+<!-- ================== JS BASE  ================== -->
+<script src="https://adminchile1.fnsmanager.com/js/libraries/jquery-migrate-1.1.0.min.js"></script>
+<script src="https://adminchile1.fnsmanager.com/js/libraries/jquery-ui.min.js"></script>
+<script src="https://adminchile1.fnsmanager.com/js/libraries/bootstrap.min.js"></script>
+
+<!-- el siguiente js nos sirve para ir hacia arriba en el scroll-->
+<script src="https://adminchile1.fnsmanager.com/js/libraries/jquery.slimscroll.min.js"></script>        
+<!-- ================== END BASE JS ================== -->
+
+<!-- ================== PAGE LEVEL JS ================== -->
+<script src="https://adminchile1.fnsmanager.com/js/libraries/apps.min.js"></script>
+<!-- ================== END PAGE LEVEL JS ================== -->
+
+<!-- ================== SCRIPT CUSTOMIZADO ================== -->
+<script src="https://adminchile1.fnsmanager.com/js/libraries/custom-js.js?v=1795040562"></script>
+<script src="https://adminchile1.fnsmanager.com/js/libraries/custom-tab.js"></script>
+<script src="https://adminchile1.fnsmanager.com/js/libraries/menu.fixed.js"></script>
+<script src="https://adminchile1.fnsmanager.com/js/libraries/menu_movil.min.js"></script>
+<!-- ================== FIN SCRIPT CUSTOMIZADO ================== -->
+
+<script>  
+ $(document).ready(function () {
+     App.init();
+
+  	// Inicializar los tabs laterales
+ 	customTabs.init();
+			AlertaPagosPentientes();
+		
+
+    if( $( '#dialog-pagos-pendientes' ).length > 0 )
+    	{
+    		$('#dialog-pagos-pendientes').modal('show');
+	    }
+
+    if( $( '#dialog-avisos-generales' ).length > 0 )
+		{
+			$('#dialog-avisos-generales').modal('show');
+	    }
+
+    if( $( '#dialog-redirect-zona' ).length > 0 )
+	    {
+    		$( '#dialog-redirect-zona' ).modal( 'show' );
+	    }
+	    
+            // Deshabilitamos el sortable de los paneles
+            $('.ui-sortable').sortable('disable');
+ });
+
+// Evento que sale cuando cerramos el modal
+$( '#dialog' ).on('hidden.bs.modal', function (e) {
+	document.form_datos.target = '_self';
+});
+</script>
+
+<script type='text/javascript'>
+function genera_enlace(modulo)
+	{
+				return "es/" + modulo;
+			}
+ function cargar( modulo, accion )
+ {
+	 document.form_datos.action = genera_enlace(modulo);
+	 document.form_datos.accion.value = accion;
+	 document.form_datos.var1.value = "";
+	 document.form_datos.var2.value = "";
+	 document.form_datos.var3.value = "";
+	 document.form_datos.var4.value = "";
+	 document.form_datos.channel_id.value = "";
+	 document.form_datos.tipo_habitacion_id.value = "";
+	 document.form_datos.cliente_id.value = "";
+	 document.form_datos.alert.value = "";
+	 document.form_datos.mensaje.value = "";
+	 document.form_datos.target = "";
+	 document.form_datos.submit();
+ }
+ 
+ function cambiar_idioma( ruta_idioma, accion )
+ {
+	 document.form_datos.action = ruta_idioma;
+	 document.form_datos.accion.value = accion;
+	 document.form_datos.method = "post";
+	 document.form_datos.target = "";
+	 document.form_datos.submit();
+ }
+
+ function edit_elemento( elemento_id, modulo, accion, destino )
+ {
+ 	destino 	= (typeof destino === "undefined" || destino === null) ? '' : destino;
+	 document.form_datos.action = genera_enlace(modulo);
+	 document.form_datos.accion.value = accion;
+	 document.form_datos.var1.value = elemento_id;
+	 document.form_datos.var2.value = "";
+	 document.form_datos.var3.value = "";
+	 document.form_datos.var4.value = "";
+	 document.form_datos.channel_id.value = "";
+	 document.form_datos.tipo_habitacion_id.value = "";
+	 document.form_datos.cliente_id.value = "";
+	 document.form_datos.empresa_id.value = "";
+	 document.form_datos.alert.value = "";
+	 document.form_datos.mensaje.value = "";
+	 document.form_datos.dia_inicio.value = "";
+	 document.form_datos.mes_inicio.value = "";
+	 document.form_datos.ano_inicio.value = "";
+	 document.form_datos.dia_fin.value = "";
+	 document.form_datos.mes_fin.value = "";
+	 document.form_datos.ano_fin.value = "";
+	 document.form_datos.f_inicio.value = "";
+	 document.form_datos.f_fin.value = "";
+
+	if(modulo=="Validacion" || destino!="")
+		{
+		document.form_datos.target			= "_blank";
+		}
+	else
+		{
+			document.form_datos.target = "";
+	 	}
+	 
+	 document.form_datos.submit();
+ }
+ function edit_elemento_2( elemento_id, modulo, accion )
+ {
+	 document.form_datos.action = genera_enlace(modulo);
+	 document.form_datos.accion.value = accion;
+	 document.form_datos.var2.value = elemento_id;
+	 document.form_datos.target = "";
+	 document.form_datos.submit();
+ }
+ function edit_elemento_3( modulo, accion, var2, var3 )
+ {
+	 document.form_datos.action = genera_enlace(modulo);
+	 document.form_datos.accion.value = accion;
+	 document.form_datos.var2.value = var2;
+	 document.form_datos.var3.value = var3;
+	 document.form_datos.target = "";
+	 document.form_datos.submit();
+ }
+ function edit_elemento_portal( elemento_id, modulo, accion )
+ {
+	 document.form_datos.action = genera_enlace(modulo);
+	 document.form_datos.accion.value = accion;
+	 document.form_datos.portal_id.value = elemento_id;
+	 document.form_datos.channel_id.value = "";
+	 document.form_datos.tipo_habitacion_id.value = "";
+	 document.form_datos.cliente_id.value = "";
+	 document.form_datos.alert.value = "";
+	 document.form_datos.mensaje.value = "";
+	 document.form_datos.target = "";
+	 document.form_datos.submit();
+ }
+ function edit_elemento_facturacion( elemento_id, modulo, accion )
+ {
+	 document.form_datos.action = genera_enlace(modulo);
+	 document.form_datos.accion.value = accion;
+	 document.form_datos.fact_cliente_id.value = elemento_id;
+	 document.form_datos.channel_id.value = "";
+	 document.form_datos.tipo_habitacion_id.value = "";
+	 document.form_datos.cliente_id.value = "";
+	 document.form_datos.alert.value = "";
+	 document.form_datos.mensaje.value = "";
+	 document.form_datos.target = "";
+	 document.form_datos.submit();
+ }
+ function cambiar_alojamiento( elemento_id, modulo, accion )
+ {
+	// Borramos las tabs laterales
+	sessionStorage.removeItem( 'checkin' );
+	sessionStorage.removeItem( 'inhouse' );
+	sessionStorage.removeItem( 'roomlist' );
+	sessionStorage.removeItem( 'checkout' );
+	sessionStorage.removeItem( 'ultimaActualizacioncheckin' );
+	sessionStorage.removeItem( 'ultimaActualizacioncheckout' );
+	sessionStorage.removeItem( 'ultimaActualizacioninhouse' );
+	sessionStorage.removeItem( 'ultimaActualizacionroomlist' );
+	 
+	 document.form_datos.action = genera_enlace(modulo);
+	 document.form_datos.accion.value = accion;
+	 document.form_datos.var1.value = elemento_id;
+	 document.form_datos.var2.value = '';
+	 document.form_datos.channel_id.value = "";
+	 document.form_datos.tipo_habitacion_id.value = "";
+	 document.form_datos.cliente_id.value = "";
+	 document.form_datos.alert.value = "";
+	 document.form_datos.mensaje.value = "";
+	 document.form_datos.target = "";
+	 document.form_datos.submit();
+ }
+
+ function recarga_th_channel( ruta, channel_id, lang, estoy ) 
+ { 
+	 var lang = 'es';
+	 var alojamiento_id = '';
+
+	 $.get(ruta + "ajax/recarga_th_channel.php", {'ruta':ruta + "&lang=" + lang + "&ajax=1&channel_id=" + channel_id + "&alojamiento_id=" + alojamiento_id + "&estoy=" + estoy})
+
+		 document.getElementById('th_channel').innerHTML = '<p class="load">Cargando...</p>'; 
+
+	 var myConn = new XHConn();
+
+	 if( !myConn )
+	 {
+		 alert("XMLHTTP no esta disponible. Inténtalo con un navegador más actual.");
+	 } 
+
+	 var peticion = function (oXML) {  document.getElementById('th_channel').innerHTML = oXML.responseText; }; 
+	 myConn.connect(ruta+"ajax/recarga_th_channel.php", "GET", "ruta=" + ruta + "&lang=" + lang + "&ajax=1&channel_id=" + channel_id + "&alojamiento_id=" + alojamiento_id + "&estoy=" + estoy, peticion); 
+ }
+
+ function cambia_pestana_channel( modulo, accion, elemento_id, channel_id, destino )
+ {
+ 	destino 	= (typeof destino === "undefined" || destino === null) ? '' : destino;
+	 document.form_datos.action = genera_enlace(modulo);
+	 document.form_datos.accion.value=accion;
+	 document.form_datos.var1.value=elemento_id;
+	 document.form_datos.channel_id.value=channel_id;
+	 document.form_datos.alert.value="";
+	 document.form_datos.mensaje.value="";
+	if(destino!="")
+			{
+			document.form_datos.target=destino;
+			}
+		else
+    		{
+    		document.form_datos.target='';
+    		}
+	 document.form_datos.submit();
+ }
+
+ function cambia_quincena( sentido )
+ {
+	 var mes_inicio = document.form_fechas.mes_inicio.value;
+	 var ano_inicio = document.form_fechas.ano_inicio.value;	
+	 
+	 if( sentido == "subir" )
+	 {
+		 if( document.form_fechas.quincena_inicio.value == "1" )
+		 {
+			 document.form_fechas.quincena_inicio.value = "2";
+		 }
+		 else
+		 {
+			 document.form_fechas.quincena_inicio.value = "1";
+
+			 if( mes_inicio == 12 )
+			 {
+				 document.form_fechas.mes_inicio.value = 1;
+				 document.form_fechas.ano_inicio.value = parseInt(ano_inicio) + 1;
+			 }
+			 else
+			 {
+				 document.form_fechas.mes_inicio.value = parseInt(mes_inicio) + 1;
+			 }
+		 }
+	 }
+	 else
+	 {
+		 if( document.form_fechas.quincena_inicio.value == "1" )
+		 {
+			 document.form_fechas.quincena_inicio.value = "2";
+
+			 if( mes_inicio == 1 ) 
+			 {
+				 document.form_fechas.mes_inicio.value = 12;
+				 document.form_fechas.ano_inicio.value = parseInt(ano_inicio) - 1;	
+			 }
+			 else
+			 {
+				 document.form_fechas.mes_inicio.value = parseInt(mes_inicio) - 1;
+			 }	
+		 }
+		 else
+		 {
+			 document.form_fechas.quincena_inicio.value = "1";
+		 }
+	 }
+	 
+	 document.form_fechas.submit()
+ }
+
+ function cambia_mes( sentido )
+	{
+		var mes_inicio = document.form_fechas.mes_inicio.value;
+		var ano_inicio = document.form_fechas.ano_inicio.value;	
+
+		if( sentido == "subir" )
+			{
+				if( mes_inicio == 12 )
+					{
+						document.form_fechas.mes_inicio.value = 1;
+						document.form_fechas.ano_inicio.value = parseInt(ano_inicio) + 1;
+					}
+				else
+					{
+						document.form_fechas.mes_inicio.value = parseInt(mes_inicio) + 1;
+					}
+			}
+		else
+			{
+				if( mes_inicio == 1 )
+					{
+						document.form_fechas.mes_inicio.value = 12;
+						document.form_fechas.ano_inicio.value = parseInt(ano_inicio) - 1;	
+					}
+				else
+					{
+						document.form_fechas.mes_inicio.value=parseInt(mes_inicio) - 1;
+					}	
+			}
+		
+		document.form_fechas.submit()
+	}
+ 
+ function selecciona_mes()
+ {
+	 var error = "";
+	 var mensaje = "";
+	 var mes_inicio = document.form_fechas.mes_inicio.value;
+	 var ano_inicio = document.form_fechas.ano_inicio.value;
+	 var mes_actual = 11;
+	 var ano_actual = 2026;
+
+	 // Variables para la fecha de consulta	
+	 if( ano_actual == ano_inicio && mes_actual > mes_inicio )
+	 {
+		 error = true;
+	 }
+	 
+	 if( error == false )
+	 {         
+		 document.form_fechas.submit()
+	 }
+	 else
+	 {
+		 window.alert("El mes debe de ser posterior al actual")
+	 } 
+ }
+ function selecciona_mes_th()
+	{
+	var error="";
+	var mensaje="";
+	var mes_inicio=document.form_fechas.mes_inicio.value;
+	var ano_inicio=document.form_fechas.ano_inicio.value;
+	var mes_actual=11;
+	var ano_actual=2026;
+
+	document.form_fechas.tipo_habitacion_id.value=document.form_fechas.var2.value;
+	//Variables para la fecha de consulta	
+	if (ano_actual==ano_inicio && mes_actual>mes_inicio){error=true}
+			
+	if(error==false)
+	  	{         
+	  	document.form_fechas.submit()
+	  	}
+	else
+	  	{
+		window.alert("El mes debe de ser posterior al actual")
+	  	} 
+	}
+
+ function suplantar_propietario( alojamiento_id, usuario, clave, url_sig, accion_sig, enlace )
+	{
+		var enlace = ( typeof( enlace ) == undefined || enlace == '' ) ? '' : enlace;
+				
+	
+		// Borramos las tabs laterales
+		sessionStorage.removeItem( 'checkin' );
+		sessionStorage.removeItem( 'inhouse' );
+		sessionStorage.removeItem( 'roomlist' );
+		sessionStorage.removeItem( 'checkout' );
+		sessionStorage.removeItem( 'ultimaActualizacioncheckin' );
+		sessionStorage.removeItem( 'ultimaActualizacioncheckout' );
+		sessionStorage.removeItem( 'ultimaActualizacioninhouse' );
+		sessionStorage.removeItem( 'ultimaActualizacionroomlist' );
+			
+		document.form_datos_prop.action				= enlace;
+		document.form_datos_prop.login.value		= usuario;
+		document.form_datos_prop.rpassword.value	= clave;
+		document.form_datos_prop.url_sig.value		= url_sig;
+		document.form_datos_prop.accion_sig.value	= accion_sig;
+		document.form_datos_prop.var1.value			= alojamiento_id;
+		document.form_datos_prop.accion.value		= "ComprobarUser";
+		//document.form_datos_prop.target			= "_blank";
+		document.form_datos_prop.submit();
+	}
+
+// Función que devuelve el precio de tarifa 
+function dame_precio_tarifa( iAlojamientoId )
+	{
+		var iUsuarioId 		= '';
+		var sLang 			= 'es';
+
+		$.get( 'ajax/dame_tarifa_walkin.php', { lang: sLang, iAlojamientoId: iAlojamientoId, usuario_id: iUsuarioId }, function( data ){
+			$( 'body' ).append( data );
+
+			// Evento que sale cuando cerramos el modal
+			$( '#modal_tarifa_walkin' ).modal( 'show' );
+
+			// Evento que sale cuando cerramos el modal
+			$( '#modal_tarifa_walkin' ).live('hidden.bs.modal', function (e) {
+				$( '#modal_tarifa_walkin' ).remove();
+			});
+		});
+	}
+
+//Funcion que comprueba si hay pagos pendientes.
+function AlertaPagosPentientes()
+{
+	var iUsuarioId 		= '';
+	var sLang 			= 'es';
+	var iAlojamientoId 	= '';
+	var sEstoy		 	= 'Entrada';
+	bAjaxStart		= '0';
+	
+	$.get( 'ajax/alerta_pagos_pendientes.php', { lang: sLang, iAlojamientoId: iAlojamientoId, usuario_id: iUsuarioId, sEstoy: sEstoy,bAjaxStart: bAjaxStart }, function( data ){
+		//Si tiene cargos pendientes, cargamos el modal y lo mostramos.
+		if( data != 'null' )
+    		{
+    			oData = JSON.parse( data );
+    		}
+		else
+    		{
+				oData = {'bMostrarAlerta':'0'};
+    		}
+
+		//console.log( oData.cuerpo )
+		if( $( '#dialog-pagos-pendientes' ).length > 0 )
+		{
+			$( '#dialog-pagos-pendientes' ).remove();
+		}
+		
+ 		if( typeof( oData.bMostrarAlerta ) != 'undefined' && oData.bMostrarAlerta == '1' )
+			{
+ 				$("div#content").prepend( oData.cuerpo );
+ 				//Cargamos las datatables.
+ 				$("#dialog-pagos-pendientes > div > div > div.modal-body > div:nth-child(2) > div > table").DataTable();
+ 				$("#dialog-pagos-pendientes > div > div > div.modal-body > div:nth-child(3) > div > table").DataTable();
+				//$( '#dialog-pagos-pendientes > div > div > div.modal-body' ).append(  );
+				$( '#dialog-pagos-pendientes' ).modal( 'show' );
+			}
+ 		else
+ 		{
+ 			$( '#dialog-pagos-pendientes' ).modal( 'hide' );
+ 	 	}
+	});
+	
+}
+
+// Función que pospone el pago
+function posponer_pago()
+	{
+		var iUsuarioId 		= '';
+		var sLang 			= 'es';
+		var iAlojamientoId 	= '';
+
+		$.get( 'ajax/posponer_pago.php', { lang: sLang, iAlojamientoId: iAlojamientoId, usuario_id: iUsuarioId }, function( data ){
+			oData = JSON.parse( data );
+			
+			if( oData.bDesbloquea == '1' )
+				{
+					// Evento que sale cuando cerramos el modal
+					$( '#dialog-pagos-pendientes' ).modal( 'hide' );
+
+					$( '#dialog-desbloqueo-solicitado' ).modal( 'show' );
+				}
+		});
+	}
+
+
+function exportar_plano( accion )
+	{
+	document.export_plano.action = "es/ExportacionExcel";	
+	document.export_plano.accion.value = accion;
+	document.export_plano.submit();
+	}
+	
+	/*
+	FORZAR MAX DECIMALES EN INPUT
+	si hay select con moneda, toma el moneda_id de ese val, si no de la moneda_id que le pasemos
+	transforma , en . por si alguno mete , para decimales
+	si el importye tiene algo que no sea , o . o numero devuelve vacio
+	devuelve el importe redondeado segun los decimales de la moneda
+	*/
+	function controlar_decimales( id_input_importe, moneda_id, id_select_moneda="" ){
+		let numeroDecimales=0;
+		let select_moneda;
+		let input_importe = $("#" + id_input_importe);
+		let importe = input_importe.val();
+		
+		importe = importe.replace(",",".");
+		const regexpString = /[^0-9\.]*/;
+		var reg = new RegExp(/^[0-9\.]+$/);
+
+		//comprobamos que tenga solo un umero o numero con . y decimales
+		if(reg.test(importe)){
+			importe = importe.replace(regexpString,"");
+    		if(id_select_moneda!=""){
+    			select_moneda = $("#" + id_select_moneda);
+        		if(select_moneda.length){
+        			if(select_moneda.val()!=""){
+        				moneda_id = select_moneda.val();
+        			}
+        		}
+    		}
+		}else{
+			//si tiene algo que no sea numero o . devolvemos vacio
+			input.value="";
+			return;
+		}
+    	if(importe=='undefined' || importe==""){
+    		return;
+    	}
+    	if(moneda_id==1 || moneda_id==2 || moneda_id==3 || moneda_id==6 || moneda_id==8 || moneda_id==11){
+    		numeroDecimales=2;
+    	}else{
+    		numeroDecimales=0;
+    	}	
+    	importe = number_format(importe, numeroDecimales, ".", "");
+    	input_importe.val(importe);
+    	
+    }
+    
+    function number_format (number, decimals, dec_point, thousands_sep) {
+        // Strip all characters but numerical ones.
+        number = (number + '').replace(/[^0-9+\-Ee.]/g, '');
+        var n = !isFinite(+number) ? 0 : +number,
+            prec = !isFinite(+decimals) ? 0 : Math.abs(decimals),
+            sep = (typeof thousands_sep === 'undefined') ? ',' : thousands_sep,
+            dec = (typeof dec_point === 'undefined') ? '.' : dec_point,
+            s = '',
+            toFixedFix = function (n, prec) {
+                var k = Math.pow(10, prec);
+                return '' + Math.round(n * k) / k;
+            };
+        // Fix for IE parseFloat(0.55).toFixed(0) = 0;
+        s = (prec ? toFixedFix(n, prec) : '' + Math.round(n)).split('.');
+        if (s[0].length > 3) {
+            s[0] = s[0].replace(/\B(?=(?:\d{3})+(?!\d))/g, sep);
+        }
+        if ((s[1] || '').length < prec) {
+            s[1] = s[1] || '';
+            s[1] += new Array(prec - s[1].length + 1).join('0');
+        }
+        return s.join(dec);
+    }
+	
+	// MOSTRAR MODAL CON REPÀRTO POR ITEM DE COBROS
+	$('body').on('click','.icono-info-reparto-item', function(){
+		var lang='es';
+		var usuario_id='';		
+    	var cobro_id = $(this).data("cobro_id");
+    	var pago_id = $(this).data("pago_id");
+    	var alojamiento_id = $(this).data("alojamiento_id");
+    	var reserva_id = $(this).data("reserva_id");
+    	var moneda_reserva_id  = $(this).data("moneda_reserva_id");
+    	var oData= {
+    		cobro_id: cobro_id,
+    		pago_id: pago_id,
+    		alojamiento_id: alojamiento_id,
+    		lang: lang,
+    		usuario_id: usuario_id,
+    		reserva_id: reserva_id,
+    		moneda_reserva_id: moneda_reserva_id,
+    	};
+    	
+    	//siempre sera en celda
+    	var $filaTabla = $(this).parent().parent();
+    	
+    	$filaTabla.addClass("resaltar");
+    	
+    	$.post('ajax/modal.cobros.reparto.php',oData, function(resp) {
+    		$('body').append(resp);
+    		$( '#modal_cobro_reparto' ).modal( 'show' );
+        	$('#modal_cobro_reparto').on('hidden.bs.modal', function (e) {
+              $('#modal_cobro_reparto').remove();
+              $filaTabla.removeClass("resaltar");
+            })
+        });
+    });
+
+	/*
+	https://fnsrooms.atlassian.net/browse/FNST-9597
+	Muestra modal con los cobros que cubren un item (cobran)
+	Lo hacemos generico para pooder poner en cualquier sitio / edit_elemento
+	Requisitos:
+	Tiene que tener clase ver-cobros-asociados-item
+	data-item_id="{id del item, cargo o detail}" 
+	data-item_tipo="{detail / cargo}"
+	data-item_padre="{reserva / evento}
+	*/
+	$('body').on('click','.ver-cobros-asociados-item', function(){
+		const oData = { ...this.dataset,
+			lang,
+    		usuario_id,
+		 };
+		 
+    	/*
+		si es una celda de tabla en segundo parent, resaltar la fila
+		*/
+		var elementoEstaEnTabla = false;
+		let $filaTabla = null;
+		if($(this).parent().parent().is("tr")){
+			$filaTabla = $(this).parent().parent();
+			elementoEstaEnTabla = true;
+			$filaTabla.addClass("resaltar");
+		}
+    	$.post('ajax/modal.cobros.asociados.item.php',oData, function(resp) {
+    		$('body').append(resp);
+    		$( '#modal_cobros_asociados' ).modal( 'show' );
+        	$('#modal_cobros_asociados').on('hidden.bs.modal', function (e) {
+              $('#modal_cobros_asociados').remove();
+			  if(elementoEstaEnTabla)
+			  {
+              	$filaTabla.removeClass("resaltar");
+			  }
+            })
+        });
+    });
+	/*
+	https://fnsrooms.atlassian.net/browse/FNST-9597
+	Funcionalidad para hacer scroll al cobro dentro de la reserva si dan click en la modal de cobrtos de un elemento
+	El elemento que acciona la funcionalidad tiene clase scroll_cobros_id y data-cobro_id
+	El elemento al que hay que hace scroll tiene id="cobro_{cobro_id}" es un tr y esta dentro del elemento id=datos_cobros
+	*/
+	$("body").on("click", ".scroll_cobros_id", function(){
+		const cobro_id = $(this).data("cobro_id");
+		const contenedorCobros = $("#datos_cobros");
+		const elementoCobro = $("#datos_cobros").find("#cobro_" + cobro_id);
+		const btnFuncionalidadesCobro = $("#datos_cobros").find("#cobro_" + cobro_id).find(".btn-group");
+		if(elementoCobro.length)
+		{
+			//cerramos modal
+			$("#modal_cobros_asociados").modal("hide");
+			//hacemos scroll al elemento
+			$('html, body').animate({
+				scrollTop: elementoCobro.offset().top - 300
+				
+			}, 1000);
+			//resaltamos el elemento un momento
+			elementoCobro.addClass("resaltar","fast");
+			//abrimos las funcionalidades del cobro
+			setTimeout(function(){
+				btnFuncionalidadesCobro.addClass('open');
+			}, 1100);
+			//quitamos la clase resaltada despues de x tiempo
+			setTimeout(function(){
+				elementoCobro.removeClass("resaltar","fast");
+			}, 5000);
+		}
+	});
+</script>
+<form name="form_datos_prop" method="POST">
+	<input name="login" type="hidden"/>
+	<input name="rpassword" type="hidden"/>
+	<input name="url_sig" type="hidden"/>
+	<input name="accion_sig" type="hidden"/>
+	<input name="accion" type="hidden"/>
+	<input name="var1" type="hidden"/>
+</form>
+
+<script>
+
+//CONTROLAR POPOVER FUNCIONALIDADES NUEVAS
+function getPos(el) {
+     var rect=el.getBoundingClientRect();
+     var w = $(el).width();
+     var maxW = $( window ).width();
+     
+     return {left:rect.left,top:rect.top, w:w ,maxw :maxW};
+}
+ 
+//control botones
+//cerrar
+$("body").on("click", ".btn-cerrar-popover-nf", function(e){
+	identificador = $(this).data("identificador");
+	$elementoNuevo = $('.nueva-funcionalidad[data-identificador="'+ identificador + '"]');
+	$elementoNuevo.popover('destroy');
+	$elementoNuevo.removeClass('nf-resaltar-elemento');
+});
+//guardar no mostrar mas
+$("body").on("click", ".btn-nomostrarmas-popover-nf", function(e){
+	identificador = $(this).data("identificador");
+	$elementoNuevo = $('.nueva-funcionalidad[data-identificador="'+ identificador + '"]');
+	var oData = { "member_id": "", "identificador": identificador};
+	$.post( 'ajax/avisos.nuevas.funcionalidades.nomostrarmas.php', oData, function( data ){
+       	$elementoNuevo.popover('destroy');
+		$elementoNuevo.removeClass('nf-resaltar-elemento');
+	});
+	
+});
+$(window).load(function () {
+	$elementoNuevo = $(".nueva-funcionalidad");
+	$elementoNuevo.each(function(i,actual){
+    	identificador = $(actual).data("identificador");
+    	$popOverActual = $('.nueva-funcionalidad[data-identificador="'+ identificador + '"]');
+    	$popOverActual = $(actual);
+    	
+    	//buscamos si tenemos el elemento en BBDD
+    	
+    	var oData = { "member_id": "", "identificador": identificador};
+    	$.ajaxSetup({async: false});
+      	 $.post( 'ajax/avisos.nuevas.funcionalidades.buscar.php', oData, function( data ){
+       		data = JSON.parse(data);
+    		if(data["mostrar"]>0){
+    			//hay q añadir los botones
+    			$htmlContainer= $("<div></div>");
+    			$popoverContent = $(data['html_popover']);
+    			$htmlContainer.html($popoverContent);
+    			$btnContainer = $("<div class='container-botones'></div>");
+    			$btnNoMostar = $("<button class='btn btn-sm btn-verde pull-right btn-nomostrarmas-popover-nf' data-identificador='" + identificador + "'>Ok, no volver a mostrar</button>");
+    			$btnCerrar = $("<button class='btn btn-sm btn-default pull-right btn-cerrar-popover-nf' data-identificador='" + identificador + "'>Cerrar</button>");
+    			$btnContainer.append($btnNoMostar);
+    			$btnContainer.append($btnCerrar);
+    			$htmlContainer.append($btnContainer);
+    			
+    			var $popover = $popOverActual.popover({
+                  	placement: function (context, source) {
+                        var position = getPos(source);
+                        
+                        if(position.maxw-position.w>500)
+                        {
+                   			if (position.left > 515) {
+                                return "left";
+                            }
+                    
+                            if (position.left < 515) {
+                                return "right";
+                            }
+                        }
+                        if (position.top < 110){
+                            return "bottom";
+                        }
+                
+                    	return "top";
+                    },
+                    html : true,
+                    content: $htmlContainer.html(),
+                    title: data['titulo_popover'],
+                    container: 'body'
+          		}).data('bs.popover')
+                  .tip()
+                  .addClass('popover-nueva-funcionalidad hidden-print');
+                  
+                $popOverActual.popover('show');
+                
+                $popOverActual.addClass('nf-resaltar-elemento');
+                $htmlContainer.remove();
+                $popover.on("hidden.bs.popover", function(e) {
+                    $popOverActual.removeClass('nf-resaltar-elemento');
+                });
+    		}
+    	});
+    	$.ajaxSetup({async: true});  
+    });
+});
+
+</script>
+
+<script>
+function regarga_combo_destino(pais_id, elemento_id, tipo, id, valorselect)
+	{
+	var data = {pais_id:pais_id, elemento_id:elemento_id, tipo:tipo, valorselect: valorselect}
+
+	$.get("ajax/recarga_combo_destino.php", data,function(responseText){
+			$('#'+id).html(responseText);
+		    
+		}
+	);
+	}
+function busca_nombre_destino_id(elemento_id, elemento)
+	{
+	var data = {elemento_id:elemento_id, elemento:elemento}
+
+	$.get("ajax/busca_nombre_destino_id.php", data,function(responseText){
+		if(responseText!="")
+			{
+			return responseText;
+		    }
+		else
+			{
+			return elemento_id;
+			}
+		}
+	);
+	}
+function recarga_ofertas_alojamiento(elementoid, alojamiento_id, opciondefault, fecha_inicio, fecha_fin, brestricciones)
+	{
+	var oData = {lang: 'es', alojamiento_id:alojamiento_id, opciondefault:opciondefault, fecha_inicio: fecha_inicio, fecha_fin:fecha_fin, brestricciones:brestricciones};
+
+	$.post("ajax/recargar_ofertas_alojamiento.php", oData, function( responseText )
+		{
+		if(responseText!="")
+			{
+			$('#'+elementoid).html(responseText);
+			}
+		});
+	}
+</script><script>
+
+
+function mostrar_modal_ayuda(id)
+		{
+
+		var usuario_id=''; 
+		var lang='es';
+		var data = {lang:lang,id:id,usuario_id:usuario_id}
+
+		$.get("ajax/modal_abrir_ayuda.php", data,function(responseText){
+				$('body').append(responseText)
+				
+				$('#modal_abrir_ayuda').modal('show');
+
+				$('#modal_abrir_ayuda').live('hidden.bs.modal', function (e) {
+					$('#modal_abrir_ayuda').remove();
+				});
+			
+			    
+			}
+		);
+		}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</script> <script>
+	
+	/*
+	https://fnsrooms.atlassian.net/browse/FNST-9301
+	Scripts funcionalidad fijar importe, vamos a intentar encapsularlo para que valga en todos los sitios
+	*/
+	/*
+	Al hacer clic en el boton unlock funcionalidad-fijar-importe que se muestre la zona de fijar importe y el candado se ponga cerrado lock
+	*/
+	$("body").on("click","#funcionalidad-fijar-importe", function(){
+		//primero comprobamos si esta cerrado o abierto, para mostrar u ocultar la zona y cambiar el icono
+		estabaCerrado = false;
+		if($(this).find("i").hasClass("fa-lock"))
+		{
+			estabaCerrado = true;
+		}
+		//si esta cerrado se mostraba zona, la ocultamos y sino la mostramos
+		if(estabaCerrado)
+		{
+			$(".zona-fijar-importe").hide();
+			$(this).find("i").removeClass("fa-lock").addClass("fa-unlock");
+		}
+		else
+		{
+			$(".zona-fijar-importe").show();
+			$(this).find("i").removeClass("fa-unlock").addClass("fa-lock");
+		}
+		
+		
+		
+	});
+
+	</script>
+	<script type='text/javascript'>
+
+	// Funcion que comprueba que esten todos los datos introducidos correctamente y envia el formulario si lo estan.
+	
+	function comprobar_entrada()
+		{
+			var error 		= false;	
+			var mensaje 	= "";
+			var login 		= document.validacion.login.value;
+			var rpassword 	= document.validacion.rpassword.value;
+			//var width		= screen.width;
+			//var height		= screen.height;
+			
+			var width		= $(window).width();
+			var height		= $(window).height();
+
+			
+			document.validacion.action 			= "es/Entrada";
+			document.validacion.width.value	= width;
+			document.validacion.height.value = height;
+			document.validacion.accion.value = "ComprobarUser";
+			document.validacion.submit();
+		}
+	function recuperar_password()
+		{
+		document.validacion.action 			= "es/Entrada";
+		document.validacion.accion.value = "RecuperarPassword";
+		document.validacion.submit();
+		}	
+	function recuperar_password_enviar()
+		{
+		document.validacion.action 			= "es/Entrada";
+		document.validacion.accion.value = "RecuperarPasswordEnvio";
+		document.validacion.submit();
+		}	
+	function volver_inicio()
+		{
+		document.validacion.action 			= "es/Entrada";
+		document.validacion.accion.value = "";
+		document.validacion.submit();
+		}	
+	function guardar_nueva_password()
+		{
+		if(document.validacion.fpw.value==1 && document.validacion.token.value!="" && document.validacion.password.value!=""  && document.validacion.password.value==document.validacion.rep_password.value)
+			{
+			document.validacion.action 			= "es/Entrada";
+			document.validacion.accion.value 	= "RecuperarPasswordGuardar";
+			document.validacion.submit();
+			}
+		else
+			{
+			if(document.validacion.fpw.value==0)
+				{alert("La contraseña debe de cumplir los criterios de seguidad exigidos. La contraseña debe contener al menos <strong>8 caracteres e incluir un número, una letra mayúscula, una letra minúscula y un caracter especial.</strong>")}
+			else
+				{alert("El valor del campo contraseña no coinciden");}
+			}
+		}		
+
+
+		    
+</script>	</body>
+</html><script>function validarSiNumeroentero(numero,objeto_id,valor_defecto,valor_minimo){valor_minimo=parseInt(valor_minimo);if(isNaN(numero)||numero==""||numero==" "||numero=="  "||numero<valor_minimo){alert("¡ATENCIÓN! El valor "+numero+" no es válido");var error=1;document.getElementById(objeto_id).value=valor_defecto}else{var error=0}return error}function validarSiNumero(numero,objeto_id,valor_defecto,valor_minimo){var error=0;valor_minimo=parseInt(valor_minimo);decallowed=2;if(isNaN(numero)||numero==""||numero==" "||numero=="  "||numero<valor_minimo){error=1}else{if(numero.indexOf('.')==-1)numero+=".";dectext=numero.substring(numero.indexOf('.')+1,numero.length);if(dectext.length>decallowed){error=1}}if(error==1){alert("¡ATENCIÓN! El valor "+numero+" no es válido");error=1;document.getElementById(objeto_id).value=valor_defecto}return error}function validar_Numero_Rango(objeto_id,valor_defecto,minimo,maximo,decimales,valido_entrante,alert){var numero=document.getElementById(objeto_id).value;numero=numero.replace(/,/g,'.');var valido=true;valor_minimo=parseInt(minimo);valor_maximo=parseInt(maximo);if(decimales=="")decimales=0;valor_decimales=parseInt(decimales);decallowed=valor_decimales;if((isNaN(numero)||numero==""||numero==" "||numero=="  ")&&minimo!=""){valido=false}else{if(numero.indexOf('.')==-1)numero+=".";dectext=numero.substring(numero.indexOf('.')+1,numero.length);if(dectext.length>decallowed){valido=false}if(minimo!="")if(numero<valor_minimo)valido=false;if(maximo!="")if(numero>valor_maximo)valido=false}if(valido==false){if(alert!="")window.alert(alert);document.getElementById(objeto_id).value=valor_defecto;document.getElementById(objeto_id).className+=" input_error";var resultado=false}else{document.getElementById(objeto_id).className+=" input";var resultado=valido_entrante}return resultado}function validarvacio_x_id(campo,valor_error){var valor=document.getElementById(campo).value;if(valor==""){document.getElementById(campo).className="input_error";return false}else{document.getElementById(campo).className="input";return valor_error}}function checkmarcado(campo,etiqueta,valor_error){var valor=document.getElementById(campo).checked;if(valor==false){document.getElementById(etiqueta).className="input_error";return false}else{document.getElementById(etiqueta).className="input";return valor_error}}function validarcamposiguales(campo1,campo2,valor_error){var valor1=document.getElementById(campo1).value;var valor2=document.getElementById(campo2).value;if(valor1==valor2&&valor1!=""&&valor2!=""){document.getElementById(campo1).className="input";document.getElementById(campo2).className="input";return valor_error}else{document.getElementById(campo1).className="input_error";document.getElementById(campo2).className="input_error";return false}}function validar_form_campos_vacios(valido){var max_input=document.getElementById("max_input").value;var id_input;max_input=parseInt(max_input);for(contador=1;contador<=max_input;contador++){id_input=document.getElementById("n_input_"+contador).value;var valido=validarvacio_x_id(id_input,valido)}return valido}function validar_form_campos_Rango(valido,valor_defecto,minimo,maximo,decimales,alert){var max_input=document.getElementById("max_input").value;var id_input;max_input=parseInt(max_input);for(contador=1;contador<=max_input;contador++){id_input=document.getElementById("n_input_"+contador).value;var valido=validar_Numero_Rango(id_input,valor_defecto,minimo,maximo,decimales,valido,alert)}return valido}function getRadioButtonSelectedValue(ctrl){marcado=false;for(i=0;i<ctrl.length;i++){if(ctrl[i].checked){marcado=true;return ctrl[i].value}}if(marcado==false)return"vacio"}function limpiaForm(miForm){$(":input",miForm).each(function(){var type=this.type;var tag=this.tagName.toLowerCase();if(type=="text"||type=="password"||tag=="textarea")this.value="";else if(type=="checkbox"||type=="radio")this.checked=false;else if(tag=="select")this.selectedIndex=-1})}function redondeo2decimales(numero){var original=parseFloat(numero);var result=Math.round(original*100)/100;return result}function utf8_encode(argString){if(argString===null||typeof argString==='undefined'){return''}var string=(argString+'');var utftext='',start,end,stringl=0;start=end=0;stringl=string.length;for(var n=0;n<stringl;n++){var c1=string.charCodeAt(n);var enc=null;if(c1<128){end++}else if(c1>127&&c1<2048){enc=String.fromCharCode((c1>>6)|192,(c1&63)|128)}else if((c1&0xF800)!=0xD800){enc=String.fromCharCode((c1>>12)|224,((c1>>6)&63)|128,(c1&63)|128)}else{if((c1&0xFC00)!=0xD800){throw new RangeError('Unmatched trail surrogate at '+n);}var c2=string.charCodeAt(++n);if((c2&0xFC00)!=0xDC00){throw new RangeError('Unmatched lead surrogate at '+(n-1));}c1=((c1&0x3FF)<<10)+(c2&0x3FF)+0x10000;enc=String.fromCharCode((c1>>18)|240,((c1>>12)&63)|128,((c1>>6)&63)|128,(c1&63)|128)}if(enc!==null){if(end>start){utftext+=string.slice(start,end)}utftext+=enc;start=end=n+1}}if(end>start){utftext+=string.slice(start,stringl)}return utftext}function utf8_decode(str_data){var tmp_arr=[],i=0,ac=0,c1=0,c2=0,c3=0,c4=0;str_data+='';while(i<str_data.length){c1=str_data.charCodeAt(i);if(c1<=191){tmp_arr[ac++]=String.fromCharCode(c1);i++}else if(c1<=223){c2=str_data.charCodeAt(i+1);tmp_arr[ac++]=String.fromCharCode(((c1&31)<<6)|(c2&63));i+=2}else if(c1<=239){c2=str_data.charCodeAt(i+1);c3=str_data.charCodeAt(i+2);tmp_arr[ac++]=String.fromCharCode(((c1&15)<<12)|((c2&63)<<6)|(c3&63));i+=3}else{c2=str_data.charCodeAt(i+1);c3=str_data.charCodeAt(i+2);c4=str_data.charCodeAt(i+3);c1=((c1&7)<<18)|((c2&63)<<12)|((c3&63)<<6)|(c4&63);c1-=0x10000;tmp_arr[ac++]=String.fromCharCode(0xD800|((c1>>10)&0x3FF));tmp_arr[ac++]=String.fromCharCode(0xDC00|(c1&0x3FF));i+=4}}return tmp_arr.join('')}</script>
+				</body>
+			</html>
+			
+
+<link href="https://adminchile1.fnsmanager.com/css/libraries/nuevas-funcionalidades.css?v=1795040562" rel="stylesheet" />
