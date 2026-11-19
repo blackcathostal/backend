@@ -79,7 +79,8 @@ def _parse_period(value: str | None, *, fallback: date | None = None) -> date:
 
 
 def _period_key(day: date) -> str:
-    return f"{day.year:04d}-{day.month:02d}"
+    """Canonical period key for UI/API: MM-YYYY (same as Emitidas Track)."""
+    return f"{day.month:02d}-{day.year:04d}"
 
 
 def _period_label(day: date) -> str:
@@ -567,7 +568,10 @@ def get_eerr_consolidated(
         for code, year, month_num, total in sums:
             if not code or year is None or month_num is None:
                 continue
-            key = f"{int(year):04d}-{int(month_num):02d}"
+            try:
+                key = _period_key(date(int(year), int(month_num), 1))
+            except ValueError:
+                continue
             if key not in monthly_by_code:
                 continue
             monthly_by_code[key][str(code)] = float(total or 0)
