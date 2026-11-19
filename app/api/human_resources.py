@@ -85,6 +85,7 @@ def _period_payload(db: Session, period_key: str) -> HrPeriodOut:
     return HrPeriodOut(period=period_key, lines=lines)
 
 
+@router.get("", response_model=HrPeriodOut, include_in_schema=False)
 @router.get("/", response_model=HrPeriodOut)
 def get_hr_period(
     period: str | None = None,
@@ -94,6 +95,7 @@ def get_hr_period(
     return _period_payload(db, _normalize_period(period))
 
 
+@router.put("", response_model=HrPeriodOut, include_in_schema=False)
 @router.put("/", response_model=HrPeriodOut)
 def update_hr_period(
     payload: HrPeriodUpdate,
