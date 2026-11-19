@@ -990,7 +990,10 @@ def get_eerr_consolidated(
             month.year == today.year and month.month == today.month
         ) else _month_end(month)
         issued_by_account = _issued_totals_by_account_id(
-            db, date_from=month, date_to=finish
+            db,
+            date_from=month,
+            date_to=finish,
+            exclude_invoice_types=True,
         )
         code_by_id = {int(account.id): str(account.code or "") for account in accounts}
         by_code: dict[str, float] = {}
@@ -1001,7 +1004,12 @@ def get_eerr_consolidated(
             by_code[code] = float(by_code.get(code, 0.0) + float(amount or 0))
         monthly_by_code[key] = by_code
         monthly_unclassified[key] = float(
-            _unassigned_issued_total(db, date_from=month, date_to=finish)
+            _unassigned_issued_total(
+                db,
+                date_from=month,
+                date_to=finish,
+                exclude_invoice_types=True,
+            )
         )
 
     rows: list[EerrConsolidatedRow] = []
