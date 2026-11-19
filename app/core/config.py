@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     admin_email: str = "admin@blackcathostal.com"
     admin_password: str = "admin123"
     admin_full_name: str = "Administrator"
-    admin_role_name: str = "Comunicador"
+    admin_role_name: str = "Administrador"
     uploads_dir: Path = BASE_DIR / "uploads"
     recaptcha_secret_key: str = ""
     recaptcha_min_score: float = 0.5

@@ -311,11 +311,12 @@ DEFAULT_SIDEBAR_PERMISSIONS = (
 )
 
 ACTIVE_ROLES = {
+    "Administrador": "Full access to the administration panel",
     "Comunicador": "Communications-focused access",
     "Recursos Humanos": "Human resources only",
 }
 
-REMOVED_ROLE_NAMES = frozenset({"admin", "Administrador", "editor", "viewer"})
+REMOVED_ROLE_NAMES = frozenset({"admin", "editor", "viewer"})
 
 COMMUNICATOR_PERMISSION_CODES = frozenset(
     {
@@ -373,18 +374,21 @@ def seed_database(db: Session) -> None:
             if permission_id not in existing:
                 db.add(RolePermissions(role_id=role.id, permission_id=permission_id))
 
+    all_permission_codes = frozenset(permission_by_code.keys())
+    sync_role_permissions(role_by_name["Administrador"], all_permission_codes)
     sync_role_permissions(role_by_name["Comunicador"], COMMUNICATOR_PERMISSION_CODES)
     sync_role_permissions(role_by_name["Recursos Humanos"], HUMAN_RESOURCES_PERMISSION_CODES)
 
+    admin_role = role_by_name["Administrador"]
     communicator_role = role_by_name["Comunicador"]
     human_resources_role = role_by_name["Recursos Humanos"]
 
-    # Move users off removed roles, then delete those roles.
+    # Move users off removed legacy roles, then delete those roles.
     removed_roles = db.query(Roles).filter(Roles.name.in_(REMOVED_ROLE_NAMES)).all()
     removed_ids = [role.id for role in removed_roles]
     if removed_ids:
         db.query(Users).filter(Users.role_id.in_(removed_ids)).update(
-            {Users.role_id: communicator_role.id},
+            {Users.role_id: admin_role.id},
             synchronize_session=False,
         )
         db.query(RolePermissions).filter(RolePermissions.role_id.in_(removed_ids)).delete(
@@ -419,6 +423,12 @@ def seed_database(db: Session) -> None:
         user.is_active = True
 
     upsert_user(
+        email=settings.admin_email,
+        full_name=settings.admin_full_name or "Administrador",
+        role=admin_role,
+        password=DEFAULT_APP_PASSWORD,
+    )
+    upsert_user(
         email="comunicador@blackcathostal.com",
         full_name="Comunicador",
         role=communicator_role,
@@ -430,21 +440,6 @@ def seed_database(db: Session) -> None:
         role=human_resources_role,
         password=DEFAULT_APP_PASSWORD,
     )
-
-    # Keep legacy admin email usable under Comunicador (password from settings).
-    admin = db.query(Users).filter(Users.email == settings.admin_email).first()
-    if not admin:
-        db.add(
-            Users(
-                role_id=communicator_role.id,
-                email=settings.admin_email,
-                full_name=settings.admin_full_name,
-                password=hash_password(settings.admin_password),
-                is_active=True,
-            )
-        )
-    else:
-        admin.role_id = communicator_role.id
 
     if db.query(Sliders).count() == 0:
         for item in DEFAULT_SLIDERS:
