@@ -76,6 +76,7 @@ class TaxDocumentRefreshResult(BaseModel):
     classified: int
     suppliers_upserted: int = 0
     customers_upserted: int = 0
+    accounts_assigned: int = 0
     warning: str = ""
 
 

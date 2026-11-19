@@ -731,6 +731,44 @@ def _upsert_docs(
     return upserted, classified, suppliers_upserted, customers_upserted
 
 
+def _backfill_unassigned_issued_to_lodging(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> int:
+    """
+    On Emitidas → Actualizar only: assign lodging (Hospedaje) to issued docs
+    still missing accounting_account_id in the refreshed date range.
+    """
+    ensure_concept_labels_from_coa(db)
+    accounts = load_income_accounts(db)
+    lodging = lodging_income_account(accounts)
+    if lodging is None:
+        return 0
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    if issued_id is None:
+        return 0
+    lodging_id = int(lodging.id)
+    rows = (
+        db.query(TaxDocuments)
+        .filter(
+            TaxDocuments.dte_version_id == int(issued_id),
+            TaxDocuments.accounting_account_id.is_(None),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+        )
+        .all()
+    )
+    if not rows:
+        return 0
+    for row in rows:
+        row.accounting_account_id = lodging_id
+    db.commit()
+    return len(rows)
+
+
 def _list_version(
     db: Session,
     *,
@@ -1074,6 +1112,7 @@ async def refresh_tax_documents(
         if resolved_type is not None:
             doc["dte_type_id"] = resolved_type
 
+    accounts_assigned = 0
     try:
         upserted, classified, suppliers_upserted, customers_upserted = _upsert_docs(
             db,
@@ -1083,6 +1122,17 @@ async def refresh_tax_documents(
             pms_rows=pms_rows,
             match_fns=False,
         )
+        # Explicit pass: any issued doc still without account in this range → Hospedaje.
+        if version_id == dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED):
+            accounts_assigned = _backfill_unassigned_issued_to_lodging(
+                db, date_from=date_from, date_to=date_to
+            )
+            if accounts_assigned:
+                note = (
+                    f"Se asignó Hospedaje a {accounts_assigned} documento(s) "
+                    "sin cuenta contable."
+                )
+                warning = f"{warning} · {note}" if warning else note
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(
@@ -1112,5 +1162,6 @@ async def refresh_tax_documents(
         classified=classified,
         suppliers_upserted=suppliers_upserted,
         customers_upserted=customers_upserted,
+        accounts_assigned=accounts_assigned,
         warning=warning,
     )

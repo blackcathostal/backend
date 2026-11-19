@@ -29,7 +29,6 @@ from app.services import dte_catalog
 from app.services.accounting_concept_map import (
     ensure_concept_labels_from_coa,
     load_income_accounts,
-    lodging_income_account,
 )
 from app.services.extranet_web_client import ExtranetWebError
 from app.services.tax_documents_fetch import TaxDocumentsFetchClient
@@ -463,6 +462,7 @@ def get_eerr_detail(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         if kind == "account" and resolved_id is not None:
+            # Only docs already assigned on Emitidas → Actualizar (no soft-assign here).
             invoice_lines = _issued_tax_document_lines(
                 db,
                 date_from=month_start,
@@ -470,17 +470,6 @@ def get_eerr_detail(
                 account_id=int(resolved_id),
                 invoice_only=True,
             )
-            lodging = lodging_income_account(accounts)
-            if lodging is not None and int(lodging.id) == int(resolved_id):
-                # Until Actualizar assigns them, unassigned facturas count as lodging.
-                unassigned = _issued_tax_document_lines(
-                    db,
-                    date_from=month_start,
-                    date_to=month_finish,
-                    invoice_only=True,
-                    unassigned_only=True,
-                )
-                invoice_lines = _merge_detail_lines(invoice_lines, unassigned)
             raw_lines = _merge_detail_lines(raw_lines, invoice_lines)
 
     lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
