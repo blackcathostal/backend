@@ -733,11 +733,15 @@ class TaxDocumentsFetchClient:
                     r"\s+", " ", str(row.get("Datos cliente") or "")
                 ).strip()
                 arrival = str(row.get("Llegada") or "").strip()
+                doc_blob = re.sub(
+                    r"\s+", " ", str(row.get("Documento") or "")
+                ).strip(" ,")
                 lines.append(
                     {
                         "issued_at": arrival or None,
                         "folio": "",
-                        "doc_type": str(row.get("Documento") or "").strip(),
+                        # Empty Documento in Ingresos-Cobros ⇒ no DTE/boleta yet (not in Emitidas).
+                        "doc_type": doc_blob or "Sin documento emitido",
                         "company_name": guest,
                         "locator": locator,
                         "concept": concept_label,
