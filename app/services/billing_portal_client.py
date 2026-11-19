@@ -372,36 +372,13 @@ class BillingPortalClient:
         return docs
 
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        """Pull issued documents month-by-month via SOAP (B + V)."""
-        if date_to < date_from:
-            raise BillingPortalError("Rango de fechas inválido")
-        docs: list[dict[str, Any]] = []
-        seen: set[tuple[str, str, str]] = set()
-        cursor = date(date_from.year, date_from.month, 1)
-        while cursor <= date_to:
-            for book_type in ("B", "V"):
-                try:
-                    batch = self.query_sales_ledger(cursor, book_type=book_type)
-                except BillingPortalError:
-                    raise
-                for doc in batch:
-                    issued = _parse_date(doc.get("issued_at"))
-                    if issued and (issued < date_from or issued > date_to):
-                        continue
-                    key = (
-                        str(doc.get("dte_type_code") or doc.get("dte_type_id") or ""),
-                        str(doc.get("folio") or ""),
-                        str(doc.get("identification_number") or doc.get("counterpart_rut") or ""),
-                    )
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    docs.append(doc)
-            if cursor.month == 12:
-                cursor = date(cursor.year + 1, 1, 1)
-            else:
-                cursor = date(cursor.year, cursor.month + 1, 1)
-        return docs
+        # Emitidas use FNS Cobros (FnsTaxDocumentsClient). Never call ConsultaLibroVentas.
+        del date_from, date_to
+        raise BillingPortalError(
+            "Emitidas ya no usan ConsultaLibroVentas. "
+            "Actualizá el API (git pull + reiniciar blackcathostal-api) "
+            "para scrapear FNS Contabilidad."
+        )
 
     def parse_ledger_file(
         self,
