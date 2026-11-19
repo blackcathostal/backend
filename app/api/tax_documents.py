@@ -1,8 +1,10 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import date, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -944,6 +946,61 @@ def clear_tax_documents(
     return TaxDocumentClearResult(dte_version_id=version_id, deleted=int(deleted or 0))
 
 
+def _scrape_tax_documents_sync(
+    *,
+    version_id: int,
+    received_id: int,
+    date_from: date,
+    date_to: date,
+) -> tuple[list[dict[str, Any]], str, str, list[dict]]:
+    """Blocking FNS/portal scrape — must run off the asyncio event loop."""
+    warning = ""
+    docs: list[dict[str, Any]] = []
+    source = "extranet_web"
+    pms_rows: list[dict] = []
+
+    if version_id == received_id:
+        # Recibidas = libro de compras (billing portal). Contabilidad extranet does not expose it.
+        source = "web"
+        with BillingPortalWebClient() as web:
+            docs = web.fetch_received(date_from, date_to)
+    else:
+        # Emitidas = FNS Cobros + facturas missing from FNS via facturacion.cl Libro de Ventas.
+        source = "extranet_web"
+        with TaxDocumentsFetchClient() as fetch_client:
+            fns_docs = fetch_client.fetch_issued(date_from, date_to)
+
+        portal_docs: list[dict] = []
+        portal_error = ""
+        try:
+            with BillingPortalWebClient() as web:
+                portal_docs = web.fetch_issued(date_from, date_to)
+        except BillingPortalError as portal_exc:
+            portal_error = str(portal_exc)
+            try:
+                portal_docs = BillingPortalClient().fetch_issued(
+                    date_from, date_to, book_types=("V", "B")
+                )
+                portal_error = ""
+            except BillingPortalError as soap_exc:
+                portal_error = (
+                    f"{portal_error}; SOAP: {soap_exc}"
+                    if portal_error
+                    else str(soap_exc)
+                )
+
+        docs, merge_warning = _merge_issued_with_billing_portal(fns_docs, portal_docs)
+        warning = merge_warning
+        if portal_error:
+            warning = (
+                f"{warning} · Portal: {portal_error}"
+                if warning
+                else f"Portal: {portal_error}"
+            )
+
+    return docs, source, warning, pms_rows
+
+
 @router.post("/refresh", response_model=TaxDocumentRefreshResult)
 async def refresh_tax_documents(
     direction: str = "issued",
@@ -963,50 +1020,16 @@ async def refresh_tax_documents(
     date_from = _parse_bound(from_date, fallback=start)
     date_to = _parse_bound(to_date, fallback=end)
 
-    warning = ""
-    docs: list[dict] = []
-    source = "extranet_web"
-    pms_rows: list[dict] = []
-
     try:
-        if version_id == received_id:
-            # Recibidas = libro de compras (billing portal). Contabilidad extranet does not expose it.
-            source = "web"
-            with BillingPortalWebClient() as web:
-                docs = web.fetch_received(date_from, date_to)
-        else:
-            # Emitidas = FNS Cobros + facturas missing from FNS via facturacion.cl Libro de Ventas.
-            source = "extranet_web"
-            with TaxDocumentsFetchClient() as fetch_client:
-                fns_docs = fetch_client.fetch_issued(date_from, date_to)
-
-            portal_docs: list[dict] = []
-            portal_error = ""
-            try:
-                with BillingPortalWebClient() as web:
-                    portal_docs = web.fetch_issued(date_from, date_to)
-            except BillingPortalError as portal_exc:
-                portal_error = str(portal_exc)
-                try:
-                    portal_docs = BillingPortalClient().fetch_issued(
-                        date_from, date_to, book_types=("V", "B")
-                    )
-                    portal_error = ""
-                except BillingPortalError as soap_exc:
-                    portal_error = (
-                        f"{portal_error}; SOAP: {soap_exc}"
-                        if portal_error
-                        else str(soap_exc)
-                    )
-
-            docs, merge_warning = _merge_issued_with_billing_portal(fns_docs, portal_docs)
-            warning = merge_warning
-            if portal_error:
-                warning = (
-                    f"{warning} · Portal: {portal_error}"
-                    if warning
-                    else f"Portal: {portal_error}"
-                )
+        # Keep the event loop free so login /auth/me and other views stay responsive
+        # while FNS/facturacion scrapes run (can take several minutes).
+        docs, source, warning, pms_rows = await asyncio.to_thread(
+            _scrape_tax_documents_sync,
+            version_id=version_id,
+            received_id=received_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
     except BillingPortalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ExtranetWebError as exc:
