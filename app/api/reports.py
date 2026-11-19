@@ -9,11 +9,12 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import extract, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.accounting_accounts import AccountingAccounts
+from app.models.customers import Customers
 from app.models.tax_documents import TaxDocuments
 from app.models.users import Users
 from app.schemas.reports import (
@@ -187,6 +188,113 @@ def _tax_document_code_totals(
     return {str(code or ""): float(total or 0) for code, total in sums if code}
 
 
+def _invoice_type_ids(db: Session) -> list[int]:
+    ids: list[int] = []
+    for code in (
+        dte_catalog.TYPE_CODE_INVOICE,
+        dte_catalog.TYPE_CODE_EXEMPT_INVOICE,
+        dte_catalog.TYPE_CODE_CREDIT_NOTE,
+    ):
+        type_id = dte_catalog.type_id_by_code(db, code)
+        if type_id is not None:
+            ids.append(int(type_id))
+    return ids
+
+
+def _customer_names_for(db: Session, identification_numbers: list[str]) -> dict[str, str]:
+    ids = sorted({str(x or "").strip() for x in identification_numbers if str(x or "").strip()})
+    if not ids:
+        return {}
+    rows = (
+        db.query(Customers)
+        .filter(Customers.identification_number.in_(ids))
+        .all()
+    )
+    return {
+        str(row.identification_number or ""): str(row.company_name or "")
+        for row in rows
+    }
+
+
+def _issued_tax_document_lines(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+    account_id: int | None = None,
+    invoice_only: bool = False,
+) -> list[dict]:
+    """Detail lines from issued tax_documents (includes facturas from facturacion.cl)."""
+    issued_id = _issued_version_id(db)
+    query = (
+        db.query(TaxDocuments)
+        .options(joinedload(TaxDocuments.dte_type))
+        .filter(
+            TaxDocuments.dte_version_id == issued_id,
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+        )
+    )
+    if account_id is not None:
+        query = query.filter(TaxDocuments.accounting_account_id == int(account_id))
+    if invoice_only:
+        type_ids = _invoice_type_ids(db)
+        if not type_ids:
+            return []
+        query = query.filter(TaxDocuments.dte_type_id.in_(type_ids))
+
+    rows = query.order_by(TaxDocuments.issued_at.asc(), TaxDocuments.id.asc()).all()
+    names = _customer_names_for(db, [row.identification_number for row in rows])
+    lines: list[dict] = []
+    for row in rows:
+        amount = float(row.total_amount or 0)
+        if abs(amount) <= 0.5:
+            continue
+        type_name = ""
+        if row.dte_type is not None:
+            type_name = str(row.dte_type.name or row.dte_type.code or "").strip()
+        folio = str(row.folio or "").strip()
+        lines.append(
+            {
+                "issued_at": row.issued_at.isoformat() if row.issued_at else None,
+                "folio": folio[:40],
+                "doc_type": type_name or "DTE",
+                "company_name": names.get(str(row.identification_number or ""), "")[:220],
+                "locator": str(row.pms_ref or "")[:120],
+                "concept": type_name or "Documento tributario",
+                "amount": amount,
+            }
+        )
+    return lines
+
+
+def _merge_detail_lines(
+    primary: list[dict],
+    extra: list[dict],
+) -> list[dict]:
+    """Append extra lines not already present by folio + doc_type."""
+    seen: set[tuple[str, str]] = set()
+    merged: list[dict] = []
+    for item in primary:
+        folio = re.sub(r"\s+", "", str(item.get("folio") or ""))
+        doc_type = str(item.get("doc_type") or "").strip().lower()
+        key = (folio, doc_type)
+        if folio:
+            seen.add(key)
+        merged.append(item)
+    for item in extra:
+        folio = re.sub(r"\s+", "", str(item.get("folio") or ""))
+        doc_type = str(item.get("doc_type") or "").strip().lower()
+        key = (folio, doc_type)
+        if folio and key in seen:
+            continue
+        if folio:
+            seen.add(key)
+        merged.append(item)
+    return merged
+
+
 def _fetch_extranet_month(date_from: date, date_to: date, *, accounts: list) -> dict:
     client = TaxDocumentsFetchClient()
     return client.fetch_income_by_account(date_from, date_to, accounts=accounts)
@@ -212,6 +320,7 @@ def get_eerr_report(
     vendido = 0.0
     cobrado = 0.0
     pendiente = 0.0
+    facturado = 0.0
     concepts_total = 0.0
     pending_sales = 0.0
     unclassified_collections = 0.0
@@ -225,6 +334,7 @@ def get_eerr_report(
         vendido = float(payload.get("vendido") or 0)
         cobrado = float(payload.get("cobrado") or 0)
         pendiente = float(payload.get("pendiente") or 0)
+        facturado = float(payload.get("facturado") or 0)
         concepts_total = float(payload.get("concepts_total") or 0)
         pending_sales = float(payload.get("pending_sales") or 0)
         unclassified_collections = float(payload.get("unclassified_collections") or 0)
@@ -237,6 +347,17 @@ def get_eerr_report(
         vendido = float(sum(by_code.values()))
         cobrado = vendido
         concepts_total = vendido
+
+    # Prefer Σ facturas emitidas in DB when FNS Facturado column is empty.
+    invoice_lines = _issued_tax_document_lines(
+        db,
+        date_from=month_start,
+        date_to=month_finish,
+        invoice_only=True,
+    )
+    invoice_sum = float(sum(float(item.get("amount") or 0) for item in invoice_lines))
+    if invoice_sum > facturado + 0.5:
+        facturado = invoice_sum
 
     rows = _rows_from_code_totals(accounts, by_code)
     rows.extend(
@@ -258,6 +379,7 @@ def get_eerr_report(
         vendido=vendido,
         cobrado=cobrado,
         pendiente=pendiente,
+        facturado=facturado,
         concepts_total=concepts_total,
         pending_sales=pending_sales,
         unclassified_collections=unclassified_collections,
@@ -309,20 +431,42 @@ def get_eerr_detail(
         title = "Cobrado"
     elif kind == "unclassified":
         title = "Vendido sin clasificar"
+    elif kind in {"invoiced", "facturado"}:
+        kind = "invoiced"
+        title = "Facturado"
     else:
         raise HTTPException(status_code=400, detail="row_kind inválido")
 
-    try:
-        client = TaxDocumentsFetchClient()
-        raw_lines = client.fetch_income_detail_lines(
-            month_start,
-            month_finish,
-            accounts=accounts,
-            row_kind=kind,
-            account_code=code,
+    raw_lines: list[dict] = []
+    if kind == "invoiced":
+        raw_lines = _issued_tax_document_lines(
+            db,
+            date_from=month_start,
+            date_to=month_finish,
+            invoice_only=True,
         )
-    except ExtranetWebError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        try:
+            client = TaxDocumentsFetchClient()
+            raw_lines = client.fetch_income_detail_lines(
+                month_start,
+                month_finish,
+                accounts=accounts,
+                row_kind=kind,
+                account_code=code,
+            )
+        except ExtranetWebError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if kind == "account" and resolved_id is not None:
+            invoice_lines = _issued_tax_document_lines(
+                db,
+                date_from=month_start,
+                date_to=month_finish,
+                account_id=int(resolved_id),
+                invoice_only=True,
+            )
+            raw_lines = _merge_detail_lines(raw_lines, invoice_lines)
 
     lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
     total = float(sum(float(item.amount or 0) for item in lines))

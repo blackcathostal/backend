@@ -20,6 +20,7 @@ class EerrReportOut(BaseModel):
     vendido: float = 0
     cobrado: float = 0
     pendiente: float = 0
+    facturado: float = 0
     concepts_total: float = 0
     pending_sales: float = 0
     unclassified_collections: float = 0
