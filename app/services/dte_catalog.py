@@ -79,11 +79,16 @@ def type_id_from_raw(db: Session, raw: object) -> int | None:
     if "voucher" in needle or "vale" in needle:
         return type_id_by_code(db, TYPE_CODE_RECEIPT)
 
-    # Direct id / code match against canonical catalog only
+    # Direct id / code match against canonical catalog only.
+    # Important: SII boleta is always code "39". A leftover autoincrement id
+    # like 41 (old "Voucher" row) must NOT be treated as a real type.
     if text.isdigit():
         by_id = db.query(DteTypes).filter(DteTypes.id == int(text)).first()
-        if by_id is not None and str(by_id.code) in CANONICAL_TYPE_CODES:
-            return int(by_id.id)
+        if by_id is not None:
+            if str(by_id.code) in CANONICAL_TYPE_CODES:
+                return int(by_id.id)
+            # Non-canonical PK (e.g. id=41 voucher) → Boleta (code 39)
+            return type_id_by_code(db, TYPE_CODE_RECEIPT)
         by_code = type_id_by_code(db, text)
         if by_code is not None:
             return by_code

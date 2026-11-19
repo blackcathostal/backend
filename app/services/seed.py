@@ -476,6 +476,7 @@ def seed_database(db: Session) -> None:
             row.code = code
             row.name = name
 
+    # Canonical SII codes: id matches code (33/34/39/61). Never keep id=41 as boleta.
     dte_types = (
         (33, dte_catalog.TYPE_CODE_INVOICE, "Factura"),
         (34, dte_catalog.TYPE_CODE_EXEMPT_INVOICE, "Factura Exenta"),
@@ -483,14 +484,31 @@ def seed_database(db: Session) -> None:
         (61, dte_catalog.TYPE_CODE_CREDIT_NOTE, "Nota de crédito"),
     )
     for type_id, code, name in dte_types:
-        row = db.query(DteTypes).filter(DteTypes.code == code).first()
-        if row is None:
-            row = db.query(DteTypes).filter(DteTypes.id == type_id).first()
-        if row is None:
-            db.add(DteTypes(id=type_id, code=code, name=name))
+        by_code = db.query(DteTypes).filter(DteTypes.code == code).first()
+        by_id = db.query(DteTypes).filter(DteTypes.id == type_id).first()
+        if by_code is not None and int(by_code.id) == type_id:
+            by_code.name = name
+            continue
+        if by_code is not None and int(by_code.id) != type_id:
+            # Wrong PK for this SII code: move docs to canonical id, then fix row.
+            wrong_id = int(by_code.id)
+            if by_id is None:
+                db.add(DteTypes(id=type_id, code=code, name=name))
+                db.flush()
+            else:
+                by_id.code = code
+                by_id.name = name
+            db.query(TaxDocuments).filter(TaxDocuments.dte_type_id == wrong_id).update(
+                {TaxDocuments.dte_type_id: type_id},
+                synchronize_session=False,
+            )
+            db.delete(by_code)
+            continue
+        if by_id is not None:
+            by_id.code = code
+            by_id.name = name
         else:
-            row.code = code
-            row.name = name
+            db.add(DteTypes(id=type_id, code=code, name=name))
 
     dte_statuses = (
         (1, dte_catalog.STATUS_CODE_PENDING_PAYMENT, "Imputada por Pagar", "red"),
