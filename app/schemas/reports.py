@@ -4,10 +4,12 @@ from pydantic import BaseModel, Field
 
 
 class EerrAccountRow(BaseModel):
-    account_id: int
+    account_id: int | None = None
     code: str = ""
     name: str = ""
     total: float = 0
+    # account = chart row; pending / unclassified = remanente detail (not a CoA dump)
+    row_kind: str = "account"
 
 
 class EerrReportOut(BaseModel):
@@ -18,15 +20,19 @@ class EerrReportOut(BaseModel):
     vendido: float = 0
     cobrado: float = 0
     pendiente: float = 0
-    source: str = "fns_vendido"
+    concepts_total: float = 0
+    pending_sales: float = 0
+    unclassified_collections: float = 0
+    source: str = "extranet_vendido"
 
 
 class EerrConsolidatedRow(BaseModel):
-    account_id: int
+    account_id: int | None = None
     code: str = ""
     name: str = ""
     amounts: dict[str, float] = Field(default_factory=dict)
     total: float = 0
+    row_kind: str = "account"
 
 
 class EerrConsolidatedOut(BaseModel):
@@ -38,4 +44,4 @@ class EerrConsolidatedOut(BaseModel):
     rows: list[EerrConsolidatedRow] = Field(default_factory=list)
     column_totals: dict[str, float] = Field(default_factory=dict)
     grand_total: float = 0
-    source: str = "fns_vendido"
+    source: str = "extranet_vendido"

@@ -119,9 +119,40 @@ def _rows_from_code_totals(
             code=account.code or "",
             name=account.name or "",
             total=float(by_code.get(str(account.code or ""), 0.0)),
+            row_kind="account",
         )
         for account in accounts
     ]
+
+
+def _remanente_rows(
+    *,
+    pending_sales: float,
+    unclassified_collections: float,
+) -> list[EerrAccountRow]:
+    """Detail lines for vendido not mapped to Cobros concept columns."""
+    rows: list[EerrAccountRow] = []
+    if abs(pending_sales) > 0.5:
+        rows.append(
+            EerrAccountRow(
+                account_id=None,
+                code="",
+                name="Pendiente por cobrar",
+                total=float(pending_sales),
+                row_kind="pending",
+            )
+        )
+    if abs(unclassified_collections) > 0.5:
+        rows.append(
+            EerrAccountRow(
+                account_id=None,
+                code="",
+                name="Cobros sin clasificar",
+                total=float(unclassified_collections),
+                row_kind="unclassified",
+            )
+        )
+    return rows
 
 
 def _tax_document_code_totals(
@@ -179,6 +210,9 @@ def get_eerr_report(
     vendido = 0.0
     cobrado = 0.0
     pendiente = 0.0
+    concepts_total = 0.0
+    pending_sales = 0.0
+    unclassified_collections = 0.0
     by_code: dict[str, float] = {}
     try:
         payload = _fetch_extranet_month(month_start, month_finish, accounts=accounts)
@@ -189,20 +223,29 @@ def get_eerr_report(
         vendido = float(payload.get("vendido") or 0)
         cobrado = float(payload.get("cobrado") or 0)
         pendiente = float(payload.get("pendiente") or 0)
+        concepts_total = float(payload.get("concepts_total") or 0)
+        pending_sales = float(payload.get("pending_sales") or 0)
+        unclassified_collections = float(payload.get("unclassified_collections") or 0)
     except ExtranetWebError as exc:
-        logger.warning("EERR FNS unavailable, falling back to tax_documents: %s", exc)
+        logger.warning("EERR extranet unavailable, falling back to tax_documents: %s", exc)
         source = "tax_documents"
         by_code = _tax_document_code_totals(
             db, date_from=month_start, date_to=month_finish
         )
         vendido = float(sum(by_code.values()))
         cobrado = vendido
+        concepts_total = vendido
 
     rows = _rows_from_code_totals(accounts, by_code)
+    rows.extend(
+        _remanente_rows(
+            pending_sales=pending_sales,
+            unclassified_collections=unclassified_collections,
+        )
+    )
     rows_total = float(sum(row.total for row in rows))
     if vendido <= 0:
         vendido = rows_total
-    # Vendido is the statement total; row sum may lag if catch-all is missing.
     grand_total = vendido if vendido > 0 else rows_total
     return EerrReportOut(
         period=_period_key(month_start),
@@ -212,6 +255,9 @@ def get_eerr_report(
         vendido=vendido,
         cobrado=cobrado,
         pendiente=pendiente,
+        concepts_total=concepts_total,
+        pending_sales=pending_sales,
+        unclassified_collections=unclassified_collections,
         source=source,
     )
 
@@ -240,6 +286,9 @@ def get_eerr_consolidated(
     accounts = load_income_accounts(db)
 
     monthly_by_code: dict[str, dict[str, float]] = {key: {} for key in period_keys}
+    monthly_pending: dict[str, float] = {key: 0.0 for key in period_keys}
+    monthly_unclassified: dict[str, float] = {key: 0.0 for key in period_keys}
+    monthly_vendido: dict[str, float] = {key: 0.0 for key in period_keys}
     source = "extranet_vendido"
     try:
         client = TaxDocumentsFetchClient()
@@ -255,9 +304,14 @@ def get_eerr_consolidated(
                 str(code): float(amount or 0)
                 for code, amount in (payload.get("by_account_code") or {}).items()
             }
+            monthly_pending[key] = float(payload.get("pending_sales") or 0)
+            monthly_unclassified[key] = float(
+                payload.get("unclassified_collections") or 0
+            )
+            monthly_vendido[key] = float(payload.get("vendido") or 0)
     except ExtranetWebError as exc:
         logger.warning(
-            "EERR consolidated FNS unavailable, falling back to tax_documents: %s",
+            "EERR consolidated extranet unavailable, falling back to tax_documents: %s",
             exc,
         )
         source = "tax_documents"
@@ -293,6 +347,9 @@ def get_eerr_consolidated(
             if key not in monthly_by_code:
                 continue
             monthly_by_code[key][str(code)] = float(total or 0)
+            monthly_vendido[key] = float(
+                monthly_vendido.get(key, 0.0) + float(total or 0)
+            )
 
     rows: list[EerrConsolidatedRow] = []
     column_totals = {key: 0.0 for key in period_keys}
@@ -312,9 +369,33 @@ def get_eerr_consolidated(
                 name=account.name or "",
                 amounts=amounts,
                 total=row_total,
+                row_kind="account",
             )
         )
 
+    for kind, name, monthly in (
+        ("pending", "Pendiente por cobrar", monthly_pending),
+        ("unclassified", "Cobros sin clasificar", monthly_unclassified),
+    ):
+        amounts = {key: float(monthly.get(key) or 0) for key in period_keys}
+        if abs(sum(amounts.values())) <= 0.5:
+            continue
+        for key, value in amounts.items():
+            column_totals[key] = float(column_totals.get(key, 0.0) + value)
+        rows.append(
+            EerrConsolidatedRow(
+                account_id=None,
+                code="",
+                name=name,
+                amounts=amounts,
+                total=float(sum(amounts.values())),
+                row_kind=kind,
+            )
+        )
+
+    grand = float(sum(monthly_vendido.values())) if any(
+        abs(v) > 0.5 for v in monthly_vendido.values()
+    ) else float(sum(column_totals.values()))
     return EerrConsolidatedOut(
         from_period=_period_key(start),
         to_period=_period_key(end),
@@ -323,6 +404,6 @@ def get_eerr_consolidated(
         section_title="Ingresos",
         rows=rows,
         column_totals=column_totals,
-        grand_total=float(sum(column_totals.values())),
+        grand_total=grand,
         source=source,
     )

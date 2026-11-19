@@ -615,13 +615,11 @@ class TaxDocumentsFetchClient:
         accounts: list,
     ) -> dict[str, Any]:
         """
-        EERR ingresos for a range: FNS Vendido (Ingresos-Cobros) split by Cobros concepts.
+        EERR ingresos for a range: Vendido (Ingresos-Cobros) split by Cobros concepts.
 
-        Grand total follows Imp. Total CLP. Concept columns allocate by catalog labels;
-        remainder (pending / unlabeled) goes to the catch-all account (`*` label).
+        Catalog accounts only get labeled concept columns (incl. Varios→4190 when mapped).
+        Remanente is returned separately as pending_sales + unclassified_collections.
         """
-        from app.services.accounting_concept_map import catch_all_account
-
         if date_to < date_from:
             raise ExtranetWebError("Rango de fechas inválido")
         sales = self._ingresos_cobros_sales_totals(date_from, date_to)
@@ -630,17 +628,21 @@ class TaxDocumentsFetchClient:
         )
         concepts_total = float(sum(by_code.values()))
         vendido = float(sales.get("vendido") or 0)
-        remainder = round(vendido - concepts_total)
-        other = catch_all_account(accounts)
-        if abs(remainder) > 0.5 and other is not None:
-            other_code = str(other.code or "")
-            by_code[other_code] = float(by_code.get(other_code) or 0) + float(remainder)
+        cobrado = float(sales.get("cobrado") or 0)
+        pendiente = float(sales.get("pendiente") or 0)
+        remanente = round(vendido - concepts_total)
+        if remanente < 0:
+            remanente = 0.0
+        pending_sales = round(min(max(pendiente, 0.0), remanente))
+        unclassified_collections = round(max(remanente - pending_sales, 0.0))
         return {
             "vendido": vendido,
-            "cobrado": float(sales.get("cobrado") or 0),
-            "pendiente": float(sales.get("pendiente") or 0),
+            "cobrado": cobrado,
+            "pendiente": pendiente,
             "facturado": float(sales.get("facturado") or 0),
             "concepts_total": concepts_total,
+            "pending_sales": float(pending_sales),
+            "unclassified_collections": float(unclassified_collections),
             "by_account_code": by_code,
             "source": "extranet_vendido",
         }
