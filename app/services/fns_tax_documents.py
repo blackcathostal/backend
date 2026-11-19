@@ -274,14 +274,16 @@ class FnsTaxDocumentsClient:
             return None
 
         amount = _money(_find_col(row, "Importe", "Total", "Monto"))
-        remaining = _find_col(row, "Restante", "Pendiente")
-        remaining_amount = _money(remaining) if str(remaining or "").strip() else 0.0
+        remaining_raw = str(_find_col(row, "Restante", "Pendiente") or "").strip()
+        remaining_amount = _money(remaining_raw) if remaining_raw else 0.0
         concepts = _concept_breakdown(row)
         has_concepts = bool(concepts)
-        paid = remaining_amount <= 0.5 and amount > 0
-        # If remaining is blank and there is importe, treat as collected.
-        if not str(remaining or "").strip() and amount > 0:
-            paid = True
+        # Cobros rows are payments: blank Restante usually means that payment settled.
+        # Final paid/pending is refined with Ingresos-Cobros Pendiente by locator.
+        if remaining_raw:
+            paid = remaining_amount <= 0.5 and amount > 0
+        else:
+            paid = amount > 0
         status_code = "paid" if paid else "pending_payment"
         # Keep FNS document type as-is; catalog resolves/creates against DB.
         raw_type = str(doc_type or "").strip()
@@ -318,10 +320,10 @@ class FnsTaxDocumentsClient:
             },
         }
 
-    def _client_name_by_locator(
+    def _ingresos_cobros_index(
         self, date_from: date, date_to: date
-    ) -> dict[str, str]:
-        """Map reservation locator -> customer name from Ingresos-Cobros."""
+    ) -> tuple[dict[str, str], dict[str, float]]:
+        """From Ingresos-Cobros: locator -> guest name, locator -> pending amount (CLP)."""
         html = self._post_report(
             module="Informes",
             action="ingresoscobros",
@@ -334,15 +336,16 @@ class FnsTaxDocumentsClient:
             flags=re.I,
         )
         if not match:
-            return {}
+            return {}, {}
         try:
             payload = json.loads(unescape(match.group(1)).replace("&quot;", '"'))
             block = payload[0] if isinstance(payload, list) else payload
             headers = (block.get("cabecera") or {}).get("1") or []
             body = block.get("cuerpo") or {}
         except (TypeError, ValueError, json.JSONDecodeError):
-            return {}
-        out: dict[str, str] = {}
+            return {}, {}
+        names: dict[str, str] = {}
+        pending: dict[str, float] = {}
         for item in body.values():
             if not isinstance(item, list):
                 continue
@@ -350,10 +353,44 @@ class FnsTaxDocumentsClient:
                 headers[i]: item[i] if i < len(item) else None for i in range(len(headers))
             }
             locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
+            if not locator:
+                continue
             name = re.sub(r"\s+", " ", str(row.get("Datos cliente") or "")).strip()
-            if locator and name:
-                out[locator] = name
-        return out
+            if name:
+                names[locator] = name
+            currency = str(row.get("Moneda") or "").strip().upper()
+            # Track balances in CLP; USD rows are ignored for pending status.
+            if currency and currency not in {"CLP", "CL$", "PESO", "PESOS", ""}:
+                continue
+            pending_amount = _money(row.get("Pendiente"))
+            if pending_amount > float(pending.get(locator) or 0):
+                pending[locator] = pending_amount
+        return names, pending
+
+    def _client_name_by_locator(
+        self, date_from: date, date_to: date
+    ) -> dict[str, str]:
+        """Map reservation locator -> customer name from Ingresos-Cobros."""
+        names, _pending = self._ingresos_cobros_index(date_from, date_to)
+        return names
+
+    def _apply_locator_payment_status(
+        self, doc: dict[str, Any], *, pending_by_locator: dict[str, float]
+    ) -> None:
+        """Override Cobros paid/pending using reservation Pendiente from Ingresos-Cobros."""
+        locator = re.sub(r"\s+", "", str(doc.get("pms_ref") or ""))
+        if not locator:
+            return
+        pending_amount = float(pending_by_locator.get(locator) or 0)
+        if pending_amount > 0.5:
+            doc["payment_status_code"] = "pending_payment"
+        else:
+            # No open balance on the reservation => treat linked docs as paid.
+            doc["payment_status_code"] = "paid"
+        raw = dict(doc.get("raw") or {})
+        raw["payment_status_code"] = doc["payment_status_code"]
+        raw["reservation_pending_amount"] = pending_amount
+        doc["raw"] = raw
 
     def _merge_issued_row(
         self,
@@ -361,6 +398,7 @@ class FnsTaxDocumentsClient:
         doc: dict[str, Any],
         *,
         client_by_locator: dict[str, str],
+        pending_by_locator: dict[str, float],
         date_from: date,
         date_to: date,
     ) -> None:
@@ -376,6 +414,7 @@ class FnsTaxDocumentsClient:
         ):
             doc["company_name"] = ingreso_name
             doc["counterpart_name"] = ingreso_name
+        self._apply_locator_payment_status(doc, pending_by_locator=pending_by_locator)
         key = (
             str(doc.get("doc_type") or doc.get("dte_type_code") or ""),
             str(doc.get("folio") or ""),
@@ -384,7 +423,7 @@ class FnsTaxDocumentsClient:
         if current is None:
             merged[key] = doc
             return
-        # Same folio may appear in several payments: sum totals, keep paid if all settled.
+        # Same folio may appear in several payments: sum totals, keep pending if any open.
         current["total_amount"] = float(current.get("total_amount") or 0) + float(
             doc.get("total_amount") or 0
         )
@@ -393,12 +432,16 @@ class FnsTaxDocumentsClient:
             concepts[name] = float(concepts.get(name) or 0) + float(amount or 0)
         current["concepts"] = concepts
         current["has_concepts"] = bool(concepts)
-        if current.get("payment_status_code") != "paid" or doc.get("payment_status_code") != "paid":
-            if doc.get("payment_status_code") == "pending_payment":
-                current["payment_status_code"] = "pending_payment"
+        if (
+            current.get("payment_status_code") == "pending_payment"
+            or doc.get("payment_status_code") == "pending_payment"
+        ):
+            current["payment_status_code"] = "pending_payment"
         raw = dict(current.get("raw") or {})
         raw["concepts"] = concepts
         raw["payment_status_code"] = current["payment_status_code"]
+        if doc.get("raw", {}).get("reservation_pending_amount") is not None:
+            raw["reservation_pending_amount"] = doc["raw"]["reservation_pending_amount"]
         current["raw"] = raw
         if doc.get("company_name") and (
             not current.get("company_name")
@@ -420,7 +463,9 @@ class FnsTaxDocumentsClient:
                 date_from=window_from,
                 date_to=window_to,
             )
-            client_by_locator = self._client_name_by_locator(window_from, window_to)
+            client_by_locator, pending_by_locator = self._ingresos_cobros_index(
+                window_from, window_to
+            )
             rows = _parse_html_table(html, "Informe de cobros")
             for row in rows:
                 doc = self._normalize_cobro_row(row, direction="issued")
@@ -430,6 +475,7 @@ class FnsTaxDocumentsClient:
                     merged,
                     doc,
                     client_by_locator=client_by_locator,
+                    pending_by_locator=pending_by_locator,
                     date_from=date_from,
                     date_to=date_to,
                 )
