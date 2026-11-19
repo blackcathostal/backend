@@ -17,6 +17,9 @@ class EerrReportOut(BaseModel):
     section_title: str = "Ingresos"
     rows: list[EerrAccountRow] = Field(default_factory=list)
     grand_total: float = 0
+    # Chilean VAT breakdown of grand_total (bruto): neto + IVA ≈ bruto.
+    grand_net: float = 0
+    grand_tax: float = 0
     vendido: float = 0
     cobrado: float = 0
     pendiente: float = 0

@@ -31,7 +31,7 @@ from app.services.accounting_concept_map import (
     load_income_accounts,
 )
 from app.services.extranet_web_client import ExtranetWebError
-from app.services.tax_documents_fetch import TaxDocumentsFetchClient
+from app.services.tax_documents_fetch import TaxDocumentsFetchClient, _split_cl_iva
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 logger = logging.getLogger(__name__)
@@ -439,11 +439,15 @@ def get_eerr_report(
             vendido = rows_total
     # Bottom total = Cobros/remanente (vendido mix) + assigned facturas in account rows.
     grand_total = rows_total
+    # Amounts are gross (bruto); expose Neto/IVA at 19% for the footer.
+    grand_net, _grand_exempt, grand_tax = _split_cl_iva(grand_total)
     return EerrReportOut(
         period=_period_key(month_start),
         section_title="Ingresos",
         rows=rows,
         grand_total=grand_total,
+        grand_net=grand_net,
+        grand_tax=grand_tax,
         vendido=vendido,
         cobrado=cobrado,
         pendiente=pendiente,

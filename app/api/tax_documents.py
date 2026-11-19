@@ -36,7 +36,7 @@ from app.services.accounting_concept_map import (
 from app.services.billing_portal_client import BillingPortalClient
 from app.services.billing_portal_web import BillingPortalError, BillingPortalWebClient
 from app.services.accounting_classify import classify_document
-from app.services.tax_documents_fetch import TaxDocumentsFetchClient
+from app.services.tax_documents_fetch import TaxDocumentsFetchClient, _split_cl_iva
 from app.services.extranet_web_client import ExtranetWebError
 from app.services.received_document_account_map import (
     load_active_received_account_map,
@@ -418,6 +418,20 @@ def _serialize_doc(row: TaxDocuments, *, company_name: str = "") -> TaxDocumentO
         item.accounting_account_id = row.accounting_account_id
         item.accounting_account_code = row.accounting_account.code or ""
         item.accounting_account_name = row.accounting_account.name or ""
+    # Older recibidas rows may only have TOTAL stored; fill Neto/IVA for the UI.
+    if (
+        abs(float(item.total_amount or 0)) > 0.5
+        and abs(float(item.net_amount or 0)) <= 0.5
+        and abs(float(item.tax_amount or 0)) <= 0.5
+        and abs(float(item.exempt_amount or 0)) <= 0.5
+    ):
+        net, exempt, tax = _split_cl_iva(
+            float(item.total_amount or 0),
+            doc_type=item.dte_type_code or item.dte_type_name or "",
+        )
+        item.net_amount = net
+        item.exempt_amount = exempt
+        item.tax_amount = tax
     return item
 
 
@@ -703,10 +717,29 @@ def _upsert_docs(
             )
         row.identification_number = identification_number
         row.issued_at = issued_at
-        row.net_amount = float(item.get("net_amount") or 0)
-        row.exempt_amount = float(item.get("exempt_amount") or 0)
-        row.tax_amount = float(item.get("tax_amount") or 0)
-        row.total_amount = float(item.get("total_amount") or 0)
+        total_amount = float(item.get("total_amount") or 0)
+        net_amount = float(item.get("net_amount") or 0)
+        exempt_amount = float(item.get("exempt_amount") or 0)
+        tax_amount = float(item.get("tax_amount") or 0)
+        # Portal ledger often only has TOTAL; derive Neto/IVA (19%) when missing.
+        doc_type_hint = (
+            item.get("dte_type_code")
+            or item.get("doc_type")
+            or (item.get("raw") or {}).get("tipo")
+            or (item.get("raw") or {}).get("DOCUMENTO")
+            or ""
+        )
+        net_amount, exempt_amount, tax_amount = _split_cl_iva(
+            total_amount,
+            doc_type=doc_type_hint,
+            net_amount=net_amount,
+            exempt_amount=exempt_amount,
+            tax_amount=tax_amount,
+        )
+        row.net_amount = net_amount
+        row.exempt_amount = exempt_amount
+        row.tax_amount = tax_amount
+        row.total_amount = total_amount
         row.branch = str(item.get("branch") or "")[:120]
         if item.get("pms_class"):
             row.pms_class = str(item.get("pms_class") or "Sin match")[:80]
