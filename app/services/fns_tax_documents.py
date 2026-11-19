@@ -41,6 +41,51 @@ def _money(value: object) -> float:
     return -amount if negative else amount
 
 
+# Chilean VAT rate used when Cobros/Informes only expose gross total.
+_IVA_RATE = 0.19
+
+
+def _is_exempt_doc_type(doc_type: object) -> bool:
+    needle = _norm(str(doc_type or ""))
+    return (
+        "exent" in needle
+        or needle in {"34", "factura exenta", "exempt invoice", "exempt"}
+    )
+
+
+def _split_cl_iva(
+    total: float,
+    *,
+    doc_type: object = "",
+    net_amount: float = 0.0,
+    exempt_amount: float = 0.0,
+    tax_amount: float = 0.0,
+) -> tuple[float, float, float]:
+    """
+    Return (net, exempt, tax) for a Chilean DTE total.
+
+    Prefer explicit columns when present; otherwise back out 19% IVA from total
+    (FNS Cobros only publishes Importe/Total).
+    """
+    total = float(total or 0)
+    net = float(net_amount or 0)
+    exempt = float(exempt_amount or 0)
+    tax = float(tax_amount or 0)
+    if abs(net) > 0.5 or abs(tax) > 0.5 or abs(exempt) > 0.5:
+        return net, exempt, tax
+    if abs(total) < 0.5:
+        return 0.0, 0.0, 0.0
+    if _is_exempt_doc_type(doc_type):
+        # No VAT: show the gross as Neto/subtotal and keep exempt for accounting.
+        return total, total, 0.0
+    # net = total / 1.19 (CLP integer-friendly); tax = remainder so they sum to total.
+    sign = -1.0 if total < 0 else 1.0
+    absolute = abs(total)
+    net_abs = round(absolute / (1.0 + _IVA_RATE))
+    tax_abs = round(absolute - net_abs)
+    return sign * net_abs, 0.0, sign * tax_abs
+
+
 def _parse_date(value: object) -> date | None:
     text = str(value or "").strip()
     if not text:
@@ -287,6 +332,13 @@ class FnsTaxDocumentsClient:
         status_code = "paid" if paid else "pending_payment"
         # Keep FNS document type as-is; catalog resolves/creates against DB.
         raw_type = str(doc_type or "").strip()
+        net_amount, exempt_amount, tax_amount = _split_cl_iva(
+            amount,
+            doc_type=raw_type,
+            net_amount=_money(_find_col(row, "Neto", "Monto neto", "Subtotal")),
+            exempt_amount=_money(_find_col(row, "Exento", "Monto exento")),
+            tax_amount=_money(_find_col(row, "IVA", "Monto IVA", "Iva")),
+        )
         issued_at = _parse_date(_find_col(row, "Fecha", "Creado el"))
         company_name = _find_col(row, "Nombre", "Cliente", "Titular")
         locator = _find_col(row, "Localizador")
@@ -300,9 +352,9 @@ class FnsTaxDocumentsClient:
             "counterpart_rut": "",
             "counterpart_name": company_name[:220],
             "issued_at": issued_at.isoformat() if issued_at else None,
-            "net_amount": 0.0,
-            "exempt_amount": 0.0,
-            "tax_amount": 0.0,
+            "net_amount": net_amount,
+            "exempt_amount": exempt_amount,
+            "tax_amount": tax_amount,
             "total_amount": amount,
             "branch": "",
             "payment_status_code": status_code,
@@ -427,6 +479,15 @@ class FnsTaxDocumentsClient:
         current["total_amount"] = float(current.get("total_amount") or 0) + float(
             doc.get("total_amount") or 0
         )
+        current["net_amount"] = float(current.get("net_amount") or 0) + float(
+            doc.get("net_amount") or 0
+        )
+        current["exempt_amount"] = float(current.get("exempt_amount") or 0) + float(
+            doc.get("exempt_amount") or 0
+        )
+        current["tax_amount"] = float(current.get("tax_amount") or 0) + float(
+            doc.get("tax_amount") or 0
+        )
         concepts = dict(current.get("concepts") or {})
         for name, amount in (doc.get("concepts") or {}).items():
             concepts[name] = float(concepts.get(name) or 0) + float(amount or 0)
@@ -520,6 +581,13 @@ class FnsTaxDocumentsClient:
                 raw_type = str(
                     _find_col(row, "Tipo", "Tipo documento", "Tipo DTE") or ""
                 ).strip()
+                net_amount, exempt_amount, tax_amount = _split_cl_iva(
+                    amount,
+                    doc_type=raw_type,
+                    net_amount=_money(_find_col(row, "Neto", "Monto neto", "Subtotal")),
+                    exempt_amount=_money(_find_col(row, "Exento", "Monto exento")),
+                    tax_amount=_money(_find_col(row, "IVA", "Monto IVA", "Iva")),
+                )
                 docs.append(
                     {
                         "dte_type_code": raw_type,
@@ -531,9 +599,9 @@ class FnsTaxDocumentsClient:
                         "counterpart_rut": rut[:40],
                         "counterpart_name": company_name[:220],
                         "issued_at": issued_at.isoformat() if issued_at else None,
-                        "net_amount": _money(_find_col(row, "Neto", "Monto neto")),
-                        "exempt_amount": _money(_find_col(row, "Exento")),
-                        "tax_amount": _money(_find_col(row, "IVA", "Monto IVA")),
+                        "net_amount": net_amount,
+                        "exempt_amount": exempt_amount,
+                        "tax_amount": tax_amount,
                         "total_amount": amount,
                         "branch": "",
                         "payment_status_code": "pending_payment",
