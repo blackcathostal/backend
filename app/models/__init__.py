@@ -16,6 +16,7 @@ from app.models.mail_accounts import MailAccounts
 from app.models.medias import Medias
 from app.models.permissions import Permissions, RolePermissions
 from app.models.posts import Posts
+from app.models.received_document_account_mappings import ReceivedDocumentAccountMappings
 from app.models.roles import Roles
 from app.models.rooms import Rooms
 from app.models.services import Services
@@ -58,6 +59,7 @@ __all__ = [
     "Rooms",
     "HostelInfo",
     "HrPeriodAmounts",
+    "ReceivedDocumentAccountMappings",
     "CommonAnswers",
     "TermsAndConditions",
     "VisitorSessions",

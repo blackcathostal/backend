@@ -36,6 +36,10 @@ from app.services.billing_portal_web import BillingPortalError, BillingPortalWeb
 from app.services.accounting_classify import classify_document
 from app.services.tax_documents_fetch import TaxDocumentsFetchClient
 from app.services.extranet_web_client import ExtranetWebError
+from app.services.received_document_account_map import (
+    load_active_received_account_map,
+    resolve_received_accounting_account_id,
+)
 
 # Issued DTE type codes treated as invoices (import from facturacion.cl when missing in FNS).
 _INVOICE_TYPE_CODES = frozenset({"33", "34", "61"})
@@ -532,6 +536,9 @@ def _upsert_docs(
     issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
     under_review_status_id = dte_catalog.under_review_status_id(db) or default_status_id
+    received_account_map = (
+        load_active_received_account_map(db) if received_id else {}
+    )
 
     for item in docs:
         version_id = int(item.get("dte_version_id") or dte_version_id or 0)
@@ -687,6 +694,15 @@ def _upsert_docs(
             account_id = _resolve_accounting_account_id(db, item)
             if account_id:
                 row.accounting_account_id = account_id
+        elif version_id == received_id:
+            # Auto-assign from Contabilidad → mapeo recibidas (RUT → cuenta).
+            mapped_id = resolve_received_accounting_account_id(
+                db,
+                identification_number,
+                mapping=received_account_map,
+            )
+            if mapped_id:
+                row.accounting_account_id = mapped_id
         row.source = str(item.get("source") or source or "")[:40]
         try:
             row.raw_json = json.dumps(item.get("raw") or item, ensure_ascii=False, default=str)
