@@ -17,6 +17,7 @@ from app.models.tax_documents import DteStatuses, TaxDocuments
 from app.models.users import Users
 from app.schemas.tax_documents import (
     DteStatusOut,
+    TaxDocumentClearResult,
     TaxDocumentListResult,
     TaxDocumentOut,
     TaxDocumentPatch,
@@ -662,6 +663,26 @@ def download_document_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.delete("/clear", response_model=TaxDocumentClearResult)
+def clear_tax_documents(
+    direction: str = "issued",
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> TaxDocumentClearResult:
+    """Delete all tax documents for issued or received (admin reset before re-Actualizar)."""
+    try:
+        version_id = dte_catalog.version_id_from_raw(db, direction)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="version must be issued/received or 1/2") from exc
+    deleted = (
+        db.query(TaxDocuments)
+        .filter(TaxDocuments.dte_version_id == version_id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return TaxDocumentClearResult(dte_version_id=version_id, deleted=int(deleted or 0))
 
 
 @router.post("/refresh", response_model=TaxDocumentRefreshResult)

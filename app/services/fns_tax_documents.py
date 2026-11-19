@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import json
 import re
+from calendar import monthrange
 from datetime import date, datetime
 from html import unescape
-from typing import Any
+from typing import Any, Iterator
 
 from app.core.config import settings
 from app.services.fns_web_client import FnsWebClient, FnsWebError
@@ -113,6 +114,22 @@ def _date_payload(date_from: date, date_to: date) -> dict[str, str]:
         "mes_fin": f"{date_to.month:02d}",
         "ano_fin": str(date_to.year),
     }
+
+
+def _month_windows(date_from: date, date_to: date) -> Iterator[tuple[date, date]]:
+    """Yield inclusive calendar-month windows covering [date_from, date_to]."""
+    if date_to < date_from:
+        return
+    cursor = date(date_from.year, date_from.month, 1)
+    while cursor <= date_to:
+        last_day = monthrange(cursor.year, cursor.month)[1]
+        window_start = max(date_from, cursor)
+        window_end = min(date_to, date(cursor.year, cursor.month, last_day))
+        yield window_start, window_end
+        if cursor.month == 12:
+            cursor = date(cursor.year + 1, 1, 1)
+        else:
+            cursor = date(cursor.year, cursor.month + 1, 1)
 
 
 def _find_col(row: dict[str, str], *candidates: str) -> str:
@@ -338,66 +355,84 @@ class FnsTaxDocumentsClient:
                 out[locator] = name
         return out
 
+    def _merge_issued_row(
+        self,
+        merged: dict[tuple[str, str], dict[str, Any]],
+        doc: dict[str, Any],
+        *,
+        client_by_locator: dict[str, str],
+        date_from: date,
+        date_to: date,
+    ) -> None:
+        issued = _parse_date(doc.get("issued_at"))
+        if issued and (issued < date_from or issued > date_to):
+            return
+        locator = str(doc.get("pms_ref") or "").strip()
+        ingreso_name = client_by_locator.get(locator, "")
+        cobro_name = str(doc.get("company_name") or "").strip()
+        # Prefer real guest name from Ingresos-Cobros when Cobros has empty/generic name.
+        if ingreso_name and (
+            not cobro_name or _norm(cobro_name) in {"consumos consumos", "consumos"}
+        ):
+            doc["company_name"] = ingreso_name
+            doc["counterpart_name"] = ingreso_name
+        key = (
+            str(doc.get("doc_type") or doc.get("dte_type_code") or ""),
+            str(doc.get("folio") or ""),
+        )
+        current = merged.get(key)
+        if current is None:
+            merged[key] = doc
+            return
+        # Same folio may appear in several payments: sum totals, keep paid if all settled.
+        current["total_amount"] = float(current.get("total_amount") or 0) + float(
+            doc.get("total_amount") or 0
+        )
+        concepts = dict(current.get("concepts") or {})
+        for name, amount in (doc.get("concepts") or {}).items():
+            concepts[name] = float(concepts.get(name) or 0) + float(amount or 0)
+        current["concepts"] = concepts
+        current["has_concepts"] = bool(concepts)
+        if current.get("payment_status_code") != "paid" or doc.get("payment_status_code") != "paid":
+            if doc.get("payment_status_code") == "pending_payment":
+                current["payment_status_code"] = "pending_payment"
+        raw = dict(current.get("raw") or {})
+        raw["concepts"] = concepts
+        raw["payment_status_code"] = current["payment_status_code"]
+        current["raw"] = raw
+        if doc.get("company_name") and (
+            not current.get("company_name")
+            or _norm(str(current.get("company_name"))) in {"consumos consumos", "consumos"}
+        ):
+            current["company_name"] = doc["company_name"]
+            current["counterpart_name"] = doc["company_name"]
+
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        """Issued sales docs from Informes/Cobros, with account payment status + concepts."""
+        """Issued sales docs from Informes/Cobros, month-by-month (12-month lookback safe)."""
         if date_to < date_from:
             raise FnsWebError("Rango de fechas inválido")
-        html = self._post_report(
-            module="Informes",
-            action="Cobros",
-            date_from=date_from,
-            date_to=date_to,
-        )
-        client_by_locator = self._client_name_by_locator(date_from, date_to)
-        rows = _parse_html_table(html, "Informe de cobros")
+        # FNS Cobros truncates / ignores huge ranges; scrape each calendar month.
         merged: dict[tuple[str, str], dict[str, Any]] = {}
-        for row in rows:
-            doc = self._normalize_cobro_row(row, direction="issued")
-            if not doc:
-                continue
-            issued = _parse_date(doc.get("issued_at"))
-            if issued and (issued < date_from or issued > date_to):
-                continue
-            locator = str(doc.get("pms_ref") or "").strip()
-            ingreso_name = client_by_locator.get(locator, "")
-            cobro_name = str(doc.get("company_name") or "").strip()
-            # Prefer real guest name from Ingresos-Cobros when Cobros has empty/generic name.
-            if ingreso_name and (
-                not cobro_name or _norm(cobro_name) in {"consumos consumos", "consumos"}
-            ):
-                doc["company_name"] = ingreso_name
-                doc["counterpart_name"] = ingreso_name
-            key = (
-                str(doc.get("doc_type") or doc.get("dte_type_code") or ""),
-                str(doc.get("folio") or ""),
+        for window_from, window_to in _month_windows(date_from, date_to):
+            html = self._post_report(
+                module="Informes",
+                action="Cobros",
+                date_from=window_from,
+                date_to=window_to,
             )
-            current = merged.get(key)
-            if current is None:
-                merged[key] = doc
-                continue
-            # Same folio may appear in several payments: sum totals, keep paid if all settled.
-            current["total_amount"] = float(current.get("total_amount") or 0) + float(
-                doc.get("total_amount") or 0
-            )
-            concepts = dict(current.get("concepts") or {})
-            for name, amount in (doc.get("concepts") or {}).items():
-                concepts[name] = float(concepts.get(name) or 0) + float(amount or 0)
-            current["concepts"] = concepts
-            current["has_concepts"] = bool(concepts)
-            if current.get("payment_status_code") != "paid" or doc.get("payment_status_code") != "paid":
-                # If any open remainder remains, keep pending.
-                if doc.get("payment_status_code") == "pending_payment":
-                    current["payment_status_code"] = "pending_payment"
-            raw = dict(current.get("raw") or {})
-            raw["concepts"] = concepts
-            raw["payment_status_code"] = current["payment_status_code"]
-            current["raw"] = raw
-            if doc.get("company_name") and (
-                not current.get("company_name")
-                or _norm(str(current.get("company_name"))) in {"consumos consumos", "consumos"}
-            ):
-                current["company_name"] = doc["company_name"]
-                current["counterpart_name"] = doc["company_name"]
+            client_by_locator = self._client_name_by_locator(window_from, window_to)
+            rows = _parse_html_table(html, "Informe de cobros")
+            for row in rows:
+                doc = self._normalize_cobro_row(row, direction="issued")
+                if not doc:
+                    continue
+                self._merge_issued_row(
+                    merged,
+                    doc,
+                    client_by_locator=client_by_locator,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
         return list(merged.values())
 
     def fetch_received(self, date_from: date, date_to: date) -> list[dict[str, Any]]:

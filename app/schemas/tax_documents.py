@@ -75,6 +75,11 @@ class TaxDocumentRefreshResult(BaseModel):
     warning: str = ""
 
 
+class TaxDocumentClearResult(BaseModel):
+    dte_version_id: int
+    deleted: int
+
+
 class TaxDocumentListResult(BaseModel):
     items: list[TaxDocumentOut]
     total: int
