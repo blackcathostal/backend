@@ -45,3 +45,24 @@ class EerrConsolidatedOut(BaseModel):
     column_totals: dict[str, float] = Field(default_factory=dict)
     grand_total: float = 0
     source: str = "extranet_vendido"
+
+
+class EerrDetailLine(BaseModel):
+    issued_at: str | None = None
+    folio: str = ""
+    doc_type: str = ""
+    company_name: str = ""
+    locator: str = ""
+    concept: str = ""
+    amount: float = 0
+
+
+class EerrDetailOut(BaseModel):
+    period: str
+    row_kind: str = "account"
+    account_id: int | None = None
+    account_code: str = ""
+    account_name: str = ""
+    title: str = ""
+    total: float = 0
+    lines: list[EerrDetailLine] = Field(default_factory=list)

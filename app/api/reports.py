@@ -20,6 +20,8 @@ from app.schemas.reports import (
     EerrAccountRow,
     EerrConsolidatedOut,
     EerrConsolidatedRow,
+    EerrDetailLine,
+    EerrDetailOut,
     EerrReportOut,
 )
 from app.services import dte_catalog
@@ -259,6 +261,77 @@ def get_eerr_report(
         pending_sales=pending_sales,
         unclassified_collections=unclassified_collections,
         source=source,
+    )
+
+
+@router.get("/eerr/detail", response_model=EerrDetailOut)
+def get_eerr_detail(
+    period: str | None = None,
+    row_kind: str = "account",
+    account_id: int | None = None,
+    account_code: str | None = None,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> EerrDetailOut:
+    """Drill-down lines for an EERR account or remanente row."""
+    month_start = _parse_period(period)
+    today = date.today()
+    month_finish = min(_month_end(month_start), today) if (
+        month_start.year == today.year and month_start.month == today.month
+    ) else _month_end(month_start)
+
+    ensure_concept_labels_from_coa(db)
+    accounts = load_income_accounts(db)
+    kind = str(row_kind or "account").strip().lower()
+    code = str(account_code or "").strip()
+    account_name = ""
+    resolved_id = account_id
+
+    if kind == "account":
+        account = None
+        if account_id is not None:
+            account = next((row for row in accounts if int(row.id) == int(account_id)), None)
+        if account is None and code:
+            account = next(
+                (row for row in accounts if str(row.code or "") == code),
+                None,
+            )
+        if account is None:
+            raise HTTPException(status_code=404, detail="Cuenta contable no encontrada")
+        code = str(account.code or "")
+        account_name = str(account.name or "")
+        resolved_id = int(account.id)
+        title = f"{code} · {account_name}".strip(" ·")
+    elif kind == "pending":
+        title = "Pendiente por cobrar"
+    elif kind == "unclassified":
+        title = "Cobros sin clasificar"
+    else:
+        raise HTTPException(status_code=400, detail="row_kind inválido")
+
+    try:
+        client = TaxDocumentsFetchClient()
+        raw_lines = client.fetch_income_detail_lines(
+            month_start,
+            month_finish,
+            accounts=accounts,
+            row_kind=kind,
+            account_code=code,
+        )
+    except ExtranetWebError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
+    total = float(sum(float(item.amount or 0) for item in lines))
+    return EerrDetailOut(
+        period=_period_key(month_start),
+        row_kind=kind,
+        account_id=resolved_id,
+        account_code=code,
+        account_name=account_name,
+        title=title,
+        total=total,
+        lines=lines,
     )
 
 

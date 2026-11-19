@@ -540,10 +540,8 @@ class TaxDocumentsFetchClient:
             current["company_name"] = doc["company_name"]
             current["counterpart_name"] = doc["company_name"]
 
-    def _ingresos_cobros_sales_totals(
-        self, date_from: date, date_to: date
-    ) -> dict[str, float]:
-        """Sum Imp. Total / Cobrado / Pendiente from Ingresos-Cobros (CLP rows only)."""
+    def _ingresos_cobros_rows(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
+        """Raw CLP rows from Ingresos-Cobros."""
         html = self._post_report(
             module="Informes",
             action="ingresoscobros",
@@ -555,16 +553,16 @@ class TaxDocumentsFetchClient:
             html,
             flags=re.I,
         )
-        totals = {"vendido": 0.0, "cobrado": 0.0, "pendiente": 0.0, "facturado": 0.0}
         if not match:
-            return totals
+            return []
         try:
             payload = json.loads(unescape(match.group(1)).replace("&quot;", '"'))
             block = payload[0] if isinstance(payload, list) else payload
             headers = (block.get("cabecera") or {}).get("1") or []
             body = block.get("cuerpo") or {}
         except (TypeError, ValueError, json.JSONDecodeError):
-            return totals
+            return []
+        rows: list[dict[str, Any]] = []
         for item in body.values():
             if not isinstance(item, list):
                 continue
@@ -573,11 +571,33 @@ class TaxDocumentsFetchClient:
             }
             if not _is_clp_currency(row.get("Moneda")):
                 continue
+            rows.append(row)
+        return rows
+
+    def _ingresos_cobros_sales_totals(
+        self, date_from: date, date_to: date
+    ) -> dict[str, float]:
+        """Sum Imp. Total / Cobrado / Pendiente from Ingresos-Cobros (CLP rows only)."""
+        totals = {"vendido": 0.0, "cobrado": 0.0, "pendiente": 0.0, "facturado": 0.0}
+        for row in self._ingresos_cobros_rows(date_from, date_to):
             totals["vendido"] += _money(row.get("Imp. Total"))
             totals["cobrado"] += _money(row.get("Cobrado"))
             totals["pendiente"] += _money(row.get("Pendiente"))
             totals["facturado"] += _money(row.get("Facturado"))
         return totals
+
+    def _iter_cobros_rows(
+        self, date_from: date, date_to: date
+    ) -> Iterator[dict[str, str]]:
+        for window_from, window_to in _month_windows(date_from, date_to):
+            html = self._post_report(
+                module="Informes",
+                action="Cobros",
+                date_from=window_from,
+                date_to=window_to,
+            )
+            for row in _parse_html_table(html, "Informe de cobros"):
+                yield row
 
     def _cobros_concept_account_sums(
         self,
@@ -646,6 +666,115 @@ class TaxDocumentsFetchClient:
             "by_account_code": by_code,
             "source": "extranet_vendido",
         }
+
+    def fetch_income_detail_lines(
+        self,
+        date_from: date,
+        date_to: date,
+        *,
+        accounts: list,
+        row_kind: str = "account",
+        account_code: str = "",
+    ) -> list[dict[str, Any]]:
+        """
+        Drill-down lines for EERR:
+        - account: Cobros concept amounts mapped to account_code
+        - pending: Ingresos-Cobros rows with Pendiente > 0
+        - unclassified: Cobros importe not covered by concept columns
+        """
+        from app.services.accounting_concept_map import account_code_for_concept
+
+        kind = str(row_kind or "account").strip().lower()
+        code = str(account_code or "").strip()
+        lines: list[dict[str, Any]] = []
+
+        if kind == "pending":
+            for row in self._ingresos_cobros_rows(date_from, date_to):
+                pending = _money(row.get("Pendiente"))
+                if pending <= 0.5:
+                    continue
+                locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
+                guest = re.sub(
+                    r"\s+", " ", str(row.get("Datos cliente") or "")
+                ).strip()
+                arrival = str(row.get("Llegada") or "").strip()
+                lines.append(
+                    {
+                        "issued_at": arrival or None,
+                        "folio": "",
+                        "doc_type": str(row.get("Documento") or "").strip(),
+                        "company_name": guest,
+                        "locator": locator,
+                        "concept": "Pendiente",
+                        "amount": float(pending),
+                    }
+                )
+            return lines
+
+        for row in self._iter_cobros_rows(date_from, date_to):
+            concepts = _concept_breakdown(row, accounts=accounts)
+            concepts_sum = float(sum(float(v or 0) for v in concepts.values()))
+            importe = _money(
+                row.get("Importe") or row.get("Total") or row.get("Monto")
+            )
+            folio = re.sub(
+                r"\s+",
+                "",
+                str(
+                    row.get("Nº documento")
+                    or row.get("N° documento")
+                    or row.get("No documento")
+                    or row.get("Folio")
+                    or ""
+                ),
+            )
+            doc_type = str(row.get("Tipo documento") or row.get("Tipo") or "").strip()
+            company = str(
+                row.get("Nombre") or row.get("Cliente") or row.get("Titular") or ""
+            ).strip()
+            locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
+            issued = _parse_date(row.get("Fecha") or row.get("Creado el"))
+            issued_s = issued.isoformat() if issued else None
+
+            if kind == "unclassified":
+                gap = round(importe - concepts_sum)
+                if gap <= 0.5:
+                    continue
+                lines.append(
+                    {
+                        "issued_at": issued_s,
+                        "folio": folio[:40],
+                        "doc_type": doc_type,
+                        "company_name": company[:220],
+                        "locator": locator[:120],
+                        "concept": "Sin concepto",
+                        "amount": float(gap),
+                    }
+                )
+                continue
+
+            # account drill-down
+            if not code:
+                continue
+            for header, amount in concepts.items():
+                mapped = account_code_for_concept(header, accounts)
+                if mapped != code:
+                    continue
+                value = float(amount or 0)
+                if abs(value) <= 0.5:
+                    continue
+                lines.append(
+                    {
+                        "issued_at": issued_s,
+                        "folio": folio[:40],
+                        "doc_type": doc_type,
+                        "company_name": company[:220],
+                        "locator": locator[:120],
+                        "concept": str(header),
+                        "amount": value,
+                    }
+                )
+        return lines
 
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """Issued sales docs from Informes/Cobros, month-by-month (12-month lookback safe)."""
