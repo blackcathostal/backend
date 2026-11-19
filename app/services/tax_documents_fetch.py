@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from calendar import monthrange
 from datetime import date, datetime
@@ -11,6 +12,8 @@ from typing import Any, Iterator
 from app.core.config import settings
 from app.services import dte_catalog
 from app.services.extranet_web_client import ExtranetWebClient, ExtranetWebError
+
+logger = logging.getLogger(__name__)
 
 
 def _norm(text: str) -> str:
@@ -899,25 +902,58 @@ class TaxDocumentsFetchClient:
                 )
         return lines
 
+    def _collection_concepts_by_locator(
+        self,
+        date_from: date,
+        date_to: date,
+        *,
+        accounts: list | None = None,
+    ) -> dict[str, dict[str, float]]:
+        """Aggregate FNS Collections concept columns keyed by reservation locator."""
+        by_locator: dict[str, dict[str, float]] = {}
+        for row in self._iter_collection_rows(date_from, date_to):
+            locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
+            if not locator:
+                continue
+            concepts = _concept_breakdown(row, accounts=accounts)
+            if not concepts:
+                continue
+            bucket = by_locator.setdefault(locator, {})
+            for header, amount in concepts.items():
+                bucket[header] = float(bucket.get(header) or 0.0) + float(amount or 0)
+        return by_locator
+
     def _normalize_income_collections_row(
-        self, row: dict[str, Any]
+        self,
+        row: dict[str, Any],
+        *,
+        concepts: dict[str, float] | None = None,
+        concept_header: str | None = None,
+        amount_override: float | None = None,
+        folio_suffix: str = "",
     ) -> dict[str, Any] | None:
         """
-        One issued Track row per FNS income-collections reservation.
+        Issued Track row from FNS income-collections reservation.
+
         Imp. Total = sold; Cobrado/Pendiente → paid vs pending.
+        Optional Cobros concept split assigns Bar/Cafeteria/… instead of all lodging.
         """
         reservation_id = re.sub(r"\s+", "", str(row.get("ID") or ""))
         locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
-        folio = reservation_id or locator
-        if not folio:
+        folio_base = reservation_id or locator
+        if not folio_base:
             return None
+        folio = f"{folio_base}{folio_suffix}"[:40]
 
         total = float(_money(row.get("Imp. Total")) or 0)
         collected = float(_money(row.get("Cobrado")) or 0)
         pending = float(_money(row.get("Pendiente")) or 0)
         if abs(total) <= 0.5 and abs(collected) <= 0.5:
             return None
-        amount = total if abs(total) > 0.5 else collected
+        sold = total if abs(total) > 0.5 else collected
+        amount = float(amount_override) if amount_override is not None else sold
+        if abs(amount) <= 0.5:
+            return None
 
         arrival = _parse_date(row.get("Llegada"))
         departure = _parse_date(row.get("Salida"))
@@ -941,13 +977,18 @@ class TaxDocumentsFetchClient:
         net_amount, exempt_amount, tax_amount = _split_cl_iva(
             amount, doc_type=doc_type_label
         )
-        # Catalog concept_labels match FNS lodging column ("Alojamiento").
-        concepts = {"Alojamiento": amount}
+        concept_map = {
+            str(k): float(v or 0)
+            for k, v in (concepts or {}).items()
+            if abs(float(v or 0)) > 0.5
+        }
+        if concept_header and abs(amount) > 0.5:
+            concept_map = {str(concept_header): float(amount)}
         return {
             "dte_type_code": type_code,
             "doc_type": doc_type_label,
             "dte_version_code": "issued",
-            "folio": folio[:40],
+            "folio": folio,
             "identification_number": "",
             "company_name": guest[:220],
             "counterpart_rut": "",
@@ -959,16 +1000,17 @@ class TaxDocumentsFetchClient:
             "total_amount": amount,
             "branch": "",
             "payment_status_code": status_code,
-            "has_concepts": True,
-            "concepts": concepts,
+            "has_concepts": bool(concept_map),
+            "concepts": concept_map,
             "pms_ref": locator[:120],
             "pms_class": "FNS Income Collections",
             "sales_channel": channel[:80],
             "raw": {
                 **{str(k): v for k, v in row.items()},
-                "concepts": concepts,
+                "concepts": concept_map,
                 "payment_status_code": status_code,
-                "sold_amount": amount,
+                "sold_amount": sold,
+                "line_amount": amount,
                 "collected_amount": collected,
                 "pending_amount": pending,
                 "remaining_amount": pending,
@@ -976,44 +1018,94 @@ class TaxDocumentsFetchClient:
                 "fns_action": "ingresoscobros",
                 "doc_type": doc_type_label,
                 "sales_channel": channel,
+                "concept_header": concept_header or "",
             },
         }
 
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """
-        Issued Track refresh: FNS income-collections (sold / collected / pending).
+        Issued Track refresh: FNS income-collections amounts, split by Cobros concepts.
 
-        One row per reservation in the period; month windows keep large ranges stable.
+        Sold/collected come from income-collections; Bar/Cafeteria/… accounts come from
+        Collections concept columns for the same locator (scaled to Imp. Total).
         """
         if date_to < date_from:
             raise ExtranetWebError("Rango de fechas inválido")
+
+        from app.services.accounting_concept_map import load_income_accounts
+
+        # Concept labels live on CoA; load once for the scrape (no DB session here).
+        accounts: list = []
+        try:
+            from app.core.database import SessionLocal
+
+            db = SessionLocal()
+            try:
+                from app.services.accounting_concept_map import (
+                    ensure_concept_labels_from_coa,
+                )
+
+                ensure_concept_labels_from_coa(db)
+                accounts = load_income_accounts(db)
+            finally:
+                db.close()
+        except Exception as exc:  # noqa: BLE001 — scrape must continue without CoA
+            logger.warning("Issued refresh CoA unavailable for concepts: %s", exc)
+
+        concepts_by_locator = self._collection_concepts_by_locator(
+            date_from, date_to, accounts=accounts or None
+        )
         merged: dict[str, dict[str, Any]] = {}
         for window_from, window_to in _month_windows(date_from, date_to):
             for row in self._income_collections_rows(window_from, window_to):
-                doc = self._normalize_income_collections_row(row)
-                if not doc:
-                    continue
-                issued = _parse_date(doc.get("issued_at"))
-                if issued is not None and (issued < date_from or issued > date_to):
-                    # Keep rows FNS returned for the window even if checkout falls
-                    # just outside; clamp into the refresh range for Track/EERR.
-                    if issued < date_from:
-                        doc["issued_at"] = date_from.isoformat()
-                    elif issued > date_to:
-                        doc["issued_at"] = date_to.isoformat()
-                folio = str(doc.get("folio") or "")
-                if not folio:
-                    continue
-                current = merged.get(folio)
-                if current is None:
-                    merged[folio] = doc
-                    continue
-                # Same reservation across overlapping windows: keep the richer paid flag.
-                if (
-                    str(doc.get("payment_status_code") or "") == "paid"
-                    and str(current.get("payment_status_code") or "") != "paid"
-                ):
-                    merged[folio] = doc
+                locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
+                sold = float(_money(row.get("Imp. Total")) or 0)
+                if abs(sold) <= 0.5:
+                    sold = float(_money(row.get("Cobrado")) or 0)
+                locator_concepts = dict(concepts_by_locator.get(locator) or {})
+                concept_total = float(sum(float(v or 0) for v in locator_concepts.values()))
+
+                lines: list[dict[str, Any]] = []
+                if locator_concepts and concept_total > 0.5 and abs(sold) > 0.5:
+                    # Keep sold total from income-collections; mix from Cobros concepts.
+                    scaled = _scale_amounts_to_target(locator_concepts, sold)
+                    for header, amount in scaled.items():
+                        if abs(float(amount or 0)) <= 0.5:
+                            continue
+                        slug = re.sub(r"[^a-z0-9]+", "", _norm(header))[:12] or "x"
+                        doc = self._normalize_income_collections_row(
+                            row,
+                            concepts={header: float(amount)},
+                            concept_header=header,
+                            amount_override=float(amount),
+                            folio_suffix=f"-{slug}",
+                        )
+                        if doc:
+                            lines.append(doc)
+                else:
+                    doc = self._normalize_income_collections_row(row)
+                    if doc:
+                        lines.append(doc)
+
+                for doc in lines:
+                    issued = _parse_date(doc.get("issued_at"))
+                    if issued is not None and (issued < date_from or issued > date_to):
+                        if issued < date_from:
+                            doc["issued_at"] = date_from.isoformat()
+                        elif issued > date_to:
+                            doc["issued_at"] = date_to.isoformat()
+                    folio = str(doc.get("folio") or "")
+                    if not folio:
+                        continue
+                    current = merged.get(folio)
+                    if current is None:
+                        merged[folio] = doc
+                        continue
+                    if (
+                        str(doc.get("payment_status_code") or "") == "paid"
+                        and str(current.get("payment_status_code") or "") != "paid"
+                    ):
+                        merged[folio] = doc
         return list(merged.values())
 
     def fetch_received(self, date_from: date, date_to: date) -> list[dict[str, Any]]:

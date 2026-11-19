@@ -3,7 +3,7 @@
   {"code": "4102", "name": "Bar", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 20, "concept_labels": ["Bar", "bar"]},
   {"code": "4104", "name": "Cafetería", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 25, "concept_labels": ["Cafetería", "Cafeteria", "caf", "Frigobar", "Desayuno", "Delivery", "Refrigerios", "frig", "desay", "deliv", "refri"]},
   {"code": "4103", "name": "Estacionamiento", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 30, "concept_labels": ["Parking", "Estacionamiento", "park"]},
-  {"code": "4110", "name": "Ingresos por servicios adicionales", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 40, "concept_labels": ["Amenities", "Sauna", "amen", "sauna"]},
+  {"code": "4110", "name": "Ingresos por servicios adicionales", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 40, "concept_labels": ["Amenities", "Sauna", "Piscina", "Pool", "amen", "sauna", "pisci", "pool"]},
   {"code": "4120", "name": "Ingresos por tours / actividades", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 50, "concept_labels": ["Transfer/Tour", "Transfer", "Tour", "transfer", "tour"]},
   {"code": "4130", "name": "Ingresos por lavandería", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 60, "concept_labels": ["Lavandería", "Lavanderia", "lavan"]},
   {"code": "4140", "name": "Ingresos por arriendo / lockers", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 70, "concept_labels": ["Locker", "Lockers", "Arriendo", "lock"]},
