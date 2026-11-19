@@ -134,13 +134,41 @@ def _customer_key(identification_number: str, company_name: str) -> str:
     return f"name:{slug or 'unknown'}"[:80]
 
 
+_DTE_TYPE_LABELS_ES = {
+    dte_catalog.TYPE_CODE_INVOICE: "Factura",
+    dte_catalog.TYPE_CODE_EXEMPT_INVOICE: "Factura Exenta",
+    dte_catalog.TYPE_CODE_RECEIPT: "Boleta",
+    dte_catalog.TYPE_CODE_CREDIT_NOTE: "Nota de crédito",
+}
+
+
+def _dte_type_name_es(*, code: str = "", name: str = "") -> str:
+    code_key = str(code or "").strip()
+    if code_key in _DTE_TYPE_LABELS_ES:
+        return _DTE_TYPE_LABELS_ES[code_key]
+    raw = str(name or "").strip()
+    low = raw.lower()
+    if low in {"invoice", "factura"}:
+        return "Factura"
+    if low in {"receipt", "boleta"}:
+        return "Boleta"
+    if "exempt" in low or "exenta" in low:
+        return "Factura Exenta"
+    if "credit" in low or "crédito" in low or "credito" in low:
+        return "Nota de crédito"
+    return raw
+
+
 def _serialize_doc(row: TaxDocuments, *, company_name: str = "") -> TaxDocumentOut:
     item = TaxDocumentOut.model_validate(row)
     item.has_pdf = _has_pdf(row)
     item.company_name = company_name or ""
     if row.dte_type is not None:
         item.dte_type_code = row.dte_type.code or ""
-        item.dte_type_name = row.dte_type.name or ""
+        item.dte_type_name = _dte_type_name_es(
+            code=row.dte_type.code or "",
+            name=row.dte_type.name or "",
+        )
     if row.dte_version is not None:
         item.dte_version_code = row.dte_version.code or ""
         item.dte_version_name = row.dte_version.name or ""
@@ -287,6 +315,8 @@ def _upsert_docs(
     version_ids = dte_catalog.all_version_ids(db)
     default_status_id = dte_catalog.default_new_document_status_id(db)
     issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+    under_review_status_id = dte_catalog.under_review_status_id(db) or default_status_id
 
     for item in docs:
         version_id = int(item.get("dte_version_id") or dte_version_id or 0)
@@ -365,28 +395,37 @@ def _upsert_docs(
 
         is_new = row is None
         if is_new:
+            if version_id == received_id:
+                initial_status_id = under_review_status_id
+            else:
+                initial_status_id = payment_status_id or default_status_id
             row = TaxDocuments(
                 dte_version_id=version_id,
                 dte_type_id=type_id,
                 folio=folio,
                 identification_number=identification_number,
-                status_id=payment_status_id or default_status_id,
-                period=period,
+                status_id=initial_status_id,
+                period=period if version_id == issued_id else "",
             )
             db.add(row)
 
         row.dte_version_id = version_id
         row.dte_type_id = type_id
-        # Issued refresh always stamps period from document date (e.g. 11-2026).
+        # Issued refresh stamps period from document date (MM-YYYY). Recibidas: no period column.
         if version_id == issued_id and period:
             row.period = period
         elif is_new or row.period is None:
-            row.period = period or ""
-        # Refresh must update account status when FNS reports paid/pending.
-        if payment_status_id:
+            row.period = period if version_id == issued_id else (row.period or "")
+        # Issued: update paid/pending from FNS. Received: keep user classification;
+        # only default En revisión when status is empty.
+        if version_id == issued_id and payment_status_id:
             row.status_id = payment_status_id
-        elif not row.status_id and default_status_id:
-            row.status_id = default_status_id
+        elif not row.status_id:
+            row.status_id = (
+                under_review_status_id
+                if version_id == received_id
+                else (payment_status_id or default_status_id)
+            )
         row.identification_number = identification_number
         row.issued_at = issued_at
         row.net_amount = float(item.get("net_amount") or 0)

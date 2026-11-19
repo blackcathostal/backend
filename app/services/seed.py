@@ -495,7 +495,7 @@ def seed_database(db: Session) -> None:
     dte_statuses = (
         (1, dte_catalog.STATUS_CODE_PENDING_PAYMENT, "Imputada por Pagar", "red"),
         (2, dte_catalog.STATUS_CODE_PAID, "Imputada Pagada", "green"),
-        (3, dte_catalog.STATUS_CODE_WAITING, "En espera", "amber"),
+        (3, dte_catalog.STATUS_CODE_WAITING, "En revisión", "gray"),
     )
     for status_id, code, name, tip_color in dte_statuses:
         row = db.query(DteStatuses).filter(DteStatuses.code == code).first()

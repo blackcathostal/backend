@@ -162,8 +162,13 @@ def pending_payment_status_id(db: Session) -> int | None:
 
 
 def default_new_document_status_id(db: Session) -> int | None:
-    """New documents start as waiting until the user classifies payment."""
+    """New documents start as under review until the user classifies payment."""
     return waiting_status_id(db) or pending_payment_status_id(db)
+
+
+def under_review_status_id(db: Session) -> int | None:
+    """Alias: waiting catalog row is shown as En revisión."""
+    return waiting_status_id(db)
 
 
 def all_type_ids(db: Session) -> set[int]:
