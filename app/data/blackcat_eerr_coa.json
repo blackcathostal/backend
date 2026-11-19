@@ -1,7 +1,13 @@
 [
-  {"code": "4101", "name": "Hospedaje", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 10},
-  {"code": "4102", "name": "Consumos", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 20},
-  {"code": "4103", "name": "Estacionamiento", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 30},
+  {"code": "4101", "name": "Hospedaje", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 10, "concept_labels": ["Alojamiento", "aloj", "hosped"]},
+  {"code": "4102", "name": "Consumos", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 20, "concept_labels": ["Bar", "Cafetería", "Cafeteria", "Frigobar", "Desayuno", "Delivery", "Refrigerios", "caf", "frig", "desay", "deliv", "refri", "bar"]},
+  {"code": "4103", "name": "Estacionamiento", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 30, "concept_labels": ["Parking", "Estacionamiento", "park"]},
+  {"code": "4110", "name": "Ingresos por servicios adicionales", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 40, "concept_labels": ["Amenities", "Sauna", "amen", "sauna"]},
+  {"code": "4120", "name": "Ingresos por tours / actividades", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 50, "concept_labels": ["Transfer/Tour", "Transfer", "Tour", "transfer", "tour"]},
+  {"code": "4130", "name": "Ingresos por lavandería", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 60, "concept_labels": ["Lavandería", "Lavanderia", "lavan"]},
+  {"code": "4140", "name": "Ingresos por arriendo / lockers", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 70, "concept_labels": ["Locker", "Lockers", "Arriendo", "lock"]},
+  {"code": "4190", "name": "Otros ingresos", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 80, "concept_labels": ["Varios", "Tasas", "varios", "tasas", "*"]},
+  {"code": "4201", "name": "Descuentos sobre ventas", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 90, "concept_labels": ["Descuento", "Descuentos"]},
 
   {"code": "5101", "name": "Sueldo Base", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
   {"code": "5102", "name": "Horas Extras", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 20},

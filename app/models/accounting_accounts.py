@@ -17,5 +17,7 @@ class AccountingAccounts(Base):
     nature: Mapped[str] = mapped_column(String(20), nullable=False, default="deudora")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON list of FNS Cobros concept labels/tokens that map to this account.
+    concept_labels: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

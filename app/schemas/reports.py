@@ -15,6 +15,10 @@ class EerrReportOut(BaseModel):
     section_title: str = "Ingresos"
     rows: list[EerrAccountRow] = Field(default_factory=list)
     grand_total: float = 0
+    vendido: float = 0
+    cobrado: float = 0
+    pendiente: float = 0
+    source: str = "fns_vendido"
 
 
 class EerrConsolidatedRow(BaseModel):
@@ -34,3 +38,4 @@ class EerrConsolidatedOut(BaseModel):
     rows: list[EerrConsolidatedRow] = Field(default_factory=list)
     column_totals: dict[str, float] = Field(default_factory=dict)
     grand_total: float = 0
+    source: str = "fns_vendido"

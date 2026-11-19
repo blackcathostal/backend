@@ -25,6 +25,10 @@ from app.schemas.tax_documents import (
     TaxDocumentRefreshResult,
 )
 from app.services import dte_catalog
+from app.services.accounting_concept_map import (
+    load_income_accounts,
+    pick_account_from_concepts,
+)
 from app.services.billing_portal_web import BillingPortalError, BillingPortalWebClient
 from app.services.fns_accounting import classify_document
 from app.services.fns_tax_documents import FnsTaxDocumentsClient
@@ -36,27 +40,6 @@ router = APIRouter(tags=["tax-documents"])
 GENERIC_CUSTOMER_RUT = "66.666.666-6"
 GENERIC_CUSTOMER_NAME = "Sin cliente"
 _GENERIC_NAME_HINTS = {"", "consumos", "consumos consumos"}
-
-# FNS Cobros concept columns → chart of accounts code (ingresos).
-_CONCEPT_ACCOUNT_CODES = (
-    ("aloj", "4101"),
-    ("lavan", "4130"),
-    ("parking", "4103"),
-    ("transfer", "4120"),
-    ("tour", "4120"),
-    ("bar", "4102"),
-    ("caf", "4102"),
-    ("frig", "4102"),
-    ("desay", "4102"),
-    ("deliv", "4102"),
-    ("refri", "4102"),
-    ("amen", "4110"),
-    ("sauna", "4110"),
-    ("varios", "4190"),
-    ("tasas", "4190"),
-)
-_DEFAULT_ISSUED_ACCOUNT_CODE = "4101"
-
 
 def _extract_pdf_token(payload: object) -> str:
     if not isinstance(payload, dict):
@@ -189,40 +172,26 @@ def _dte_type_name_es(*, code: str = "", name: str = "") -> str:
     return "Boleta"
 
 
-def _concept_account_code(concepts: dict | None) -> str:
-    """Pick account code from the concept with the largest absolute amount."""
-    rows = concepts if isinstance(concepts, dict) else {}
-    best_name = ""
-    best_amount = 0.0
-    for name, amount in rows.items():
-        value = abs(float(amount or 0))
-        if value >= best_amount:
-            best_amount = value
-            best_name = str(name or "")
-    needle = re.sub(r"\s+", " ", best_name.strip()).lower()
-    for src, dst in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ñ", "n")):
-        needle = needle.replace(src, dst)
-    for token, code in _CONCEPT_ACCOUNT_CODES:
-        if token in needle:
-            return code
-    return _DEFAULT_ISSUED_ACCOUNT_CODE
-
-
 def _resolve_accounting_account_id(db: Session, item: dict) -> int | None:
     code = str(item.get("accounting_account_code") or "").strip()
-    if not code:
-        concepts = item.get("concepts")
-        if not isinstance(concepts, dict):
-            raw = item.get("raw")
-            if isinstance(raw, dict):
-                concepts = raw.get("concepts")
-        code = _concept_account_code(concepts if isinstance(concepts, dict) else {})
-    row = (
-        db.query(AccountingAccounts)
-        .filter(AccountingAccounts.code == code)
-        .first()
+    if code:
+        row = (
+            db.query(AccountingAccounts)
+            .filter(AccountingAccounts.code == code)
+            .first()
+        )
+        return int(row.id) if row is not None else None
+    concepts = item.get("concepts")
+    if not isinstance(concepts, dict):
+        raw = item.get("raw")
+        if isinstance(raw, dict):
+            concepts = raw.get("concepts")
+    accounts = load_income_accounts(db)
+    account = pick_account_from_concepts(
+        concepts if isinstance(concepts, dict) else {},
+        accounts,
     )
-    return int(row.id) if row is not None else None
+    return int(account.id) if account is not None else None
 
 
 def _serialize_doc(row: TaxDocuments, *, company_name: str = "") -> TaxDocumentOut:

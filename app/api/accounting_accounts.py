@@ -14,6 +14,7 @@ from app.schemas.accounting_accounts import (
     AccountingAccountsOut,
     AccountingAccountsUpdate,
 )
+from app.services.accounting_concept_map import parse_concept_labels, serialize_concept_labels
 router = APIRouter(prefix="/accounting-accounts", tags=["accounting-accounts"])
 
 COA_FILE = Path(__file__).resolve().parents[1] / "data" / "blackcat_eerr_coa.json"
@@ -72,6 +73,7 @@ def _load_coa_catalog() -> list[dict]:
                 "account_type": account_type,
                 "nature": nature,
                 "sort_order": sort_order,
+                "concept_labels": parse_concept_labels(item.get("concept_labels")),
             }
         )
     if not accounts:
@@ -127,6 +129,7 @@ def import_accounting_accounts_from_billing_portal(
     for item in catalog:
         code = item["code"]
         row = existing.get(code)
+        labels_json = serialize_concept_labels(item.get("concept_labels") or [])
         if row is None:
             account = AccountingAccounts(
                 code=code,
@@ -136,6 +139,7 @@ def import_accounting_accounts_from_billing_portal(
                 nature=item["nature"],
                 sort_order=item["sort_order"],
                 description=None,
+                concept_labels=labels_json,
                 is_active=True,
             )
             db.add(account)
@@ -158,6 +162,9 @@ def import_accounting_accounts_from_billing_portal(
             changed = True
         if int(row.sort_order or 0) != item["sort_order"]:
             row.sort_order = item["sort_order"]
+            changed = True
+        if (row.concept_labels or "[]") != labels_json:
+            row.concept_labels = labels_json
             changed = True
         if not row.is_active:
             row.is_active = True
@@ -216,6 +223,7 @@ def create_accounting_account(
         nature=payload.nature,
         sort_order=int(payload.sort_order or 0),
         description=(payload.description or "").strip() or None,
+        concept_labels=serialize_concept_labels(payload.concept_labels),
         is_active=payload.is_active,
     )
     db.add(account)
@@ -255,6 +263,8 @@ def update_accounting_account(
         data["description"] = cleaned or None
     if "sort_order" in data and data["sort_order"] is not None:
         data["sort_order"] = int(data["sort_order"])
+    if "concept_labels" in data and data["concept_labels"] is not None:
+        data["concept_labels"] = serialize_concept_labels(data["concept_labels"])
 
     for key, value in data.items():
         setattr(account, key, value)

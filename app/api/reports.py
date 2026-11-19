@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from calendar import monthrange
 from datetime import date, datetime
@@ -22,8 +23,12 @@ from app.schemas.reports import (
     EerrReportOut,
 )
 from app.services import dte_catalog
+from app.services.accounting_concept_map import load_income_accounts
+from app.services.fns_tax_documents import FnsTaxDocumentsClient
+from app.services.fns_web_client import FnsWebError
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+logger = logging.getLogger(__name__)
 
 _MONTH_LABELS_ES = (
     "",
@@ -94,30 +99,61 @@ def _iter_months(start: date, end: date) -> list[date]:
     return months
 
 
-def _income_accounts(db: Session) -> list[AccountingAccounts]:
-    rows = (
-        db.query(AccountingAccounts)
-        .filter(
-            AccountingAccounts.is_active.is_(True),
-            AccountingAccounts.account_type == "ingreso",
-        )
-        .order_by(
-            AccountingAccounts.sort_order.asc(),
-            AccountingAccounts.code.asc(),
-        )
-        .all()
-    )
-    # Prefer category Ingresos when present; keep other ingreso accounts after.
-    ingresos = [row for row in rows if (row.category or "").strip().lower() == "ingresos"]
-    others = [row for row in rows if (row.category or "").strip().lower() != "ingresos"]
-    return ingresos + others
-
-
 def _issued_version_id(db: Session) -> int:
     version_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
     if version_id is None:
         raise HTTPException(status_code=500, detail="Catálogo dte_versions incompleto")
     return int(version_id)
+
+
+def _rows_from_code_totals(
+    accounts: list[AccountingAccounts],
+    by_code: dict[str, float],
+) -> list[EerrAccountRow]:
+    return [
+        EerrAccountRow(
+            account_id=int(account.id),
+            code=account.code or "",
+            name=account.name or "",
+            total=float(by_code.get(str(account.code or ""), 0.0)),
+        )
+        for account in accounts
+    ]
+
+
+def _tax_document_code_totals(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> dict[str, float]:
+    """Fallback: sum issued document totals by accounting account code."""
+    issued_id = _issued_version_id(db)
+    sums = (
+        db.query(
+            AccountingAccounts.code,
+            func.coalesce(func.sum(TaxDocuments.total_amount), 0.0),
+        )
+        .join(
+            AccountingAccounts,
+            AccountingAccounts.id == TaxDocuments.accounting_account_id,
+        )
+        .filter(
+            TaxDocuments.dte_version_id == issued_id,
+            TaxDocuments.accounting_account_id.isnot(None),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+        )
+        .group_by(AccountingAccounts.code)
+        .all()
+    )
+    return {str(code or ""): float(total or 0) for code, total in sums if code}
+
+
+def _fetch_fns_month(date_from: date, date_to: date, *, accounts: list) -> dict:
+    client = FnsTaxDocumentsClient()
+    return client.fetch_income_by_account(date_from, date_to, accounts=accounts)
 
 
 @router.get("/eerr", response_model=EerrReportOut)
@@ -126,44 +162,51 @@ def get_eerr_report(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrReportOut:
-    """Income statement for one month: Ingresos accounts + total per account."""
+    """Income statement for one month from FNS Vendido (not Cobros/emitidas only)."""
     month_start = _parse_period(period)
-    month_finish = _month_end(month_start)
-    issued_id = _issued_version_id(db)
-    accounts = _income_accounts(db)
+    # Cap "this month" to today so mid-month matches FNS open range.
+    today = date.today()
+    month_finish = min(_month_end(month_start), today) if (
+        month_start.year == today.year and month_start.month == today.month
+    ) else _month_end(month_start)
+    accounts = load_income_accounts(db)
 
-    sums = (
-        db.query(
-            TaxDocuments.accounting_account_id,
-            func.coalesce(func.sum(TaxDocuments.total_amount), 0.0),
+    source = "fns_vendido"
+    vendido = 0.0
+    cobrado = 0.0
+    pendiente = 0.0
+    by_code: dict[str, float] = {}
+    try:
+        payload = _fetch_fns_month(month_start, month_finish, accounts=accounts)
+        by_code = {
+            str(code): float(amount or 0)
+            for code, amount in (payload.get("by_account_code") or {}).items()
+        }
+        vendido = float(payload.get("vendido") or 0)
+        cobrado = float(payload.get("cobrado") or 0)
+        pendiente = float(payload.get("pendiente") or 0)
+    except FnsWebError as exc:
+        logger.warning("EERR FNS unavailable, falling back to tax_documents: %s", exc)
+        source = "tax_documents"
+        by_code = _tax_document_code_totals(
+            db, date_from=month_start, date_to=month_finish
         )
-        .filter(
-            TaxDocuments.dte_version_id == issued_id,
-            TaxDocuments.accounting_account_id.isnot(None),
-            TaxDocuments.issued_at.isnot(None),
-            TaxDocuments.issued_at >= month_start,
-            TaxDocuments.issued_at <= month_finish,
-        )
-        .group_by(TaxDocuments.accounting_account_id)
-        .all()
-    )
-    by_account = {int(account_id): float(total or 0) for account_id, total in sums if account_id}
+        vendido = float(sum(by_code.values()))
+        cobrado = vendido
 
-    rows = [
-        EerrAccountRow(
-            account_id=int(account.id),
-            code=account.code or "",
-            name=account.name or "",
-            total=float(by_account.get(int(account.id), 0.0)),
-        )
-        for account in accounts
-    ]
+    rows = _rows_from_code_totals(accounts, by_code)
     grand_total = float(sum(row.total for row in rows))
+    if vendido <= 0 and grand_total > 0:
+        vendido = grand_total
     return EerrReportOut(
         period=_period_key(month_start),
         section_title="Ingresos",
         rows=rows,
-        grand_total=grand_total,
+        grand_total=grand_total if grand_total > 0 else vendido,
+        vendido=vendido,
+        cobrado=cobrado,
+        pendiente=pendiente,
+        source=source,
     )
 
 
@@ -174,13 +217,10 @@ def get_eerr_consolidated(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrConsolidatedOut:
-    """Income statement by account with one total column per month."""
+    """Income statement by account with one total column per month (FNS Vendido)."""
     today = date.today()
     default_to = date(today.year, today.month, 1)
-    if today.month == 1:
-        default_from = date(today.year - 1, 1, 1)
-    else:
-        default_from = date(today.year, 1, 1)
+    default_from = date(today.year, 1, 1)
 
     start = _parse_period(from_period, fallback=default_from)
     end = _parse_period(to_period, fallback=default_to)
@@ -190,47 +230,70 @@ def get_eerr_consolidated(
     months = _iter_months(start, end)
     period_keys = [_period_key(month) for month in months]
     period_labels = [_period_label(month) for month in months]
-    issued_id = _issued_version_id(db)
-    accounts = _income_accounts(db)
+    accounts = load_income_accounts(db)
 
-    range_start = months[0]
-    range_end = _month_end(months[-1])
-    year_col = extract("year", TaxDocuments.issued_at)
-    month_col = extract("month", TaxDocuments.issued_at)
-    sums = (
-        db.query(
-            TaxDocuments.accounting_account_id,
-            year_col,
-            month_col,
-            func.coalesce(func.sum(TaxDocuments.total_amount), 0.0),
+    monthly_by_code: dict[str, dict[str, float]] = {key: {} for key in period_keys}
+    source = "fns_vendido"
+    try:
+        client = FnsTaxDocumentsClient()
+        for month in months:
+            key = _period_key(month)
+            finish = min(_month_end(month), today) if (
+                month.year == today.year and month.month == today.month
+            ) else _month_end(month)
+            payload = client.fetch_income_by_account(
+                month, finish, accounts=accounts
+            )
+            monthly_by_code[key] = {
+                str(code): float(amount or 0)
+                for code, amount in (payload.get("by_account_code") or {}).items()
+            }
+    except FnsWebError as exc:
+        logger.warning(
+            "EERR consolidated FNS unavailable, falling back to tax_documents: %s",
+            exc,
         )
-        .filter(
-            TaxDocuments.dte_version_id == issued_id,
-            TaxDocuments.accounting_account_id.isnot(None),
-            TaxDocuments.issued_at.isnot(None),
-            TaxDocuments.issued_at >= range_start,
-            TaxDocuments.issued_at <= range_end,
+        source = "tax_documents"
+        issued_id = _issued_version_id(db)
+        year_col = extract("year", TaxDocuments.issued_at)
+        month_col = extract("month", TaxDocuments.issued_at)
+        sums = (
+            db.query(
+                AccountingAccounts.code,
+                year_col,
+                month_col,
+                func.coalesce(func.sum(TaxDocuments.total_amount), 0.0),
+            )
+            .join(
+                AccountingAccounts,
+                AccountingAccounts.id == TaxDocuments.accounting_account_id,
+            )
+            .filter(
+                TaxDocuments.dte_version_id == issued_id,
+                TaxDocuments.accounting_account_id.isnot(None),
+                TaxDocuments.issued_at.isnot(None),
+                TaxDocuments.issued_at >= months[0],
+                TaxDocuments.issued_at <= _month_end(months[-1]),
+            )
+            .group_by(AccountingAccounts.code, year_col, month_col)
+            .all()
         )
-        .group_by(
-            TaxDocuments.accounting_account_id,
-            year_col,
-            month_col,
-        )
-        .all()
-    )
-
-    totals: dict[tuple[int, str], float] = {}
-    for account_id, year, month, total in sums:
-        if account_id is None or year is None or month is None:
-            continue
-        key = (int(account_id), f"{int(year):04d}-{int(month):02d}")
-        totals[key] = float(total or 0)
+        monthly_by_code = {key: {} for key in period_keys}
+        for code, year, month_num, total in sums:
+            if not code or year is None or month_num is None:
+                continue
+            key = f"{int(year):04d}-{int(month_num):02d}"
+            if key not in monthly_by_code:
+                continue
+            monthly_by_code[key][str(code)] = float(total or 0)
 
     rows: list[EerrConsolidatedRow] = []
     column_totals = {key: 0.0 for key in period_keys}
     for account in accounts:
+        code = str(account.code or "")
         amounts = {
-            key: float(totals.get((int(account.id), key), 0.0)) for key in period_keys
+            key: float((monthly_by_code.get(key) or {}).get(code, 0.0))
+            for key in period_keys
         }
         row_total = float(sum(amounts.values()))
         for key, value in amounts.items():
@@ -238,7 +301,7 @@ def get_eerr_consolidated(
         rows.append(
             EerrConsolidatedRow(
                 account_id=int(account.id),
-                code=account.code or "",
+                code=code,
                 name=account.name or "",
                 amounts=amounts,
                 total=row_total,
@@ -254,4 +317,5 @@ def get_eerr_consolidated(
         rows=rows,
         column_totals=column_totals,
         grand_total=float(sum(column_totals.values())),
+        source=source,
     )

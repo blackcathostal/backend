@@ -1,0 +1,12 @@
+---
+description: Prohibido código duro for business catalogs/mappings (accounts, FNS concepts, etc.)
+alwaysApply: true
+---
+
+# Prohibido código en duro
+
+Before creating or editing mappings/catalogs in this project, follow `.cursor/skills/no-hardcoded-business-data/SKILL.md`.
+
+- **Never** hardcode account codes, FNS concept→account maps, or similar business tables in Python/JS.
+- Store mappings in DB catalogs / `app/data` JSON; resolve at runtime from active rows.
+- If you find hardcoded business maps while editing, move them to the catalog and delete the literals.

@@ -189,34 +189,63 @@ def _find_col(row: dict[str, str], *candidates: str) -> str:
     return ""
 
 
-def _concept_breakdown(row: dict[str, str]) -> dict[str, float]:
+# FNS Cobros layout columns that are never revenue concepts (table schema, not CoA).
+_NON_CONCEPT_HEADERS = frozenset(
+    {
+        "id",
+        "fecha",
+        "creado el",
+        "tipo",
+        "tipo documento",
+        "folio",
+        "n documento",
+        "no documento",
+        "importe",
+        "total",
+        "monto",
+        "restante",
+        "pendiente",
+        "nombre",
+        "cliente",
+        "titular",
+        "localizador",
+        "forma de cobro",
+        "canal",
+        "origen",
+        "comentario",
+        "comentarios",
+        "empresa",
+        "moneda",
+        "rut",
+    }
+)
+
+
+def _concept_breakdown(
+    row: dict[str, str],
+    *,
+    accounts: list | None = None,
+) -> dict[str, float]:
+    """Extract money columns that map to income concepts (from catalog labels when given)."""
+    from app.services.accounting_concept_map import is_concept_column
+
     out: dict[str, float] = {}
     for key, value in row.items():
         nk = _norm(key)
-        if not any(
-            token in nk
-            for token in (
-                "aloj",
-                "lavan",
-                "bar",
-                "sauna",
-                "frig",
-                "caf",
-                "deliv",
-                "amen",
-                "transfer",
-                "park",
-                "desay",
-                "refri",
-                "varios",
-                "tasas",
-            )
-        ):
+        if nk in _NON_CONCEPT_HEADERS:
             continue
+        if accounts is not None:
+            if not is_concept_column(key, accounts):
+                continue
         amount = _money(value)
         if amount:
             out[key] = amount
     return out
+
+
+def _is_clp_currency(value: object) -> bool:
+    currency = str(value or "").strip().upper()
+    return (not currency) or currency in {"CLP", "CL$", "PESO", "PESOS", "$"}
 
 
 def _parse_html_table(html: str, title_hint: str) -> list[dict[str, str]]:
@@ -510,6 +539,111 @@ class FnsTaxDocumentsClient:
         ):
             current["company_name"] = doc["company_name"]
             current["counterpart_name"] = doc["company_name"]
+
+    def _ingresos_cobros_sales_totals(
+        self, date_from: date, date_to: date
+    ) -> dict[str, float]:
+        """Sum Imp. Total / Cobrado / Pendiente from Ingresos-Cobros (CLP rows only)."""
+        html = self._post_report(
+            module="Informes",
+            action="ingresoscobros",
+            date_from=date_from,
+            date_to=date_to,
+        )
+        match = re.search(
+            r'name=["\']json_tablas["\']\s+value=["\']([^"\']+)["\']',
+            html,
+            flags=re.I,
+        )
+        totals = {"vendido": 0.0, "cobrado": 0.0, "pendiente": 0.0, "facturado": 0.0}
+        if not match:
+            return totals
+        try:
+            payload = json.loads(unescape(match.group(1)).replace("&quot;", '"'))
+            block = payload[0] if isinstance(payload, list) else payload
+            headers = (block.get("cabecera") or {}).get("1") or []
+            body = block.get("cuerpo") or {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return totals
+        for item in body.values():
+            if not isinstance(item, list):
+                continue
+            row = {
+                headers[i]: item[i] if i < len(item) else None for i in range(len(headers))
+            }
+            if not _is_clp_currency(row.get("Moneda")):
+                continue
+            totals["vendido"] += _money(row.get("Imp. Total"))
+            totals["cobrado"] += _money(row.get("Cobrado"))
+            totals["pendiente"] += _money(row.get("Pendiente"))
+            totals["facturado"] += _money(row.get("Facturado"))
+        return totals
+
+    def _cobros_concept_account_sums(
+        self,
+        date_from: date,
+        date_to: date,
+        *,
+        accounts: list,
+    ) -> dict[str, float]:
+        """Sum Cobros concept columns mapped via accounting_accounts.concept_labels."""
+        from app.services.accounting_concept_map import account_code_for_concept
+
+        by_code: dict[str, float] = {}
+        for window_from, window_to in _month_windows(date_from, date_to):
+            html = self._post_report(
+                module="Informes",
+                action="Cobros",
+                date_from=window_from,
+                date_to=window_to,
+            )
+            rows = _parse_html_table(html, "Informe de cobros")
+            for row in rows:
+                concepts = _concept_breakdown(row, accounts=accounts)
+                for header, amount in concepts.items():
+                    code = account_code_for_concept(header, accounts)
+                    if not code:
+                        continue
+                    by_code[code] = float(by_code.get(code) or 0) + float(amount or 0)
+        return by_code
+
+    def fetch_income_by_account(
+        self,
+        date_from: date,
+        date_to: date,
+        *,
+        accounts: list,
+    ) -> dict[str, Any]:
+        """
+        EERR ingresos for a range: FNS Vendido (Ingresos-Cobros) split by Cobros concepts.
+
+        Grand total follows Imp. Total CLP. Concept columns allocate by catalog labels;
+        remainder (pending / unlabeled) goes to the catch-all account (`*` label).
+        """
+        from app.services.accounting_concept_map import catch_all_account
+
+        if date_to < date_from:
+            raise FnsWebError("Rango de fechas inválido")
+        sales = self._ingresos_cobros_sales_totals(date_from, date_to)
+        by_code = self._cobros_concept_account_sums(
+            date_from, date_to, accounts=accounts
+        )
+        concepts_total = float(sum(by_code.values()))
+        vendido = float(sales.get("vendido") or 0)
+        remainder = round(vendido - concepts_total)
+        other = catch_all_account(accounts)
+        if abs(remainder) > 0.5 and other is not None:
+            other_code = str(other.code or "")
+            by_code[other_code] = float(by_code.get(other_code) or 0) + float(remainder)
+        return {
+            "vendido": vendido,
+            "cobrado": float(sales.get("cobrado") or 0),
+            "pendiente": float(sales.get("pendiente") or 0),
+            "facturado": float(sales.get("facturado") or 0),
+            "concepts_total": concepts_total,
+            "by_account_code": by_code,
+            "source": "fns_vendido",
+        }
 
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """Issued sales docs from Informes/Cobros, month-by-month (12-month lookback safe)."""

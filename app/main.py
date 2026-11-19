@@ -195,6 +195,20 @@ def _ensure_schema_patches() -> None:
                     "ADD COLUMN sort_order INT NOT NULL DEFAULT 0"
                 )
             )
+        if not column_exists("accounting_accounts", "concept_labels"):
+            conn.execute(
+                text(
+                    "ALTER TABLE accounting_accounts "
+                    "ADD COLUMN concept_labels TEXT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE accounting_accounts "
+                    "SET concept_labels = '[]' "
+                    "WHERE concept_labels IS NULL OR concept_labels = ''"
+                )
+            )
         if not column_exists("roles", "updated_at"):
             conn.execute(
                 text(
