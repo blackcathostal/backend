@@ -8,7 +8,7 @@ from calendar import monthrange
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import extract, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -269,6 +269,52 @@ def _expense_rows_for_period(
     return rows
 
 
+def _issued_doc_signed_amount(db: Session, *, type_id: int | None, amount: float) -> float:
+    """Apply NC sign so credit notes reduce issued income totals."""
+    value = float(amount or 0)
+    if abs(value) <= 0.5:
+        return 0.0
+    credit_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_CREDIT_NOTE)
+    if credit_id is not None and type_id is not None and int(type_id) == int(credit_id):
+        return -abs(value)
+    return value
+
+
+def _issued_totals_by_account_id(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> dict[int, float]:
+    """Σ emitidas (boletas/facturas/NC) by assigned accounting account for the month."""
+    issued_id = _issued_version_id(db)
+    rows = (
+        db.query(
+            TaxDocuments.accounting_account_id,
+            TaxDocuments.dte_type_id,
+            TaxDocuments.total_amount,
+        )
+        .filter(
+            TaxDocuments.dte_version_id == issued_id,
+            TaxDocuments.accounting_account_id.isnot(None),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+        )
+        .all()
+    )
+    totals: dict[int, float] = {}
+    for account_id, type_id, amount in rows:
+        if account_id is None:
+            continue
+        value = _issued_doc_signed_amount(db, type_id=type_id, amount=float(amount or 0))
+        if abs(value) <= 0.5:
+            continue
+        key = int(account_id)
+        totals[key] = float(totals.get(key, 0.0) + value)
+    return totals
+
+
 def _invoice_totals_by_account_id(
     db: Session,
     *,
@@ -296,45 +342,68 @@ def _invoice_totals_by_account_id(
         )
         .all()
     )
-    credit_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_CREDIT_NOTE)
     totals: dict[int, float] = {}
     for account_id, type_id, amount in rows:
         if account_id is None:
             continue
-        value = float(amount or 0)
+        value = _issued_doc_signed_amount(db, type_id=type_id, amount=float(amount or 0))
         if abs(value) <= 0.5:
             continue
-        if credit_id is not None and int(type_id or 0) == int(credit_id):
-            value = -abs(value)
         key = int(account_id)
         totals[key] = float(totals.get(key, 0.0) + value)
     return totals
 
 
-def _remanente_rows(
+def _unassigned_issued_total(
+    db: Session,
     *,
-    pending_sales: float,
-    unclassified_collections: float,
-) -> list[EerrAccountRow]:
-    """Detail lines for vendido not mapped to Cobros concept columns."""
-    rows: list[EerrAccountRow] = []
-    if abs(pending_sales) > 0.5:
-        rows.append(
-            EerrAccountRow(
-                account_id=None,
-                code="",
-                name="Pendiente por cobrar",
-                total=float(pending_sales),
-                row_kind="pending",
-            )
+    date_from: date,
+    date_to: date,
+) -> float:
+    """Σ emitidas still without accounting_account_id (NC negative)."""
+    issued_id = _issued_version_id(db)
+    rows = (
+        db.query(TaxDocuments.dte_type_id, TaxDocuments.total_amount)
+        .filter(
+            TaxDocuments.dte_version_id == issued_id,
+            TaxDocuments.accounting_account_id.is_(None),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
         )
-    if abs(unclassified_collections) > 0.5:
+        .all()
+    )
+    total = 0.0
+    for type_id, amount in rows:
+        total += _issued_doc_signed_amount(db, type_id=type_id, amount=float(amount or 0))
+    return float(total)
+
+
+def _income_rows_from_issued(
+    accounts: list[AccountingAccounts],
+    issued_by_account_id: dict[int, float],
+    *,
+    unassigned_total: float = 0.0,
+) -> list[EerrAccountRow]:
+    """Build ingreso rows from Emitidas assigned totals (mirror of recibidas egresos)."""
+    rows: list[EerrAccountRow] = [
+        EerrAccountRow(
+            account_id=int(account.id),
+            code=str(account.code or ""),
+            name=str(account.name or ""),
+            total=float(issued_by_account_id.get(int(account.id), 0.0)),
+            row_kind="account",
+            category=str(account.category or ""),
+        )
+        for account in accounts
+    ]
+    if abs(unassigned_total) > 0.5:
         rows.append(
             EerrAccountRow(
                 account_id=None,
                 code="",
-                name="Vendido sin clasificar",
-                total=float(unclassified_collections),
+                name="Emitidas sin clasificar",
+                total=float(unassigned_total),
                 row_kind="unclassified",
             )
         )
@@ -604,7 +673,13 @@ def get_eerr_report(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrReportOut:
-    """Income statement for one month from FNS Vendido (not Cobros/emitidas only)."""
+    """
+    Income statement for one month.
+
+    Ingresos ← Emitidas (boletas/facturas/NC) by account — same idea as Recibidas for egresos.
+    Egresos ← Recibidas + RRHH + OTA commissions (Informes/Comisiones).
+    Cobrado/Pendiente KPIs still come from FNS Ingresos-Cobros when available.
+    """
     month_start = _parse_period(period)
     # Cap "this month" to today so mid-month matches FNS open range.
     today = date.today()
@@ -614,45 +689,41 @@ def get_eerr_report(
     ensure_concept_labels_from_coa(db)
     accounts = load_income_accounts(db)
 
-    source = "extranet_vendido"
-    vendido = 0.0
+    source = "tax_documents_issued"
+    issued_by_account = _issued_totals_by_account_id(
+        db, date_from=month_start, date_to=month_finish
+    )
+    unassigned_total = _unassigned_issued_total(
+        db, date_from=month_start, date_to=month_finish
+    )
+    rows = _income_rows_from_issued(
+        accounts,
+        issued_by_account,
+        unassigned_total=unassigned_total,
+    )
+    grand_total = float(sum(float(row.total or 0) for row in rows))
+    concepts_total = float(sum(float(v or 0) for v in issued_by_account.values()))
+    unclassified_collections = float(unassigned_total)
+    pending_sales = 0.0
+    vendido = float(grand_total)
     cobrado = 0.0
     pendiente = 0.0
-    facturado = 0.0
-    concepts_total = 0.0
-    pending_sales = 0.0
-    unclassified_collections = 0.0
-    by_code: dict[str, float] = {}
-    try:
-        payload = _fetch_extranet_month(month_start, month_finish, accounts=accounts)
-        by_code = {
-            str(code): float(amount or 0)
-            for code, amount in (payload.get("by_account_code") or {}).items()
-        }
-        vendido = float(payload.get("vendido") or 0)
-        cobrado = float(payload.get("cobrado") or 0)
-        pendiente = float(payload.get("pendiente") or 0)
-        facturado = float(payload.get("facturado") or 0)
-        concepts_total = float(payload.get("concepts_total") or 0)
-        pending_sales = float(payload.get("pending_sales") or 0)
-        unclassified_collections = float(payload.get("unclassified_collections") or 0)
-    except ExtranetWebError as exc:
-        logger.warning("EERR extranet unavailable, falling back to tax_documents: %s", exc)
-        source = "tax_documents"
-        by_code = _tax_document_code_totals(
-            db, date_from=month_start, date_to=month_finish
-        )
-        vendido = float(sum(by_code.values()))
-        cobrado = vendido
-        concepts_total = vendido
 
-    # Facturado KPI matches drill-down: Σ emitidas 33/34/61 from DB (NC negative).
-    # Fall back to FNS Ingresos-Cobros "Facturado" only when DB has no invoices yet.
+    # Optional cash KPIs from FNS (do not drive income rows).
+    try:
+        sales = TaxDocumentsFetchClient()._ingresos_cobros_sales_totals(
+            month_start, month_finish
+        )
+        cobrado = float(sales.get("cobrado") or 0)
+        pendiente = float(sales.get("pendiente") or 0)
+    except ExtranetWebError as exc:
+        logger.warning("EERR cobrado/pendiente unavailable: %s", exc)
+
+    # Facturado KPI: facturas/NC 33/34/61 (assigned + unassigned).
     invoice_by_account = _invoice_totals_by_account_id(
         db, date_from=month_start, date_to=month_finish
     )
-    invoice_sum = float(sum(invoice_by_account.values()))
-    # Include unassigned invoices in the KPI (assigned ones already in invoice_by_account).
+    facturado = float(sum(invoice_by_account.values()))
     unassigned_invoice_lines = _issued_tax_document_lines(
         db,
         date_from=month_start,
@@ -660,33 +731,10 @@ def get_eerr_report(
         invoice_only=True,
         unassigned_only=True,
     )
-    invoice_sum += float(
+    facturado += float(
         sum(float(item.get("amount") or 0) for item in unassigned_invoice_lines)
     )
-    if abs(invoice_sum) > 0.5:
-        facturado = invoice_sum
-    # else keep FNS facturado (may be 0)
 
-    # Cobros path: add assigned facturas into each account (e.g. Hospedaje).
-    # tax_documents fallback already comes from assigned docs — do not double-add.
-    extra_invoices = invoice_by_account if source == "extranet_vendido" else None
-    rows = _rows_from_code_totals(
-        accounts, by_code, extra_by_account_id=extra_invoices
-    )
-    rows.extend(
-        _remanente_rows(
-            pending_sales=pending_sales,
-            unclassified_collections=unclassified_collections,
-        )
-    )
-    rows_total = float(sum(row.total for row in rows))
-    if vendido <= 0:
-        vendido = float(sum(float(by_code.get(str(a.code or ""), 0)) for a in accounts))
-        if vendido <= 0:
-            vendido = rows_total
-    # Bottom total = Cobros/remanente (vendido mix) + assigned facturas in account rows.
-    grand_total = rows_total
-    # Amounts are gross (bruto); expose Neto/IVA at 19% for the footer.
     grand_net, _grand_exempt, grand_tax = _split_cl_iva(grand_total)
     period_key = _period_key(month_start)
     expense_rows = _expense_rows_for_period(
@@ -786,7 +834,7 @@ def get_eerr_detail(
     elif kind == "collected":
         title = "Cobrado"
     elif kind == "unclassified":
-        title = "Vendido sin clasificar"
+        title = "Emitidas sin clasificar"
     elif kind in {"invoiced", "facturado"}:
         kind = "invoiced"
         title = "Facturado"
@@ -844,7 +892,24 @@ def get_eerr_detail(
             date_to=month_finish,
             invoice_only=True,
         )
+    elif kind == "account":
+        raw_lines = _issued_tax_document_lines(
+            db,
+            date_from=month_start,
+            date_to=month_finish,
+            account_id=int(resolved_id) if resolved_id is not None else None,
+            invoice_only=False,
+        )
+    elif kind == "unclassified":
+        raw_lines = _issued_tax_document_lines(
+            db,
+            date_from=month_start,
+            date_to=month_finish,
+            invoice_only=False,
+            unassigned_only=True,
+        )
     else:
+        # pending / collected: still from FNS Ingresos-Cobros
         try:
             client = TaxDocumentsFetchClient()
             raw_lines = client.fetch_income_detail_lines(
@@ -856,17 +921,6 @@ def get_eerr_detail(
             )
         except ExtranetWebError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        if kind == "account" and resolved_id is not None:
-            # Show Emitidas facturas already assigned to this account (e.g. Hospedaje).
-            invoice_lines = _issued_tax_document_lines(
-                db,
-                date_from=month_start,
-                date_to=month_finish,
-                account_id=int(resolved_id),
-                invoice_only=True,
-            )
-            raw_lines = _merge_detail_lines(raw_lines, invoice_lines)
 
     lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
     total = float(sum(float(item.amount or 0) for item in lines))
@@ -889,7 +943,7 @@ def get_eerr_consolidated(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrConsolidatedOut:
-    """Income statement by account with one total column per month (FNS Vendido)."""
+    """Income statement by account with one total column per month (Emitidas)."""
     today = date.today()
     default_to = date(today.year, today.month, 1)
     default_from = date(today.year, 1, 1)
@@ -906,73 +960,28 @@ def get_eerr_consolidated(
     accounts = load_income_accounts(db)
 
     monthly_by_code: dict[str, dict[str, float]] = {key: {} for key in period_keys}
-    monthly_pending: dict[str, float] = {key: 0.0 for key in period_keys}
     monthly_unclassified: dict[str, float] = {key: 0.0 for key in period_keys}
-    monthly_vendido: dict[str, float] = {key: 0.0 for key in period_keys}
-    source = "extranet_vendido"
-    try:
-        client = TaxDocumentsFetchClient()
-        for month in months:
-            key = _period_key(month)
-            finish = min(_month_end(month), today) if (
-                month.year == today.year and month.month == today.month
-            ) else _month_end(month)
-            payload = client.fetch_income_by_account(
-                month, finish, accounts=accounts
-            )
-            monthly_by_code[key] = {
-                str(code): float(amount or 0)
-                for code, amount in (payload.get("by_account_code") or {}).items()
-            }
-            monthly_pending[key] = float(payload.get("pending_sales") or 0)
-            monthly_unclassified[key] = float(
-                payload.get("unclassified_collections") or 0
-            )
-            monthly_vendido[key] = float(payload.get("vendido") or 0)
-    except ExtranetWebError as exc:
-        logger.warning(
-            "EERR consolidated extranet unavailable, falling back to tax_documents: %s",
-            exc,
+    source = "tax_documents_issued"
+
+    for month in months:
+        key = _period_key(month)
+        finish = min(_month_end(month), today) if (
+            month.year == today.year and month.month == today.month
+        ) else _month_end(month)
+        issued_by_account = _issued_totals_by_account_id(
+            db, date_from=month, date_to=finish
         )
-        source = "tax_documents"
-        issued_id = _issued_version_id(db)
-        year_col = extract("year", TaxDocuments.issued_at)
-        month_col = extract("month", TaxDocuments.issued_at)
-        sums = (
-            db.query(
-                AccountingAccounts.code,
-                year_col,
-                month_col,
-                func.coalesce(func.sum(TaxDocuments.total_amount), 0.0),
-            )
-            .join(
-                AccountingAccounts,
-                AccountingAccounts.id == TaxDocuments.accounting_account_id,
-            )
-            .filter(
-                TaxDocuments.dte_version_id == issued_id,
-                TaxDocuments.accounting_account_id.isnot(None),
-                TaxDocuments.issued_at.isnot(None),
-                TaxDocuments.issued_at >= months[0],
-                TaxDocuments.issued_at <= _month_end(months[-1]),
-            )
-            .group_by(AccountingAccounts.code, year_col, month_col)
-            .all()
+        code_by_id = {int(account.id): str(account.code or "") for account in accounts}
+        by_code: dict[str, float] = {}
+        for account_id, amount in issued_by_account.items():
+            code = code_by_id.get(int(account_id), "")
+            if not code:
+                continue
+            by_code[code] = float(by_code.get(code, 0.0) + float(amount or 0))
+        monthly_by_code[key] = by_code
+        monthly_unclassified[key] = float(
+            _unassigned_issued_total(db, date_from=month, date_to=finish)
         )
-        monthly_by_code = {key: {} for key in period_keys}
-        for code, year, month_num, total in sums:
-            if not code or year is None or month_num is None:
-                continue
-            try:
-                key = _period_key(date(int(year), int(month_num), 1))
-            except ValueError:
-                continue
-            if key not in monthly_by_code:
-                continue
-            monthly_by_code[key][str(code)] = float(total or 0)
-            monthly_vendido[key] = float(
-                monthly_vendido.get(key, 0.0) + float(total or 0)
-            )
 
     rows: list[EerrConsolidatedRow] = []
     column_totals = {key: 0.0 for key in period_keys}
@@ -996,29 +1005,24 @@ def get_eerr_consolidated(
             )
         )
 
-    for kind, name, monthly in (
-        ("pending", "Pendiente por cobrar", monthly_pending),
-        ("unclassified", "Vendido sin clasificar", monthly_unclassified),
-    ):
-        amounts = {key: float(monthly.get(key) or 0) for key in period_keys}
-        if abs(sum(amounts.values())) <= 0.5:
-            continue
-        for key, value in amounts.items():
+    unclassified_amounts = {
+        key: float(monthly_unclassified.get(key) or 0) for key in period_keys
+    }
+    if abs(sum(unclassified_amounts.values())) > 0.5:
+        for key, value in unclassified_amounts.items():
             column_totals[key] = float(column_totals.get(key, 0.0) + value)
         rows.append(
             EerrConsolidatedRow(
                 account_id=None,
                 code="",
-                name=name,
-                amounts=amounts,
-                total=float(sum(amounts.values())),
-                row_kind=kind,
+                name="Emitidas sin clasificar",
+                amounts=unclassified_amounts,
+                total=float(sum(unclassified_amounts.values())),
+                row_kind="unclassified",
             )
         )
 
-    # Prefer sum of monthly vendido KPIs; fall back to column sum of scaled rows.
-    vendido_sum = float(sum(monthly_vendido.values()))
-    grand = vendido_sum if vendido_sum > 0.5 else float(sum(column_totals.values()))
+    grand = float(sum(column_totals.values()))
     return EerrConsolidatedOut(
         from_period=_period_key(start),
         to_period=_period_key(end),
