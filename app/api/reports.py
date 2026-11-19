@@ -345,17 +345,30 @@ def get_eerr_report(
     # else keep FNS facturado (may be 0)
 
     rows = _rows_from_code_totals(accounts, by_code)
+    # Own line: facturas are NOT part of Hospedaje/Cobros mix (KPI + drill-down only).
+    if abs(facturado) > 0.5:
+        rows.append(
+            EerrAccountRow(
+                account_id=None,
+                code="",
+                name="Facturado",
+                total=float(facturado),
+                row_kind="invoiced",
+            )
+        )
     rows.extend(
         _remanente_rows(
             pending_sales=pending_sales,
             unclassified_collections=unclassified_collections,
         )
     )
-    rows_total = float(sum(row.total for row in rows))
+    # Grand total follows vendido; Facturado is parallel and excluded from this sum.
+    cobros_rows_total = float(
+        sum(row.total for row in rows if str(row.row_kind or "account") != "invoiced")
+    )
     if vendido <= 0:
-        vendido = rows_total
-    # Statement total = month vendido (rows are scaled/split to match).
-    grand_total = vendido if vendido > 0 else rows_total
+        vendido = cobros_rows_total
+    grand_total = vendido if vendido > 0 else cobros_rows_total
     return EerrReportOut(
         period=_period_key(month_start),
         section_title="Ingresos",
