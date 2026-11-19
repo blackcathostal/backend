@@ -67,6 +67,23 @@ def load_income_accounts(db: Session) -> list[AccountingAccounts]:
     return ingresos + others if ingresos else rows
 
 
+def load_expense_accounts(db: Session) -> list[AccountingAccounts]:
+    """Active gasto accounts for EERR egresos (Remuneraciones, Materiales, …)."""
+    return (
+        db.query(AccountingAccounts)
+        .filter(
+            AccountingAccounts.is_active.is_(True),
+            AccountingAccounts.account_type == "gasto",
+        )
+        .order_by(
+            AccountingAccounts.category.asc(),
+            AccountingAccounts.sort_order.asc(),
+            AccountingAccounts.code.asc(),
+        )
+        .all()
+    )
+
+
 def _load_coa_rows() -> list[dict]:
     try:
         raw = json.loads(COA_FILE.read_text(encoding="utf-8"))

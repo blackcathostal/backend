@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.accounting_accounts import AccountingAccounts
 from app.models.customers import Customers
+from app.models.hr_period_amounts import HrPeriodAmounts
 from app.models.tax_documents import TaxDocuments
 from app.models.users import Users
 from app.schemas.reports import (
@@ -28,6 +29,7 @@ from app.schemas.reports import (
 from app.services import dte_catalog
 from app.services.accounting_concept_map import (
     ensure_concept_labels_from_coa,
+    load_expense_accounts,
     load_income_accounts,
 )
 from app.services.extranet_web_client import ExtranetWebError
@@ -128,9 +130,91 @@ def _rows_from_code_totals(
             total=float(by_code.get(str(account.code or ""), 0.0))
             + float(extras.get(int(account.id), 0.0)),
             row_kind="account",
+            category=str(account.category or ""),
         )
         for account in accounts
     ]
+
+
+def _hr_amounts_by_account_id(db: Session, period_key: str) -> dict[int, float]:
+    """Monthly Remuneraciones amounts keyed by accounting_account_id."""
+    return {
+        int(row.accounting_account_id): float(row.amount or 0)
+        for row in db.query(HrPeriodAmounts)
+        .filter(HrPeriodAmounts.period == period_key)
+        .all()
+    }
+
+
+def _received_totals_by_account_id(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> dict[int, float]:
+    """Σ recibidas (compras) by assigned accounting account for the month."""
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+    if received_id is None:
+        return {}
+    rows = (
+        db.query(
+            TaxDocuments.accounting_account_id,
+            func.coalesce(func.sum(TaxDocuments.total_amount), 0.0),
+        )
+        .filter(
+            TaxDocuments.dte_version_id == int(received_id),
+            TaxDocuments.accounting_account_id.isnot(None),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+        )
+        .group_by(TaxDocuments.accounting_account_id)
+        .all()
+    )
+    return {
+        int(account_id): float(total or 0)
+        for account_id, total in rows
+        if account_id is not None
+    }
+
+
+def _expense_rows_for_period(
+    db: Session,
+    *,
+    period_key: str,
+    date_from: date,
+    date_to: date,
+) -> list[EerrAccountRow]:
+    """
+    Egresos: all active gasto accounts.
+    Remuneraciones ← hr_period_amounts; other categories ← recibidas assigned totals.
+    """
+    accounts = load_expense_accounts(db)
+    if not accounts:
+        return []
+    hr_amounts = _hr_amounts_by_account_id(db, period_key)
+    received_amounts = _received_totals_by_account_id(
+        db, date_from=date_from, date_to=date_to
+    )
+    rows: list[EerrAccountRow] = []
+    for account in accounts:
+        category = str(account.category or "").strip()
+        account_id = int(account.id)
+        if category.lower() == "remuneraciones":
+            amount = float(hr_amounts.get(account_id, 0.0))
+        else:
+            amount = float(received_amounts.get(account_id, 0.0))
+        rows.append(
+            EerrAccountRow(
+                account_id=account_id,
+                code=str(account.code or ""),
+                name=str(account.name or ""),
+                total=amount,
+                row_kind="expense",
+                category=category,
+            )
+        )
+    return rows
 
 
 def _invoice_totals_by_account_id(
@@ -441,13 +525,26 @@ def get_eerr_report(
     grand_total = rows_total
     # Amounts are gross (bruto); expose Neto/IVA at 19% for the footer.
     grand_net, _grand_exempt, grand_tax = _split_cl_iva(grand_total)
+    period_key = _period_key(month_start)
+    expense_rows = _expense_rows_for_period(
+        db,
+        period_key=period_key,
+        date_from=month_start,
+        date_to=month_finish,
+    )
+    expenses_total = float(sum(float(row.total or 0) for row in expense_rows))
+    result_total = float(grand_total - expenses_total)
     return EerrReportOut(
-        period=_period_key(month_start),
+        period=period_key,
         section_title="Ingresos",
         rows=rows,
         grand_total=grand_total,
         grand_net=grand_net,
         grand_tax=grand_tax,
+        expense_section_title="Egresos",
+        expense_rows=expense_rows,
+        expenses_total=expenses_total,
+        result_total=result_total,
         vendido=vendido,
         cobrado=cobrado,
         pendiente=pendiente,
