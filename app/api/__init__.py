@@ -20,6 +20,7 @@ from app.api import (
     media,
     places,
     posts,
+    reports,
     reviews,
     roles,
     rooms,
@@ -56,6 +57,7 @@ api_router.include_router(facebook.router)
 api_router.include_router(analytics.router)
 api_router.include_router(terms.router)
 api_router.include_router(accounting_accounts.router)
+api_router.include_router(reports.router)
 api_router.include_router(tax_documents.router, prefix="/tax-documents")
 # Legacy path for older admin builds
 api_router.include_router(tax_documents.router, prefix="/accounting-track")
