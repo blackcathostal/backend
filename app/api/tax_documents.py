@@ -28,7 +28,9 @@ from app.schemas.tax_documents import (
 )
 from app.services import dte_catalog
 from app.services.accounting_concept_map import (
+    ensure_concept_labels_from_coa,
     load_income_accounts,
+    lodging_income_account,
     pick_account_from_concepts,
 )
 from app.services.billing_portal_client import BillingPortalClient
@@ -352,6 +354,12 @@ def _dte_type_name_es(*, code: str = "", name: str = "") -> str:
     return "Boleta"
 
 
+def _concepts_have_amounts(concepts: object) -> bool:
+    if not isinstance(concepts, dict):
+        return False
+    return any(abs(float(amount or 0)) > 0.5 for amount in concepts.values())
+
+
 def _resolve_accounting_account_id(db: Session, item: dict) -> int | None:
     code = str(item.get("accounting_account_code") or "").strip()
     if code:
@@ -367,10 +375,14 @@ def _resolve_accounting_account_id(db: Session, item: dict) -> int | None:
         if isinstance(raw, dict):
             concepts = raw.get("concepts")
     accounts = load_income_accounts(db)
-    account = pick_account_from_concepts(
-        concepts if isinstance(concepts, dict) else {},
-        accounts,
-    )
+    if not accounts:
+        return None
+    # Cobros concept mix → best matching income account.
+    if _concepts_have_amounts(concepts):
+        account = pick_account_from_concepts(concepts, accounts)
+        return int(account.id) if account is not None else None
+    # Facturas/boletas without Cobros concepts default to lodging (Hospedaje) from catalog.
+    account = lodging_income_account(accounts)
     return int(account.id) if account is not None else None
 
 
@@ -539,6 +551,9 @@ def _upsert_docs(
     received_account_map = (
         load_active_received_account_map(db) if received_id else {}
     )
+    if issued_id and int(dte_version_id or 0) == int(issued_id):
+        # Keep lodging/Hospedaje labels available for invoice defaults.
+        ensure_concept_labels_from_coa(db)
 
     for item in docs:
         version_id = int(item.get("dte_version_id") or dte_version_id or 0)
@@ -691,9 +706,11 @@ def _upsert_docs(
         else:
             row.pms_ref = str(class_info.get("pms_ref") or "")[:120]
         if version_id == issued_id:
-            account_id = _resolve_accounting_account_id(db, item)
-            if account_id:
-                row.accounting_account_id = account_id
+            # Only fill when empty so manual classify is kept; invoices → Hospedaje by default.
+            if not row.accounting_account_id:
+                account_id = _resolve_accounting_account_id(db, item)
+                if account_id:
+                    row.accounting_account_id = account_id
         elif version_id == received_id:
             # Auto-assign from Contabilidad → mapeo recibidas (RUT → cuenta).
             mapped_id = resolve_received_accounting_account_id(

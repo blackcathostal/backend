@@ -187,6 +187,38 @@ def default_income_account(
     return rows[0] if rows else None
 
 
+def lodging_income_account(
+    accounts: list[AccountingAccounts] | None = None,
+    *,
+    db: Session | None = None,
+) -> AccountingAccounts | None:
+    """
+    Default account for issued invoices/boletas without Cobros concepts.
+    Resolves via catalog concept_labels (Alojamiento / Hospedaje), never a hardcoded code.
+    """
+    rows = accounts if accounts is not None else (load_income_accounts(db) if db else [])
+    if not rows:
+        return None
+    for label in ("Alojamiento", "Hospedaje"):
+        matched = match_account_for_concept(label, rows)
+        if matched is None:
+            continue
+        labels = {
+            _norm(item)
+            for item in parse_concept_labels(getattr(matched, "concept_labels", None))
+        }
+        lodging_tokens = {_norm("Alojamiento"), _norm("Hospedaje"), "aloj", "hosped"}
+        if labels & lodging_tokens:
+            return matched
+        if any(
+            _token_matches(_norm(label), token)
+            for token in labels
+            if token and token != CATCH_ALL_LABEL
+        ):
+            return matched
+    return default_income_account(rows)
+
+
 def _token_matches(needle: str, token: str) -> bool:
     if not needle or not token or token == CATCH_ALL_LABEL:
         return False

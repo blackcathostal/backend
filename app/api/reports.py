@@ -29,6 +29,7 @@ from app.services import dte_catalog
 from app.services.accounting_concept_map import (
     ensure_concept_labels_from_coa,
     load_income_accounts,
+    lodging_income_account,
 )
 from app.services.extranet_web_client import ExtranetWebError
 from app.services.tax_documents_fetch import TaxDocumentsFetchClient
@@ -223,6 +224,7 @@ def _issued_tax_document_lines(
     date_to: date,
     account_id: int | None = None,
     invoice_only: bool = False,
+    unassigned_only: bool = False,
 ) -> list[dict]:
     """Detail lines from issued tax_documents (includes facturas from facturacion.cl)."""
     issued_id = _issued_version_id(db)
@@ -236,7 +238,9 @@ def _issued_tax_document_lines(
             TaxDocuments.issued_at <= date_to,
         )
     )
-    if account_id is not None:
+    if unassigned_only:
+        query = query.filter(TaxDocuments.accounting_account_id.is_(None))
+    elif account_id is not None:
         query = query.filter(TaxDocuments.accounting_account_id == int(account_id))
     if invoice_only:
         type_ids = _invoice_type_ids(db)
@@ -466,6 +470,17 @@ def get_eerr_detail(
                 account_id=int(resolved_id),
                 invoice_only=True,
             )
+            lodging = lodging_income_account(accounts)
+            if lodging is not None and int(lodging.id) == int(resolved_id):
+                # Until Actualizar assigns them, unassigned facturas count as lodging.
+                unassigned = _issued_tax_document_lines(
+                    db,
+                    date_from=month_start,
+                    date_to=month_finish,
+                    invoice_only=True,
+                    unassigned_only=True,
+                )
+                invoice_lines = _merge_detail_lines(invoice_lines, unassigned)
             raw_lines = _merge_detail_lines(raw_lines, invoice_lines)
 
     lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
