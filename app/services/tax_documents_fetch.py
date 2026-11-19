@@ -41,6 +41,25 @@ def _money(value: object) -> float:
     return -amount if negative else amount
 
 
+def _scale_amounts_to_target(
+    amounts: dict[str, float], target: float
+) -> dict[str, float]:
+    """Scale account totals so they sum to target (rounding drift on largest key)."""
+    raw = {str(k): float(v or 0) for k, v in amounts.items()}
+    total = float(sum(raw.values()))
+    target_value = float(target or 0)
+    if target_value <= 0.5 or total <= 0.5:
+        return {k: 0.0 for k in raw}
+    if abs(total - target_value) <= 0.5:
+        return raw
+    scaled = {k: round(v * target_value / total) for k, v in raw.items()}
+    drift = round(target_value - sum(scaled.values()))
+    if drift and scaled:
+        top_key = max(scaled, key=lambda key: abs(scaled[key]))
+        scaled[top_key] = float(scaled[top_key] + drift)
+    return scaled
+
+
 # Chilean VAT rate used when Cobros/Informes only expose gross total.
 _IVA_RATE = 0.19
 
@@ -635,25 +654,35 @@ class TaxDocumentsFetchClient:
         accounts: list,
     ) -> dict[str, Any]:
         """
-        EERR ingresos by account from Cobros concept columns (statement rows + total).
+        EERR ingresos for the month: Ingresos-Cobros vendido is the source of truth.
 
-        Ingresos-Cobros vendido/cobrado/pendiente stay as header KPIs only; they do not
-        override the account total. If Cobros concepts are below vendido, the gap is
-        returned as remanente (pending + unclassified).
+        Cobros concept columns only provide the mix to split that vendido by account.
+        If Cobros concepts exceed vendido, amounts are scaled down so rows sum to vendido.
+        Gap below vendido is remanente (pending + unclassified).
         """
         if date_to < date_from:
             raise ExtranetWebError("Rango de fechas inválido")
         sales = self._ingresos_cobros_sales_totals(date_from, date_to)
-        by_code = self._cobros_concept_account_sums(
+        by_code_raw = self._cobros_concept_account_sums(
             date_from, date_to, accounts=accounts
         )
-        concepts_total = float(sum(float(v or 0) for v in by_code.values()))
+        concepts_raw_total = float(sum(float(v or 0) for v in by_code_raw.values()))
         vendido = float(sales.get("vendido") or 0)
         cobrado = float(sales.get("cobrado") or 0)
         pendiente = float(sales.get("pendiente") or 0)
-        remanente = round(vendido - concepts_total)
-        if remanente < 0:
-            remanente = 0.0
+
+        if vendido > 0.5 and concepts_raw_total > vendido + 0.5:
+            by_code = _scale_amounts_to_target(by_code_raw, vendido)
+            concepts_total = float(sum(by_code.values()))
+            scale = vendido / concepts_raw_total if concepts_raw_total else 1.0
+        else:
+            by_code = {
+                str(code): float(amount or 0) for code, amount in by_code_raw.items()
+            }
+            concepts_total = concepts_raw_total
+            scale = 1.0
+
+        remanente = round(max(vendido - concepts_total, 0.0))
         pending_sales = round(min(max(pendiente, 0.0), remanente))
         unclassified_collections = round(max(remanente - pending_sales, 0.0))
         return {
@@ -662,10 +691,12 @@ class TaxDocumentsFetchClient:
             "pendiente": pendiente,
             "facturado": float(sales.get("facturado") or 0),
             "concepts_total": concepts_total,
+            "concepts_raw_total": concepts_raw_total,
+            "scale": float(scale),
             "pending_sales": float(pending_sales),
             "unclassified_collections": float(unclassified_collections),
             "by_account_code": by_code,
-            "source": "extranet_cobros",
+            "source": "extranet_vendido",
         }
 
     def fetch_income_detail_lines(
@@ -712,6 +743,19 @@ class TaxDocumentsFetchClient:
                 )
             return lines
 
+        scale = 1.0
+        if kind == "account":
+            sales = self._ingresos_cobros_sales_totals(date_from, date_to)
+            vendido = float(sales.get("vendido") or 0)
+            by_code_raw = self._cobros_concept_account_sums(
+                date_from, date_to, accounts=accounts
+            )
+            concepts_raw_total = float(
+                sum(float(v or 0) for v in by_code_raw.values())
+            )
+            if vendido > 0.5 and concepts_raw_total > vendido + 0.5:
+                scale = vendido / concepts_raw_total
+
         for row in self._iter_cobros_rows(date_from, date_to):
             concepts = _concept_breakdown(row, accounts=accounts)
             concepts_sum = float(sum(float(v or 0) for v in concepts.values()))
@@ -754,14 +798,14 @@ class TaxDocumentsFetchClient:
                 )
                 continue
 
-            # account drill-down
+            # account drill-down (scaled to month vendido when Cobros exceed it)
             if not code:
                 continue
             for header, amount in concepts.items():
                 mapped = account_code_for_concept(header, accounts)
                 if mapped != code:
                     continue
-                value = float(amount or 0)
+                value = round(float(amount or 0) * scale)
                 if abs(value) <= 0.5:
                     continue
                 lines.append(
