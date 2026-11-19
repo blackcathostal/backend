@@ -5,7 +5,7 @@ import base64
 import csv
 import io
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from xml.etree import ElementTree as ET
 
@@ -371,14 +371,45 @@ class BillingPortalClient:
             )
         return docs
 
-    def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        # Emitidas use FNS Cobros (TaxDocumentsFetchClient). Never call ConsultaLibroVentas.
-        del date_from, date_to
-        raise BillingPortalError(
-            "Emitidas ya no usan ConsultaLibroVentas. "
-            "Actualizá el API (git pull + reiniciar blackcathostal-api) "
-            "para scrapear FNS Contabilidad."
-        )
+    def fetch_issued(
+        self,
+        date_from: date,
+        date_to: date,
+        *,
+        book_types: tuple[str, ...] = ("V", "B"),
+    ) -> list[dict[str, Any]]:
+        """
+        Issued sales ledger via SOAP ConsultaLibroVentas (day by day).
+        book_types: V=facturas/ventas, B=boletas.
+        Prefer BillingPortalWebClient.fetch_issued when the web ledger is available.
+        """
+        if date_to < date_from:
+            raise BillingPortalError("Rango de fechas inválido")
+        types = tuple(
+            str(item or "").strip().upper()
+            for item in (book_types or ("V", "B"))
+            if str(item or "").strip().upper() in {"V", "B"}
+        ) or ("V", "B")
+        docs: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        cursor = date_from
+        while cursor <= date_to:
+            for book in types:
+                try:
+                    batch = self.query_sales_ledger(cursor, book_type=book)
+                except BillingPortalError:
+                    raise
+                for doc in batch:
+                    key = (
+                        str(doc.get("dte_type_code") or ""),
+                        str(doc.get("folio") or "").strip(),
+                    )
+                    if not key[1] or key in seen:
+                        continue
+                    seen.add(key)
+                    docs.append(doc)
+            cursor = cursor + timedelta(days=1)
+        return docs
 
     def parse_ledger_file(
         self,

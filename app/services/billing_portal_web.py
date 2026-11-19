@@ -173,17 +173,29 @@ class BillingPortalWebClient:
                 fields[name] = first.group(2) if first else ""
         return fields
 
-    def _load_compras_form(self) -> tuple[str, dict[str, str]]:
+    def _load_ledger_form(self, *, indice: str = "2") -> tuple[str, dict[str, str]]:
+        """Open libros2 ledger. indice 1=Ventas, 2=Compras."""
+        book = str(indice or "2").strip() or "2"
         client = self._ensure_client()
         response = client.get(
-            urljoin(self.base_url, "form/contabilidad/libros2/?indice=2&fromMenu=true")
+            urljoin(
+                self.base_url,
+                f"form/contabilidad/libros2/?indice={book}&fromMenu=true",
+            )
         )
         html = response.text or ""
-        if "Libro de Compras" not in html and "indice" not in html.lower():
+        label = "Libro de Ventas" if book == "1" else "Libro de Compras"
+        if label not in html and "indice" not in html.lower() and "Libro" not in html:
             raise BillingPortalError(
-                "No se pudo abrir Libro de Compras en facturacion.cl"
+                f"No se pudo abrir {label} en facturacion.cl"
             )
         return html, self._extract_fields(html)
+
+    def _load_compras_form(self) -> tuple[str, dict[str, str]]:
+        return self._load_ledger_form(indice="2")
+
+    def _load_ventas_form(self) -> tuple[str, dict[str, str]]:
+        return self._load_ledger_form(indice="1")
 
     def _search_month(
         self,
@@ -195,12 +207,14 @@ class BillingPortalWebClient:
         folio: str = "",
         rut: str = "",
         page_size: int = 100,
+        indice: str = "2",
     ) -> str:
         client = self._ensure_client()
         size = str(max(30, min(int(page_size or 100), 500)))
+        book = str(indice or base_fields.get("indice") or "2").strip() or "2"
         payload = {
             **base_fields,
-            "indice": "2",
+            "indice": book,
             "anno": str(year),
             "mes": f"{month:02d}",
             "tipoinformacion": base_fields.get("tipoinformacion") or "1",
@@ -229,11 +243,13 @@ class BillingPortalWebClient:
         base_fields: dict[str, str],
         folio: str = "",
         rut: str = "",
+        indice: str = "2",
     ) -> list[dict[str, Any]]:
         """Fetch all grid pages for a month (portal often caps ~30/page)."""
         rows: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()
         page_size = 100
+        book = str(indice or "2").strip() or "2"
         for page in range(1, 21):
             html = self._search_month(
                 year=year,
@@ -243,6 +259,7 @@ class BillingPortalWebClient:
                 folio=folio,
                 rut=rut,
                 page_size=page_size,
+                indice=book,
             )
             batch = self._parse_grid_html(html)
             if not batch:
@@ -259,11 +276,19 @@ class BillingPortalWebClient:
                 break
         return rows
 
-    def _download_excel(self, *, year: int, month: int, fields: dict[str, str]) -> bytes | None:
+    def _download_excel(
+        self,
+        *,
+        year: int,
+        month: int,
+        fields: dict[str, str],
+        indice: str = "2",
+    ) -> bytes | None:
         client = self._ensure_client()
+        book = str(indice or fields.get("indice") or "2").strip() or "2"
         payload = {
             **fields,
-            "indice": "2",
+            "indice": book,
             "anno": str(year),
             "mes": f"{month:02d}",
             "tipoinformacion": fields.get("tipoinformacion") or "1",
@@ -482,13 +507,21 @@ class BillingPortalWebClient:
                     return token
         return ""
 
-    def fetch_received(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        """Pull Libro de Compras month-by-month from company web UI."""
+    def _fetch_ledger_range(
+        self,
+        date_from: date,
+        date_to: date,
+        *,
+        direction: str,
+        indice: str,
+        excel_name: str,
+    ) -> list[dict[str, Any]]:
         if date_to < date_from:
             raise BillingPortalError("Rango de fechas inválido")
 
         self.login()
-        _, base_fields = self._load_compras_form()
+        book = str(indice or "2").strip() or "2"
+        _, base_fields = self._load_ledger_form(indice=book)
         normalizer = BillingPortalClient()
         docs: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
@@ -496,7 +529,10 @@ class BillingPortalWebClient:
         cursor = date(date_from.year, date_from.month, 1)
         while cursor <= date_to:
             batch_raw = self._iter_month_rows(
-                year=cursor.year, month=cursor.month, base_fields=base_fields
+                year=cursor.year,
+                month=cursor.month,
+                base_fields=base_fields,
+                indice=book,
             )
             month_fields = base_fields
 
@@ -514,27 +550,32 @@ class BillingPortalWebClient:
                     "rut": raw.get("rut") or raw.get("rutproveedor"),
                     "pdf_data": raw.get("pdf_data") or "",
                 }
-                doc = normalizer._normalize_doc(payload, direction="received")
+                doc = normalizer._normalize_doc(payload, direction=direction)
                 if not doc["total_amount"] and raw.get("montototal") is not None:
                     doc["total_amount"] = _parse_amount(raw.get("montototal"))
                 month_docs.append(doc)
 
             if not month_docs:
-                # Probe one page to refresh fields for excel export.
                 html = self._search_month(
-                    year=cursor.year, month=cursor.month, base_fields=base_fields
+                    year=cursor.year,
+                    month=cursor.month,
+                    base_fields=base_fields,
+                    indice=book,
                 )
                 month_fields = self._extract_fields(html) or base_fields
                 excel = self._download_excel(
-                    year=cursor.year, month=cursor.month, fields=month_fields
+                    year=cursor.year,
+                    month=cursor.month,
+                    fields=month_fields,
+                    indice=book,
                 )
                 if excel:
                     filename = (
-                        "libro_compras.xlsx" if excel[:2] == b"PK" else "libro_compras.xls"
+                        f"{excel_name}.xlsx" if excel[:2] == b"PK" else f"{excel_name}.xls"
                     )
                     try:
                         month_docs = normalizer.parse_ledger_file(
-                            excel, direction="received", filename=filename
+                            excel, direction=direction, filename=filename
                         )
                     except BillingPortalError:
                         month_docs = []
@@ -561,3 +602,23 @@ class BillingPortalWebClient:
                 cursor = date(cursor.year, cursor.month + 1, 1)
 
         return docs
+
+    def fetch_received(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
+        """Pull Libro de Compras month-by-month from company web UI."""
+        return self._fetch_ledger_range(
+            date_from,
+            date_to,
+            direction="received",
+            indice="2",
+            excel_name="libro_compras",
+        )
+
+    def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
+        """Pull Libro de Ventas (issued DTEs) month-by-month from company web UI."""
+        return self._fetch_ledger_range(
+            date_from,
+            date_to,
+            direction="issued",
+            indice="1",
+            excel_name="libro_ventas",
+        )

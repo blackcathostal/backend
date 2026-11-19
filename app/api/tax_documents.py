@@ -29,10 +29,121 @@ from app.services.accounting_concept_map import (
     load_income_accounts,
     pick_account_from_concepts,
 )
+from app.services.billing_portal_client import BillingPortalClient
 from app.services.billing_portal_web import BillingPortalError, BillingPortalWebClient
 from app.services.accounting_classify import classify_document
 from app.services.tax_documents_fetch import TaxDocumentsFetchClient
 from app.services.extranet_web_client import ExtranetWebError
+
+# Issued DTE type codes treated as invoices (import from facturacion.cl when missing in FNS).
+_INVOICE_TYPE_CODES = frozenset({"33", "34", "61"})
+# Boletas stay FNS-only; facturacion.cl is used to corroborate.
+_BOLETA_TYPE_CODES = frozenset({"39", "41"})
+
+
+def _issued_doc_key(doc: dict) -> tuple[str, str]:
+    return (
+        str(doc.get("dte_type_code") or doc.get("dte_type_id") or "").strip(),
+        re.sub(r"\s+", "", str(doc.get("folio") or "")),
+    )
+
+
+def _merge_issued_with_billing_portal(
+    fns_docs: list[dict],
+    portal_docs: list[dict],
+) -> tuple[list[dict], str]:
+    """
+    Keep all FNS emitidas. Import portal invoices missing in FNS.
+    Use portal boletas only to corroborate FNS boletas (do not import portal-only boletas).
+    """
+    merged: list[dict] = []
+    fns_keys: set[tuple[str, str]] = set()
+    fns_boleta_folios: set[str] = set()
+
+    for doc in fns_docs:
+        item = dict(doc)
+        item.setdefault("source", "extranet_web")
+        key = _issued_doc_key(item)
+        if key[1]:
+            fns_keys.add(key)
+        code = key[0]
+        if code in _BOLETA_TYPE_CODES or (
+            not code and "boleta" in str(item.get("doc_type") or "").lower()
+        ):
+            if key[1]:
+                fns_boleta_folios.add(key[1])
+        merged.append(item)
+
+    portal_invoice_keys: set[tuple[str, str]] = set()
+    portal_boleta_folios: set[str] = set()
+    added_invoices = 0
+
+    for doc in portal_docs:
+        key = _issued_doc_key(doc)
+        code = key[0]
+        if not key[1]:
+            continue
+        raw_obj = doc.get("raw") if isinstance(doc.get("raw"), dict) else {}
+        tipo = str(
+            doc.get("doc_type")
+            or raw_obj.get("tipo")
+            or raw_obj.get("DOCUMENTO")
+            or ""
+        ).lower()
+        if code in _BOLETA_TYPE_CODES or "boleta" in tipo:
+            portal_boleta_folios.add(key[1])
+            continue
+        is_invoice = code in _INVOICE_TYPE_CODES or (
+            "factura" in tipo
+            or "nota de credito" in tipo
+            or "nota de crédito" in tipo
+        )
+        if not is_invoice:
+            continue
+        if key in fns_keys or key in portal_invoice_keys:
+            continue
+        item = dict(doc)
+        item["source"] = "billing_portal"
+        item["dte_version_code"] = "issued"
+        raw = item.get("raw")
+        if isinstance(raw, dict):
+            raw = dict(raw)
+            raw["billing_portal_only"] = True
+            item["raw"] = raw
+        else:
+            item["raw"] = {"billing_portal_only": True, "portal": doc}
+        portal_invoice_keys.add(key)
+        merged.append(item)
+        added_invoices += 1
+
+    corroborated = 0
+    for item in merged:
+        if str(item.get("source") or "") != "extranet_web":
+            continue
+        key = _issued_doc_key(item)
+        code = key[0]
+        is_boleta = code in _BOLETA_TYPE_CODES or (
+            not code and "boleta" in str(item.get("doc_type") or "").lower()
+        )
+        if not is_boleta or not key[1]:
+            continue
+        if key[1] not in portal_boleta_folios:
+            continue
+        corroborated += 1
+        raw = item.get("raw")
+        if isinstance(raw, dict):
+            raw = dict(raw)
+            raw["billing_portal_corroborated"] = True
+            item["raw"] = raw
+        else:
+            item["raw"] = {"billing_portal_corroborated": True}
+
+    parts = [
+        f"FNS: {len(fns_docs)}",
+        f"facturas nuevas facturacion.cl: {added_invoices}",
+        f"boletas FNS corroboradas en portal: {corroborated}/{len(fns_boleta_folios)}",
+    ]
+    return merged, " · ".join(parts)
 
 router = APIRouter(tags=["tax-documents"])
 
@@ -487,7 +598,7 @@ def _upsert_docs(
             account_id = _resolve_accounting_account_id(db, item)
             if account_id:
                 row.accounting_account_id = account_id
-        row.source = source
+        row.source = str(item.get("source") or source or "")[:40]
         try:
             row.raw_json = json.dumps(item.get("raw") or item, ensure_ascii=False, default=str)
         except TypeError:
@@ -777,10 +888,38 @@ async def refresh_tax_documents(
             with BillingPortalWebClient() as web:
                 docs = web.fetch_received(date_from, date_to)
         else:
-            # Emitidas = Cobros + account status / concepts from property extranet.
+            # Emitidas = FNS Cobros + facturas missing from FNS via facturacion.cl Libro de Ventas.
             source = "extranet_web"
             with TaxDocumentsFetchClient() as fetch_client:
-                docs = fetch_client.fetch_issued(date_from, date_to)
+                fns_docs = fetch_client.fetch_issued(date_from, date_to)
+
+            portal_docs: list[dict] = []
+            portal_error = ""
+            try:
+                with BillingPortalWebClient() as web:
+                    portal_docs = web.fetch_issued(date_from, date_to)
+            except BillingPortalError as portal_exc:
+                portal_error = str(portal_exc)
+                try:
+                    portal_docs = BillingPortalClient().fetch_issued(
+                        date_from, date_to, book_types=("V", "B")
+                    )
+                    portal_error = ""
+                except BillingPortalError as soap_exc:
+                    portal_error = (
+                        f"{portal_error}; SOAP: {soap_exc}"
+                        if portal_error
+                        else str(soap_exc)
+                    )
+
+            docs, merge_warning = _merge_issued_with_billing_portal(fns_docs, portal_docs)
+            warning = merge_warning
+            if portal_error:
+                warning = (
+                    f"{warning} · Portal: {portal_error}"
+                    if warning
+                    else f"Portal: {portal_error}"
+                )
     except BillingPortalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ExtranetWebError as exc:
