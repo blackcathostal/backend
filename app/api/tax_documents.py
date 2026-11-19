@@ -48,40 +48,44 @@ def _issued_doc_key(doc: dict) -> tuple[str, str]:
     )
 
 
+def _is_placeholder_identification(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    lowered = text.lower()
+    return lowered.startswith("name:") or lowered in {
+        "66.666.666-6",
+        "66666666-6",
+    }
+
+
+def _is_real_rut(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text or _is_placeholder_identification(text):
+        return False
+    return bool(re.fullmatch(r"\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]", text, flags=re.I)) or bool(
+        re.fullmatch(r"\d{7,8}-[\dkK]", text, flags=re.I)
+    )
+
+
 def _merge_issued_with_billing_portal(
     fns_docs: list[dict],
     portal_docs: list[dict],
 ) -> tuple[list[dict], str]:
     """
     Keep all FNS emitidas. Import portal invoices missing in FNS.
+    Enrich FNS rows that lack RUT with facturacion.cl invoice RUT/name.
     Use portal boletas only to corroborate FNS boletas (do not import portal-only boletas).
     """
-    merged: list[dict] = []
-    fns_keys: set[tuple[str, str]] = set()
-    fns_boleta_folios: set[str] = set()
-
-    for doc in fns_docs:
-        item = dict(doc)
-        item.setdefault("source", "extranet_web")
-        key = _issued_doc_key(item)
-        if key[1]:
-            fns_keys.add(key)
-        code = key[0]
-        if code in _BOLETA_TYPE_CODES or (
-            not code and "boleta" in str(item.get("doc_type") or "").lower()
-        ):
-            if key[1]:
-                fns_boleta_folios.add(key[1])
-        merged.append(item)
-
-    portal_invoice_keys: set[tuple[str, str]] = set()
     portal_boleta_folios: set[str] = set()
-    added_invoices = 0
+    portal_invoices_by_folio: dict[str, dict] = {}
+    portal_invoice_keys: set[tuple[str, str]] = set()
 
     for doc in portal_docs:
         key = _issued_doc_key(doc)
         code = key[0]
-        if not key[1]:
+        folio = key[1]
+        if not folio:
             continue
         raw_obj = doc.get("raw") if isinstance(doc.get("raw"), dict) else {}
         tipo = str(
@@ -91,7 +95,7 @@ def _merge_issued_with_billing_portal(
             or ""
         ).lower()
         if code in _BOLETA_TYPE_CODES or "boleta" in tipo:
-            portal_boleta_folios.add(key[1])
+            portal_boleta_folios.add(folio)
             continue
         is_invoice = code in _INVOICE_TYPE_CODES or (
             "factura" in tipo
@@ -100,7 +104,66 @@ def _merge_issued_with_billing_portal(
         )
         if not is_invoice:
             continue
-        if key in fns_keys or key in portal_invoice_keys:
+        portal_invoice_keys.add(key)
+        # Prefer rows that carry a real RUT when the same folio appears twice.
+        current = portal_invoices_by_folio.get(folio)
+        if current is None or (
+            _is_real_rut(doc.get("identification_number"))
+            and not _is_real_rut(current.get("identification_number"))
+        ):
+            portal_invoices_by_folio[folio] = doc
+
+    merged: list[dict] = []
+    fns_keys: set[tuple[str, str]] = set()
+    fns_boleta_folios: set[str] = set()
+    enriched_ruts = 0
+
+    for doc in fns_docs:
+        item = dict(doc)
+        item.setdefault("source", "extranet_web")
+        key = _issued_doc_key(item)
+        folio = key[1]
+        code = key[0]
+        if folio:
+            fns_keys.add(key)
+        if code in _BOLETA_TYPE_CODES or (
+            not code and "boleta" in str(item.get("doc_type") or "").lower()
+        ):
+            if folio:
+                fns_boleta_folios.add(folio)
+
+        portal = portal_invoices_by_folio.get(folio) if folio else None
+        fns_tipo = str(item.get("doc_type") or "").lower()
+        fns_is_invoice = code in _INVOICE_TYPE_CODES or "factura" in fns_tipo
+        if (
+            portal
+            and _is_placeholder_identification(item.get("identification_number"))
+            and (fns_is_invoice or not code)
+        ):
+            portal_rut = str(
+                portal.get("identification_number") or portal.get("counterpart_rut") or ""
+            ).strip()
+            portal_name = str(
+                portal.get("company_name") or portal.get("counterpart_name") or ""
+            ).strip()
+            if _is_real_rut(portal_rut):
+                item["identification_number"] = portal_rut
+                item["counterpart_rut"] = portal_rut
+                if portal_name:
+                    item["company_name"] = portal_name
+                    item["counterpart_name"] = portal_name
+                raw = item.get("raw")
+                if isinstance(raw, dict):
+                    raw = dict(raw)
+                    raw["billing_portal_rut_enriched"] = True
+                    item["raw"] = raw
+                enriched_ruts += 1
+        merged.append(item)
+
+    added_invoices = 0
+    for folio, doc in portal_invoices_by_folio.items():
+        key = _issued_doc_key(doc)
+        if key in fns_keys:
             continue
         item = dict(doc)
         item["source"] = "billing_portal"
@@ -112,7 +175,6 @@ def _merge_issued_with_billing_portal(
             item["raw"] = raw
         else:
             item["raw"] = {"billing_portal_only": True, "portal": doc}
-        portal_invoice_keys.add(key)
         merged.append(item)
         added_invoices += 1
 
@@ -141,6 +203,7 @@ def _merge_issued_with_billing_portal(
     parts = [
         f"FNS: {len(fns_docs)}",
         f"facturas nuevas facturacion.cl: {added_invoices}",
+        f"RUT enriquecidos desde portal: {enriched_ruts}",
         f"boletas FNS corroboradas en portal: {corroborated}/{len(fns_boleta_folios)}",
     ]
     return merged, " · ".join(parts)
@@ -536,6 +599,30 @@ def _upsert_docs(
             )
             .first()
         )
+        # Re-Actualizar: upgrade name:/empty placeholders when portal/FNS now has a real RUT.
+        if (
+            row is None
+            and version_id == issued_id
+            and folio
+            and _is_real_rut(identification_number)
+        ):
+            candidates = (
+                db.query(TaxDocuments)
+                .filter(
+                    TaxDocuments.dte_version_id == version_id,
+                    TaxDocuments.dte_type_id == type_id,
+                    TaxDocuments.folio == folio,
+                )
+                .all()
+            )
+            row = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if _is_placeholder_identification(candidate.identification_number)
+                ),
+                None,
+            )
         payment_status_id = dte_catalog.status_id_from_payment_code(
             db, item.get("payment_status_code")
         )
