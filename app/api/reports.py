@@ -34,6 +34,7 @@ from app.services.accounting_concept_map import (
     load_expense_accounts,
     load_income_accounts,
 )
+from app.api.tax_documents import _has_pdf
 from app.services.extranet_web_client import ExtranetWebError
 from app.services.tax_documents_fetch import TaxDocumentsFetchClient, _split_cl_iva
 
@@ -544,6 +545,8 @@ def _received_tax_document_lines(
                 "locator": str(row.pms_ref or "")[:120],
                 "concept": type_name or "Documento tributario",
                 "amount": amount,
+                "tax_document_id": int(row.id),
+                "has_pdf": bool(_has_pdf(row)),
             }
         )
     return lines
@@ -648,6 +651,8 @@ def _issued_tax_document_lines(
                 "locator": str(row.pms_ref or "")[:120],
                 "concept": type_name or "Documento tributario",
                 "amount": amount,
+                "tax_document_id": int(row.id),
+                "has_pdf": bool(_has_pdf(row)),
             }
         )
     return lines

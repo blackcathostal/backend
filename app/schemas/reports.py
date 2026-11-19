@@ -65,6 +65,8 @@ class EerrDetailLine(BaseModel):
     locator: str = ""
     concept: str = ""
     amount: float = 0
+    tax_document_id: int | None = None
+    has_pdf: bool = False
 
 
 class EerrDetailOut(BaseModel):
