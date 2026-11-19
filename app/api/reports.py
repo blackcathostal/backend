@@ -116,17 +116,63 @@ def _issued_version_id(db: Session) -> int:
 def _rows_from_code_totals(
     accounts: list[AccountingAccounts],
     by_code: dict[str, float],
+    *,
+    extra_by_account_id: dict[int, float] | None = None,
 ) -> list[EerrAccountRow]:
+    extras = extra_by_account_id or {}
     return [
         EerrAccountRow(
             account_id=int(account.id),
             code=account.code or "",
             name=account.name or "",
-            total=float(by_code.get(str(account.code or ""), 0.0)),
+            total=float(by_code.get(str(account.code or ""), 0.0))
+            + float(extras.get(int(account.id), 0.0)),
             row_kind="account",
         )
         for account in accounts
     ]
+
+
+def _invoice_totals_by_account_id(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> dict[int, float]:
+    """Σ facturas/NC emitidas (33/34/61) grouped by assigned accounting account."""
+    issued_id = _issued_version_id(db)
+    type_ids = _invoice_type_ids(db)
+    if not type_ids:
+        return {}
+    rows = (
+        db.query(
+            TaxDocuments.accounting_account_id,
+            TaxDocuments.dte_type_id,
+            TaxDocuments.total_amount,
+        )
+        .filter(
+            TaxDocuments.dte_version_id == issued_id,
+            TaxDocuments.dte_type_id.in_(type_ids),
+            TaxDocuments.accounting_account_id.isnot(None),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+        )
+        .all()
+    )
+    credit_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_CREDIT_NOTE)
+    totals: dict[int, float] = {}
+    for account_id, type_id, amount in rows:
+        if account_id is None:
+            continue
+        value = float(amount or 0)
+        if abs(value) <= 0.5:
+            continue
+        if credit_id is not None and int(type_id or 0) == int(credit_id):
+            value = -abs(value)
+        key = int(account_id)
+        totals[key] = float(totals.get(key, 0.0) + value)
+    return totals
 
 
 def _remanente_rows(
@@ -355,18 +401,31 @@ def get_eerr_report(
 
     # Facturado KPI matches drill-down: Σ emitidas 33/34/61 from DB (NC negative).
     # Fall back to FNS Ingresos-Cobros "Facturado" only when DB has no invoices yet.
-    invoice_lines = _issued_tax_document_lines(
+    invoice_by_account = _invoice_totals_by_account_id(
+        db, date_from=month_start, date_to=month_finish
+    )
+    invoice_sum = float(sum(invoice_by_account.values()))
+    # Include unassigned invoices in the KPI (assigned ones already in invoice_by_account).
+    unassigned_invoice_lines = _issued_tax_document_lines(
         db,
         date_from=month_start,
         date_to=month_finish,
         invoice_only=True,
+        unassigned_only=True,
     )
-    invoice_sum = float(sum(float(item.get("amount") or 0) for item in invoice_lines))
+    invoice_sum += float(
+        sum(float(item.get("amount") or 0) for item in unassigned_invoice_lines)
+    )
     if abs(invoice_sum) > 0.5:
         facturado = invoice_sum
     # else keep FNS facturado (may be 0)
 
-    rows = _rows_from_code_totals(accounts, by_code)
+    # Cobros path: add assigned facturas into each account (e.g. Hospedaje).
+    # tax_documents fallback already comes from assigned docs — do not double-add.
+    extra_invoices = invoice_by_account if source == "extranet_vendido" else None
+    rows = _rows_from_code_totals(
+        accounts, by_code, extra_by_account_id=extra_invoices
+    )
     rows.extend(
         _remanente_rows(
             pending_sales=pending_sales,
@@ -375,10 +434,11 @@ def get_eerr_report(
     )
     rows_total = float(sum(row.total for row in rows))
     if vendido <= 0:
-        vendido = rows_total
-    # Statement total = month vendido (rows are scaled/split to match).
-    # Facturado stays a parallel KPI (not added into Hospedaje / grand_total).
-    grand_total = vendido if vendido > 0 else rows_total
+        vendido = float(sum(float(by_code.get(str(a.code or ""), 0)) for a in accounts))
+        if vendido <= 0:
+            vendido = rows_total
+    # Bottom total = Cobros/remanente (vendido mix) + assigned facturas in account rows.
+    grand_total = rows_total
     return EerrReportOut(
         period=_period_key(month_start),
         section_title="Ingresos",
@@ -468,7 +528,6 @@ def get_eerr_detail(
 
         if kind == "account" and resolved_id is not None:
             # Show Emitidas facturas already assigned to this account (e.g. Hospedaje).
-            cobros_total = float(sum(float(item.get("amount") or 0) for item in raw_lines))
             invoice_lines = _issued_tax_document_lines(
                 db,
                 date_from=month_start,
@@ -477,18 +536,6 @@ def get_eerr_detail(
                 invoice_only=True,
             )
             raw_lines = _merge_detail_lines(raw_lines, invoice_lines)
-            lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
-            # Header total stays Cobros/row amount; facturas are listed but not double-counted.
-            return EerrDetailOut(
-                period=_period_key(month_start),
-                row_kind=kind,
-                account_id=resolved_id,
-                account_code=code,
-                account_name=account_name,
-                title=title,
-                total=cobros_total,
-                lines=lines,
-            )
 
     lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
     total = float(sum(float(item.amount or 0) for item in lines))
