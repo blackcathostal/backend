@@ -304,6 +304,7 @@ DEFAULT_SIDEBAR_PERMISSIONS = (
     ("settings", "Configuraciones", "settings", "Settings section"),
     ("maintainers", "Mantenedores", "maintainers", "Maintainers section"),
     ("suppliers", "Proveedores", "maintainers", "Suppliers list"),
+    ("customers", "Clientes", "maintainers", "Customers list"),
     ("roles", "Roles", "maintainers", "Roles and permissions management"),
 )
 
@@ -515,6 +516,21 @@ def seed_database(db: Session) -> None:
             row.tip_color = tip_color
 
     db.flush()
+
+    # Generic customer for issued docs without a real client from FNS.
+    from app.models.customers import Customers
+
+    generic_rut = "66.666.666-6"
+    generic_name = "Sin cliente"
+    generic = (
+        db.query(Customers)
+        .filter(Customers.identification_number == generic_rut)
+        .first()
+    )
+    if generic is None:
+        db.add(Customers(identification_number=generic_rut, company_name=generic_name))
+    else:
+        generic.company_name = generic_name
 
     issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)

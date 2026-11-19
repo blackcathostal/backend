@@ -35,6 +35,7 @@ from app.models import (  # noqa: F401
     Rooms,
     Services,
     Sliders,
+    Customers,
     Suppliers,
     TaxDocuments,
     TermsAndConditions,

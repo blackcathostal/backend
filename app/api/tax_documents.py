@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.customers import Customers
 from app.models.suppliers import Suppliers
 from app.models.tax_documents import DteStatuses, TaxDocuments
 from app.models.users import Users
@@ -21,11 +23,17 @@ from app.schemas.tax_documents import (
     TaxDocumentRefreshResult,
 )
 from app.services import dte_catalog
-from app.services.billing_portal_client import BillingPortalClient, BillingPortalError
-from app.services.billing_portal_web import BillingPortalWebClient
-from app.services.fns_accounting import classify_document, fetch_pms_production
+from app.services.billing_portal_web import BillingPortalError, BillingPortalWebClient
+from app.services.fns_accounting import classify_document
+from app.services.fns_tax_documents import FnsTaxDocumentsClient
+from app.services.fns_web_client import FnsWebError
 
 router = APIRouter(tags=["tax-documents"])
+
+# Placeholder customer for issued docs without a real guest/client from FNS.
+GENERIC_CUSTOMER_RUT = "66.666.666-6"
+GENERIC_CUSTOMER_NAME = "Sin cliente"
+_GENERIC_NAME_HINTS = {"", "consumos", "consumos consumos"}
 
 
 def _extract_pdf_token(payload: object) -> str:
@@ -65,8 +73,9 @@ def _pdf_token(row: TaxDocuments) -> str:
 def _resolve_type_id(db: Session, item: dict) -> int | None:
     raw = item.get("dte_type_id")
     if raw is None or raw == "":
-        raw = item.get("dte_type_code") or item.get("doc_type") or ""
-    return dte_catalog.type_id_from_raw(db, raw)
+        raw = item.get("doc_type") or item.get("dte_type_code") or ""
+    # Resolve against DB catalog; create from FNS/SII label if missing (no hard-coded map).
+    return dte_catalog.ensure_type_id(db, raw)
 
 
 def _list_statuses(db: Session) -> list[DteStatusOut]:
@@ -84,6 +93,45 @@ def _supplier_name_map(db: Session, identification_numbers: list[str]) -> dict[s
         .all()
     )
     return {row.identification_number: (row.company_name or "") for row in rows}
+
+
+def _customer_name_map(db: Session, identification_numbers: list[str]) -> dict[str, str]:
+    ids = sorted({str(x or "").strip() for x in identification_numbers if str(x or "").strip()})
+    if not ids:
+        return {}
+    rows = (
+        db.query(Customers)
+        .filter(Customers.identification_number.in_(ids))
+        .all()
+    )
+    return {row.identification_number: (row.company_name or "") for row in rows}
+
+
+def _period_from_issued_at(issued_at: date | None) -> str:
+    if issued_at is None:
+        return ""
+    return f"{issued_at.month:02d}-{issued_at.year}"
+
+
+def _is_missing_customer_name(company_name: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(company_name or "").strip()).lower()
+    for src, dst in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ñ", "n")):
+        normalized = normalized.replace(src, dst)
+    return normalized in _GENERIC_NAME_HINTS
+
+
+def _customer_key(identification_number: str, company_name: str) -> str:
+    """Stable unique key: prefer RUT; generic customer when missing; else name key."""
+    rut = str(identification_number or "").strip()
+    if rut:
+        return rut[:80]
+    if _is_missing_customer_name(company_name):
+        return GENERIC_CUSTOMER_RUT
+    name = re.sub(r"\s+", " ", str(company_name or "").strip())
+    if not name:
+        return GENERIC_CUSTOMER_RUT
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60]
+    return f"name:{slug or 'unknown'}"[:80]
 
 
 def _serialize_doc(row: TaxDocuments, *, company_name: str = "") -> TaxDocumentOut:
@@ -171,6 +219,58 @@ def _upsert_supplier(db: Session, identification_number: str, company_name: str)
     return False
 
 
+def _upsert_customer(db: Session, identification_number: str, company_name: str) -> tuple[bool, str]:
+    """Upsert customer for issued docs. Returns (created, stored_identification_number)."""
+    raw_name = str(company_name or "").strip()[:220]
+    if _is_missing_customer_name(raw_name) and not str(identification_number or "").strip():
+        key = GENERIC_CUSTOMER_RUT
+        display_name = GENERIC_CUSTOMER_NAME
+    else:
+        key = _customer_key(identification_number, raw_name)
+        display_name = raw_name or GENERIC_CUSTOMER_NAME
+    if not key:
+        key = GENERIC_CUSTOMER_RUT
+        display_name = GENERIC_CUSTOMER_NAME
+    cache: dict[str, Customers] = db.info.setdefault("customer_by_id", {})
+    row = cache.get(key)
+    if row is None:
+        row = (
+            db.query(Customers)
+            .filter(Customers.identification_number == key)
+            .first()
+        )
+    if row is None:
+        created = False
+        try:
+            with db.begin_nested():
+                row = Customers(
+                    identification_number=key,
+                    company_name=display_name,
+                )
+                db.add(row)
+                db.flush()
+                created = True
+        except IntegrityError:
+            row = (
+                db.query(Customers)
+                .filter(Customers.identification_number == key)
+                .first()
+            )
+            if row is None:
+                raise
+            created = False
+        cache[key] = row
+        if display_name and row.company_name != display_name:
+            row.company_name = display_name
+        return created, key
+    if display_name and row.company_name != display_name and key != GENERIC_CUSTOMER_RUT:
+        row.company_name = display_name
+    elif key == GENERIC_CUSTOMER_RUT and row.company_name != GENERIC_CUSTOMER_NAME:
+        row.company_name = GENERIC_CUSTOMER_NAME
+    cache[key] = row
+    return False, key
+
+
 def _upsert_docs(
     db: Session,
     docs: list[dict],
@@ -179,12 +279,14 @@ def _upsert_docs(
     dte_version_id: int,
     pms_rows: list[dict] | None = None,
     match_fns: bool = True,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     upserted = 0
     classified = 0
     suppliers_upserted = 0
+    customers_upserted = 0
     version_ids = dte_catalog.all_version_ids(db)
     default_status_id = dte_catalog.default_new_document_status_id(db)
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
 
     for item in docs:
         version_id = int(item.get("dte_version_id") or dte_version_id or 0)
@@ -200,11 +302,8 @@ def _upsert_docs(
         company_name = str(
             item.get("company_name") or item.get("counterpart_name") or ""
         ).strip()
-        if not folio and not identification_number:
+        if not folio and not identification_number and not company_name:
             continue
-
-        if _upsert_supplier(db, identification_number, company_name):
-            suppliers_upserted += 1
 
         issued_raw = item.get("issued_at")
         issued_at = None
@@ -215,6 +314,21 @@ def _upsert_docs(
                 issued_at = datetime.strptime(str(issued_raw)[:10], "%Y-%m-%d").date()
             except ValueError:
                 issued_at = None
+        period = _period_from_issued_at(issued_at)
+
+        if version_id == issued_id:
+            created, customer_key = _upsert_customer(
+                db, identification_number, company_name
+            )
+            if created:
+                customers_upserted += 1
+            if customer_key:
+                identification_number = customer_key
+            if identification_number == GENERIC_CUSTOMER_RUT:
+                company_name = GENERIC_CUSTOMER_NAME
+        elif identification_number:
+            if _upsert_supplier(db, identification_number, company_name):
+                suppliers_upserted += 1
 
         # Keep classify_document compatible during transition
         classify_payload = {
@@ -239,6 +353,16 @@ def _upsert_docs(
             )
             .first()
         )
+        payment_status_id = dte_catalog.status_id_from_payment_code(
+            db, item.get("payment_status_code")
+        )
+        # When FNS says paid and concepts were allocated, force Imputada Pagada.
+        if (
+            str(item.get("payment_status_code") or "").strip().lower() == "paid"
+            and item.get("has_concepts")
+        ):
+            payment_status_id = dte_catalog.paid_status_id(db) or payment_status_id
+
         is_new = row is None
         if is_new:
             row = TaxDocuments(
@@ -246,16 +370,22 @@ def _upsert_docs(
                 dte_type_id=type_id,
                 folio=folio,
                 identification_number=identification_number,
-                status_id=default_status_id,
-                period="",
+                status_id=payment_status_id or default_status_id,
+                period=period,
             )
             db.add(row)
 
         row.dte_version_id = version_id
         row.dte_type_id = type_id
-        if is_new or row.period is None:
-            row.period = ""
-        if not row.status_id and default_status_id:
+        # Issued refresh always stamps period from document date (e.g. 11-2026).
+        if version_id == issued_id and period:
+            row.period = period
+        elif is_new or row.period is None:
+            row.period = period or ""
+        # Refresh must update account status when FNS reports paid/pending.
+        if payment_status_id:
+            row.status_id = payment_status_id
+        elif not row.status_id and default_status_id:
             row.status_id = default_status_id
         row.identification_number = identification_number
         row.issued_at = issued_at
@@ -264,8 +394,14 @@ def _upsert_docs(
         row.tax_amount = float(item.get("tax_amount") or 0)
         row.total_amount = float(item.get("total_amount") or 0)
         row.branch = str(item.get("branch") or "")[:120]
-        row.pms_class = str(class_info.get("pms_class") or "Sin match")[:80]
-        row.pms_ref = str(class_info.get("pms_ref") or "")[:120]
+        if item.get("pms_class"):
+            row.pms_class = str(item.get("pms_class") or "Sin match")[:80]
+        else:
+            row.pms_class = str(class_info.get("pms_class") or "Sin match")[:80]
+        if item.get("pms_ref"):
+            row.pms_ref = str(item.get("pms_ref") or "")[:120]
+        else:
+            row.pms_ref = str(class_info.get("pms_ref") or "")[:120]
         row.source = source
         try:
             row.raw_json = json.dumps(item.get("raw") or item, ensure_ascii=False, default=str)
@@ -274,7 +410,7 @@ def _upsert_docs(
         upserted += 1
 
     db.commit()
-    return upserted, classified, suppliers_upserted
+    return upserted, classified, suppliers_upserted, customers_upserted
 
 
 def _list_version(
@@ -302,7 +438,12 @@ def _list_version(
         TaxDocuments.issued_at.desc(),
         TaxDocuments.id.desc(),
     ).all()
-    names = _supplier_name_map(db, [row.identification_number for row in rows])
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    ids = [row.identification_number for row in rows]
+    if dte_version_id == issued_id:
+        names = _customer_name_map(db, ids)
+    else:
+        names = _supplier_name_map(db, ids)
     return TaxDocumentListResult(
         items=[
             _serialize_doc(row, company_name=names.get(row.identification_number or "", ""))
@@ -498,7 +639,6 @@ async def refresh_tax_documents(
         raise HTTPException(status_code=400, detail="version must be issued/received or 1/2") from exc
 
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
-    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
 
     start, end = _default_range()
     date_from = _parse_bound(from_date, fallback=start)
@@ -506,20 +646,23 @@ async def refresh_tax_documents(
 
     warning = ""
     docs: list[dict] = []
-    source = "api"
+    source = "fns_web"
     pms_rows: list[dict] = []
 
     try:
         if version_id == received_id:
+            # Recibidas = libro de compras (facturacion.cl). FNS Contabilidad no lo expone.
             source = "web"
             with BillingPortalWebClient() as web:
                 docs = web.fetch_received(date_from, date_to)
         else:
-            client = BillingPortalClient()
-            client.login()
-            docs = client.fetch_issued(date_from, date_to)
-            pms_rows = await fetch_pms_production(date_from, date_to)
+            # Emitidas = FNS Cobros + estado de cuenta / conceptos.
+            source = "fns_web"
+            with FnsTaxDocumentsClient() as fns:
+                docs = fns.fetch_issued(date_from, date_to)
     except BillingPortalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FnsWebError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     for doc in docs:
@@ -529,13 +672,13 @@ async def refresh_tax_documents(
             doc["dte_type_id"] = resolved_type
 
     try:
-        upserted, classified, suppliers_upserted = _upsert_docs(
+        upserted, classified, suppliers_upserted, customers_upserted = _upsert_docs(
             db,
             docs,
             source=source,
             dte_version_id=version_id,
             pms_rows=pms_rows,
-            match_fns=version_id == issued_id,
+            match_fns=False,
         )
     except IntegrityError as exc:
         db.rollback()
@@ -552,5 +695,6 @@ async def refresh_tax_documents(
         upserted=upserted,
         classified=classified,
         suppliers_upserted=suppliers_upserted,
+        customers_upserted=customers_upserted,
         warning=warning,
     )

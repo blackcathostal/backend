@@ -1,0 +1,1 @@
+<br>DELETE FROM cm_booking_facturas_desbloqueos WHERE factura_id= AND tipo=''<br>[noZona]Reg->

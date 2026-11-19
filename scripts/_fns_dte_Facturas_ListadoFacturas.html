@@ -1,0 +1,3492 @@
+
+<!DOCTYPE html>
+<!--[if IE 8]> <html lang="en" class="ie8"> <![endif]-->
+<!--[if !IE]><!-->
+<html lang="es">
+    <!--<![endif]-->
+    <head>
+        <meta charset="utf-8" />
+        <title>fnsManager - Zona de Propietarios</title>
+        <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
+        <meta content="Sistema de gestión para hoteles donde gestionar cómodamente toda tu venta online. Ten actualizado en tiempo real el inventario y la estrategia de tarifas para todos tus canales." name="description" />
+        <meta content="FNSRooms" name="author" />
+        <meta content="svrInd" name="SRVAPPLATAM101"/>
+        <!-- <meta http-equiv="Cache-Control" content="no-cache, mustrevalidate"> -->
+       <base href="https://adminchile1.fnsmanager.com/" />
+<form method="post" name="form_datos">
+	<input type='hidden' name='accion' value="edit_elemento"> 
+	<input type='hidden' name='usuario' value=""> 
+	<input type='hidden' name='error' value="">
+	<input type='hidden' name='channel_id' value="">
+	<input type='hidden' name='tipo_habitacion_id' value="">    
+	<input type='hidden' name='password' value=""> 
+	<input type='hidden' name='usuario_id' value="5406"> 
+	<input type='hidden' name='var1' value="7402">  
+	<input type='hidden' name='var2' value="Facturas"> 
+	<input type='hidden' name='var3' value="ListadoFacturas"> 
+	<input type='hidden' name='var4' value=""> 
+	<input type='hidden' name='var5' value=""> 
+	<input type='hidden' name='var6' value=""> 
+	<input type='hidden' name='var7' value=""> 
+	<input type='hidden' name='var8' value=""> 
+	<input type='hidden' name='var9' value=""> 
+	<input type='hidden' name='accion_sig' value="">
+	<input type='hidden' name='estoy_sig' value=""> 
+	<input type='hidden' name='estoy' value="Contabilidad"> 
+	<input type='hidden' name='dia_inicio' value=""> 
+	<input type='hidden' name='mes_inicio' value="">
+	<input type='hidden' name='ano_inicio' value=""> 
+	<input type='hidden' name='dia_fin' value=""> 
+	<input type='hidden' name='mes_fin' value=""> 
+	<input type='hidden' name='ano_fin' value="">
+	<input type='hidden' name='f_inicio' value=""> 
+	<input type='hidden' name='f_fin' value="">
+	<input type='hidden' name='alert' value=""> 
+	<input type='hidden' name='nombre' value=""> 
+	<input type='hidden' name='cif' value=""> 
+	<input type='hidden' name='encargado' value=""> 
+	<input type='hidden' name='mail' value=""> 
+	<input type='hidden' name='telefono1' value=""> 
+	<input type='hidden' name='telefono2' value=""> 
+	<input type='hidden' name='fax' value=""> 
+	<input type='hidden' name='direccion' value=""> 
+	<input type='hidden' name='cp' value=""> 
+	<input type='hidden' name='ciudad_id' value=""> 
+	<input type='hidden' name='transaccion_id' value="">
+	<input type='hidden' name='reserva_id' value="">
+	<input type='hidden' name='cod_res' value="">
+	<input type='hidden' name='habitacion_id' value="">
+	<input type='hidden' name='desglose_id' value="">
+	<input type='hidden' name='portal_id' value="">
+	<input type='hidden' name='noticia_id' value="">
+	<input type='hidden' name='factura_id' value="">
+	<input type='hidden' name='cliente_id' value="">
+	<input type='hidden' name='empresa_id' value="">
+	<input type='hidden' name='estado_reserva' value="">
+	<input type='hidden' name='oferta_id' value="">
+	<input type='hidden' name='actividad_id' value="">
+	<input type='hidden' name='categoria_id' value="">
+	<input type='hidden' name='galeria_id' value="">
+	<input type='hidden' name='imagen_id' value="">
+	<input type='hidden' name='adjunto_id' value="">
+	<input type='hidden' name='fact_cliente_id' value="">
+	
+	<input type='hidden' name='regimen_id' value="">
+	<input type='hidden' name='valor_mapeo' value="">
+	<input type='hidden' name='capacidad_minima' value="">
+	<input type='hidden' name='capacidad_maxima' value="">
+	<input type='hidden' name='num_habitaciones' value="">
+	<input type='hidden' name='tipo_mensaje_mapeo' value="">
+	<input type='hidden' name='mensaje_mapeo' value="">
+	<input type='hidden' name='tarifas_ocupacion' value="">
+	<input type='hidden' name='tarifas_encoded' value="">
+	<input type='hidden' name='rate_ch_id' value="">
+	
+	<input type='hidden' name='tipo_mensaje' value="">
+	<input type='hidden' name='mensaje' value="">
+	<input type='hidden' name='nombre_tipo_habitacion' value="">
+	<input type='hidden' name='nombre_habitacion' value="">
+	<input type='hidden' name='nuevo_tipo_habitacion_id' value="">
+	
+	<input type='hidden' name='b_estado' value="1">
+	<input type='hidden' name='b_prioridad' value="2">
+	
+	<input type='hidden' name='recalcular' value="">
+	<input type='hidden' name='quincena_inicio' value="">
+	
+	<input type='hidden' name='peticion_alojamiento_id' value="">
+	<input type='hidden' name='peticion_estado' value="">
+	<input type='hidden' name='peticion_channel' value="">
+	<input type='hidden' name='peticion_fecha_inicio' value="">
+	<input type='hidden' name='peticion_fecha_fin' value="">
+	<input type='hidden' name='peticion_fecha_filtro' value="">
+	<input type='hidden' name='peticion_campo_ordenacion' value="">
+	<input type='hidden' name='peticion_orden' value="">
+	
+	<input type='hidden' name='peticion_reserva_id' value="">
+	<input type='hidden' name='moneda_tarifa_id' value="">
+	
+	<input type='hidden' name='idioma_contrato_id' value="">
+	
+	<input type='hidden' name='edi_th_nombre_tipo_habitacion_prop' value="">
+	<input type='hidden' name='edi_th_numero_habitaciones' value="">
+	<input type='hidden' name='edi_th_capacidad_minima' value="">
+	<input type='hidden' name='edi_th_capacidad_maxima' value="">
+	<input type='hidden' name='edi_th_capacidad_estandar' value="">
+	<input type='hidden' name='edi_th_orden' value="">
+	<input type='hidden' name='edi_th_array_lang' value="">
+	<input type='hidden' name='bRecargarResultados' value="">
+	<input type='hidden' name='partner_id' value="">
+	<input type='hidden' name='multihotel_alojamientos' value="" id="hidden-multihotel-alojamientos">
+	<input type='hidden' name='multihotel_aplicar' value="" id="hidden-multihotel-aplicar">
+</form>		<link href="https://adminchile1.fnsmanager.com/css/libraries/bootstrap.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/jquery-ui.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/dataTables.bootstrap.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/jquery-ui.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/style.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/style-responsive.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/animate.min.css" rel="stylesheet" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/portal.css?v=1795045058" rel="stylesheet" id="theme" />
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/print.css?v=1795045058" rel=stylesheet type="text/css" media="print">
+		<link href="https://adminchile1.fnsmanager.com/css/libraries/modales/modales.css" rel="stylesheet" type="text/css" />
+<script src="https://adminchile1.fnsmanager.com/js/libraries/jquery-1.9.1.min.js"></script>
+
+
+<script type='text/javascript'>
+
+/**
+ * Función que ejecuta vuelve a la acción indicada mostrando el mensaje indicado.
+ *
+ * @param String 	estoy_siguiente		Módulo al que se debe redirigir.
+ * @param String 	accion_siguiente  	Acción a la que se debe redirigir.
+ * @param Inteher	tipo				Tipo de mensaje: 0 = Error | 1 = Éxito.
+ * @param String	mensaje				Mensaje a mostrar al usuario en la pantalla destino.
+ */
+ 
+function redirige_limpiando( estoy_siguiente, accion_siguiente, tipo, mensaje )
+	{
+		document.form_datos.action							= estoy_siguiente;
+		document.form_datos.accion.value					= accion_siguiente;
+		document.form_datos.tipo_habitacion_id.value 		= "";
+		document.form_datos.habitacion_id.value				= "";
+		document.form_datos.nombre_tipo_habitacion.value	= "";
+		document.form_datos.nombre_habitacion.value			= "";
+		document.form_datos.nuevo_tipo_habitacion_id.value	= "";
+		document.form_datos.tipo_mensaje.value 				= tipo;
+		document.form_datos.mensaje.value 					= mensaje;
+		document.form_datos.submit();										
+	}
+
+</script>        
+    </head>
+	<style>
+/* Funcionalidad para ver concepto contraido y al pasar raton por encima expandir */
+.truncate-text-chars-20 { max-width:20ch}
+.truncate-text-chars-30 { max-width:30ch}
+.truncate-text-chars-50 { max-width:50ch}
+.truncate-text-chars-100 { max-width:100ch}
+
+.truncate-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; position:relative; padding-right:1.6em; }
+.truncate-full { display:none; background:#fff; white-space:normal; }
+.truncate-wrapper {  display:inline-block; }
+/* icono + sutil cuando el texto está truncado */
+.truncate-text::after{
+  content: "+";
+  position: absolute;
+  right: 0.25em;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 700;
+  font-size: 0.95em;
+  color: #000;
+  opacity: 0.18;
+  transition: opacity .12s ease;
+  pointer-events: none;
+}
+/* al hacer hover desaparece el + (porque se muestra el texto completo)*/
+/*
+.truncate-wrapper:hover .truncate-text::after { opacity: 0; }
+.truncate-wrapper:hover .truncate-full { display:block; }
+.truncate-wrapper:hover .truncate-text { display:none; } */
+
+/* Hacemos qeu valga tanto hover como click para que  sirva tb para movil */
+.truncate-toggle { position: absolute; left: -9999px; }
+/* hover sigue funcionando */
+.truncate-wrapper:hover .truncate-full { display:block; }
+.truncate-wrapper:hover .truncate-text { display:none; }
+/* click: cuando el checkbox está checked */
+.truncate-toggle:checked + .truncate-label .truncate-full { display:block; }
+.truncate-toggle:checked + .truncate-label .truncate-text { display:none; }
+/* ocultar el + en hover o cuando esté abierto por click */
+.truncate-wrapper:hover .truncate-text::after,
+.truncate-toggle:checked + .truncate-label .truncate-text::after { opacity: 0; }
+</style>    <body  id="general">
+		<!-- begin #page-loader -->
+		<div id="page-loader" class="fade in"><span class="spinner"></span></div>
+		<!-- end #page-loader -->
+	
+    				<!-- begin #page-container -->
+    				<div id="page-container" class="fade page-sidebar-fixed page-header-fixed ">
+<div id="headermovil" class="header navbar navbar-default navbar-fixed-top">
+
+	<div id="menu-movil">
+		<div class="d-flex justify-content-between b-b-1">
+			<div id="menu-hamburguesa" class="menu-hamburguesa">
+				<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/hamburguesa.svg" alt="Menu">
+				<div id="logo-responsive">
+					<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/logo_fns_responsive.svg" alt="Menu">
+				</div>
+			</div>
+			<div class="d-flex">
+				<!-- <div id="menu-help">
+					<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/menu_help.svg" alt="Menu">
+				</div> -->
+
+
+			<div>
+				
+           			<form class="navbar-form full-width">
+	                    <div class="form-group">
+	                        							<select id="alojamiento_en_uso_id" name='alojamiento_en_uso' class='form-control custom-tooltip' data-customtitle='Hotel Boutique Black Cat' onchange="javascript:cambiar_alojamiento(this.value, 'Contabilidad', 'edit_elemento')">
+									<option value="7402" selected>7402 - Hotel Boutique Black Cat</option>
+								 </select>
+		                       
+	                    </div>
+                	</form>
+            	</div>
+				<div id="menu_aux"> 
+			
+            <li class="dropdown navbar-user">
+                <a href="javascript:;" class="dropdown-toggle" data-toggle="dropdown">
+                	<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/menu_right.svg" alt="" class="menu-def">
+                </a>
+                <ul class="dropdown-menu animated fadeInRight">
+                    <li class="arrow"></li>
+                    <li><a href="#" id="modo-kiosko">Modo kiosko</a></li>
+						<li><a href="javascript:FreshworksWidget('open', 'ticketForm');">Contacto</a></li>
+						<li><a href="javascript:cargar('Maestros','GestorPreferenciasMenu.editar');">Ajustes</a></li>
+						<li><a href="javascript:cargar('Ayuda','');">Ayuda</a></li>
+					 	<li class="divider"></li>
+						<li><a href="javascript:cargar('Cerrarsesion','cerrar');" title="Cerrar sesi&oacute;n">Cerrar sesi&oacute;n</a></li>
+                </ul>
+            </li>
+	       		</div>
+			</div>
+		
+		</div>
+<div id="menu-movil-puntos" class="plegado">
+	<div class="wrapper-movil-puntos">
+		<ul class="primer-nivel-movil">
+
+			<li class=" ">
+				<a href="javascript:edit_elemento('7402', 'MenuAdmin', '')">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsMenu ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsMenu.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Inicio</span>
+				</a>
+					
+			</li>
+			<li class="has-submenu ">
+				<a href="javascript:;">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsManager ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsManager.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Channel Manager</span>
+				</a>
+					<div class="punto-segundo-nivel-movil plegado">	
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Gestión Integral</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'GestionIntegral', '')">
+													<i class="fa fa-calendar m-r-5"></i>Días												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'GestionIntegral', 'periodos')">
+													<i class="fa fa-arrows-h m-r-5"></i>Periodos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MapeoHabitaciones', 'verprocesospendientes_cm')">
+													<i class="fa fa-clock-o m-r-5"></i>Procesos Pendientes												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Cupos', 'listado.cupos.pactados')">
+													<i class="fa fa-arrow-right m-r-5"></i>Cupos Pactados												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Precios</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Tarifas', 'editar_basica')">
+													<i class="fa fa-arrow-up m-r-5"></i>Tarifas Rack												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Configuracion', 'ComisionCM.editar')">
+													<i class="fa fa-eur m-r-5"></i>Comisiones OTAS												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Tarifas / Promociones</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Ofertas', 'crear_formulario_1')">
+													<i class="fa fa-plus-square m-r-5"></i>Crear												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Ofertas', 'listado_ofertas')">
+													<i class="fa fa-edit m-r-5"></i>Editar												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Tarifas', 'editar_maestras')">
+													<i class="fa fa-sitemap m-r-5"></i>Tarifas Maestras												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Up-Selling / Cross-Selling</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Productos', 'crear_producto')">
+													<i class="fa fa-plus-square m-r-5"></i>Crear												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Productos', 'listado_productos')">
+													<i class="fa fa-edit m-r-5"></i>Editar												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Dynamic Pricing</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'DynamicPricing', 'listado.notificaciones')">
+													<i class="fa fa-flag m-r-5"></i>Notificaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'DynamicPricing', 'listado.reglas')">
+													<i class="fa fa-line-chart m-r-5"></i>Reglas												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Estado</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MapeoHabitaciones', 'ver')">
+													<i class="fa fa-th-large m-r-5"></i>Tabla de Mapeo												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'conexionesPorAlojamiento')">
+													<i class="fa fa-code-fork m-r-5"></i>Estado Conexiones												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+					</div>
+					
+			</li>
+			<li class="has-submenu ">
+				<a href="javascript:;">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsHoteldesk ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsHoteldesk.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">PMS</span>
+				</a>
+					<div class="punto-segundo-nivel-movil plegado">	
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Planning</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'PlanningV2', 'ver')">
+													<i class="fa fa-calendar m-r-5"></i>Interactivo												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Planning', 'ver')">
+													<i class="fa fa-tasks m-r-5"></i>Canal												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Planning', 'ver_x_estados')">
+													<i class="fa fa-list m-r-5"></i>Estado												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Reservas</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Reservas', 'Crear')">
+													<i class="fa fa-user m-r-5"></i>Crear reserva												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Reservas', 'CrearGrupal')">
+													<i class="fa fa-users m-r-5"></i>Crear Reserva Grupal												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'PreReservas', 'Crear')">
+													<i class="fa fa-calendar-plus-o m-r-5"></i>Crear pre-reserva												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'PreReservas', 'CrearGrupal')">
+													<i class="fa fa-calendar-plus-o m-r-5"></i>Crear Pre-Reserva Grupal												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Presupuestos', 'CrearGrupal')">
+													<i class="fa fa-calculator m-r-5"></i>Cotizador												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Reservas', 'CrearPasante')">
+													<i class="fa fa-male m-r-5"></i>Crear Pasante												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Reservas', 'ConsultarDisponibilidad')">
+													<i class="fa fa-calendar-check-o m-r-5"></i>Consulta Disponibilidad												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Reservas', '')">
+													<i class="fa fa-bookmark m-r-5"></i>Reservas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Cancelaciones', '')">
+													<i class="fa fa-ban m-r-5"></i>Cancelaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'reservas.noshow')">
+													<i class="fa fa-eye-slash m-r-5"></i>No Show												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'PreReservas', '')">
+													<i class="fa fa-bookmark-o m-r-5"></i>Pre-reservas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Presupuestos', '')">
+													<i class="fa fa-shopping-cart m-r-5"></i>Cotizaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Reservas', 'BuscaPasantes')">
+													<i class="fa fa-search m-r-5"></i>Pasantes												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Reservas', 'ExportacionExcel')">
+													<i class="fa fa-file-excel-o m-r-5"></i>Exportar a Excel												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ComentariosAlojamiento', 'ver_comentarios_alojamiento')">
+													<i class="fa fa-comment m-r-5"></i>Comentarios Clientes												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Check-in Check-out</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'EditarEmail', 'listado.huespedes')">
+													<i class="fa fa-sign-in m-r-5"></i>Estado Check-in												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'EditarEmail', 'listado')">
+													<i class="fa fa-envelope-o m-r-5"></i>Configuración Plantillas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'EditarEmail', 'listado.emails')">
+													<i class="fa fa-paper-plane m-r-5"></i>Control Envíos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Clientes', 'VerificaFichaParteViajeros.dia')">
+													<i class="fa fa-suitcase m-r-5"></i>Parte viajeros												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Clientes', 'VerificaFichaParteViajeros.periodo')">
+													<i class="fa fa-suitcase m-r-5"></i>Libro de Registro												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Facturas</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Facturas', 'ListadoFacturas')">
+													<i class="fa fa-search m-r-5"></i>Buscador												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Facturas', 'Descargar.PDF')">
+													<i class="fa fa-file-pdf-o m-r-5"></i>Descargar PDF												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Facturas', 'ListadoFacturasElectronicas')">
+													<i class="fa fa-credit-card m-r-5"></i>Facturas Electrónicas												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Clientes</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Clientes', 'Crear')">
+													<i class="fa fa-user-plus m-r-5"></i>Crear												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Clientes', '')">
+													<i class="fa fa-search m-r-5"></i>Buscar												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Empresas</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Empresas', 'crear')">
+													<i class="fa fa-plus-square m-r-5"></i>Crear												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Empresas', '')">
+													<i class="fa fa-search m-r-5"></i>Buscar												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Auditoría</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'formularios.auditoria')">
+													<i class="fa fa-check-square-o m-r-5"></i>Formularios Auditoría												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Libros', 'libro_recepcion')">
+													<i class="fa fa-book m-r-5"></i>Libro Recepción												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'cierreDias')">
+													<i class="fa fa-lock m-r-5"></i>Cierres de Días												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Autorizaciones', 'listado')">
+													<i class="fa fa-check-square-o m-r-5"></i>Autorizaciones												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+					</div>
+					
+			</li>
+			<li class="has-submenu ">
+				<a href="javascript:;">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsHouskeeping ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsHouskeeping.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">House Keeping</span>
+				</a>
+					<div class="punto-segundo-nivel-movil plegado">	
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Informes</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Limpieza')">
+													<i class="fa fa-paint-brush m-r-5"></i>Limpieza Diaria												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'limpieza.periodo')">
+													<i class="fa fa-paint-brush m-r-5"></i>Limpieza Periodo												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'estadodelimpieza.listado')">
+													<i class="fa fa-trash-o m-r-5"></i>Estado Habitaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'rack')">
+													<i class="fa fa-building m-r-5"></i>Rack Habitaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'limpieza.completo')">
+													<i class="fa fa-list m-r-5"></i>Plantilla Limpieza												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'produccion.limpiadoras')">
+													<i class="fa fa-paint-brush m-r-5"></i>Limpieza Producción												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'historico.habitaciones')">
+													<i class="fa fa-history m-r-5"></i>Histórico Limpiezas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'habitaciones.sin.uso')">
+													<i class="fa fa-arrow-right m-r-5"></i>Habitaciones sin uso												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Gestión Limpieza</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'partesdelimpieza.listado')">
+													<i class="fa fa-list m-r-5"></i>Plantillas Housekeeping												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ObjetosPerdidos', '')">
+													<i class="fa fa-question m-r-5"></i>Objetos Perdidos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Bloqueos', '')">
+													<i class="fa fa-ban m-r-5"></i>Bloqueos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'personal.limpieza.listado')">
+													<i class="fa fa-child m-r-5"></i>Gestión Personal												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Mantenimiento</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Incidencias.man.crear')">
+													<i class="fa fa-exclamation-triangle m-r-5"></i>Crear Incidencia												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Incidencias.man.listado')">
+													<i class="fa fa-exclamation-triangle m-r-5"></i>Incidencias												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Ordenes.trabajo.man')">
+													<i class="fa fa-briefcase m-r-5"></i>Órdenes de Trabajo												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Mis.ordenes.man')">
+													<i class="fa fa-briefcase m-r-5"></i>Mis Órdenes												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Tipo.incidencias.man.crear')">
+													<i class="fa fa-exclamation-triangle m-r-5"></i>Crear Tipo Incidencia												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+					</div>
+					
+			</li>
+			<li class="has-submenu ">
+				<a href="javascript:;">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsReporting ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsReporting.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Informes</span>
+				</a>
+					<div class="punto-segundo-nivel-movil plegado">	
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Actividad</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Checkin')">
+													<i class="fa fa-sign-in m-r-5"></i>Check-in												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Checkout')">
+													<i class="fa fa-sign-out m-r-5"></i>Check-out												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'inhouse')">
+													<i class="fa fa-home m-r-5"></i>In House												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Activas')">
+													<i class="fa fa-send-o m-r-5"></i>Actividad												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'roomlist')">
+													<i class="fa fa-slideshare m-r-5"></i>Room List												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Reservas_x_Habitacion')">
+													<i class="fa fa-bookmark m-r-5"></i>Reservas x Habitación												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Reservas_x_Tipo_Habitacion')">
+													<i class="fa fa-bookmark m-r-5"></i>Reservas x TH												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'reservasGrupales')">
+													<i class="fa fa fa-group m-r-5"></i>Reservas Grupales												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'upgrade')">
+													<i class="fa fa-arrow-up m-r-5"></i>Upgrades												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'previsionservicios')">
+													<i class="fa fa-coffee m-r-5"></i>Previsión Servicios												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'serviciosxhab')">
+													<i class="fa fa-coffee m-r-5"></i>Servicios x Hab												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'prevision.supletorias')">
+													<i class="fa fa-bed m-r-5"></i>Previsión Supletorias												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'prevision.cunas.supletorias')">
+													<i class="fa fa-child m-r-5"></i>Previsión Cunas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Comentarios')">
+													<i class="fa fa-comment m-r-5"></i>Comentarios Reservas												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Financieros</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Cobros')">
+													<i class="fa fa-money m-r-5"></i>Cobros												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'cobrosPorCheckout')">
+													<i class="fa fa-money m-r-5"></i>Cobros x Checkout												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'CargosDiarios')">
+													<i class="fa fa-shopping-cart m-r-5"></i>Cargos diarios												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ingresoscobros')">
+													<i class="fa fa-dollar m-r-5"></i>Ingresos-Cobros												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'informe.planillas')">
+													<i class="fa fa-file m-r-5"></i>Planillas Turnos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'cuentas.sobre.dias')">
+													<i class="fa fa-bar-chart-o m-r-5"></i>Cuentas sobre días												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Pagos.anticipados')">
+													<i class="fa fa-money m-r-5"></i>Pagos Anticipados												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'Depositos')">
+													<i class="fa fa-money m-r-5"></i>Depósitos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'iva')">
+													<i class="fa fa-list-alt m-r-5"></i>IVA Mensual												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'libro_contable_verificacion')">
+													<i class="fa fa-search m-r-5"></i>Verificar Libro Contable												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'libro_contable')">
+													<i class="fa fa-book m-r-5"></i>Libro Contable												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Contabilidad', 'movimientos.contables')">
+													<i class="fa fa-arrows m-r-5"></i>Movimientos Contables												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'formularios.auditoria')">
+													<i class="fa fa-check-square-o m-r-5"></i>Formularios Auditoría												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'AuditoriaNoctura')">
+													<i class="fa fa-moon-o m-r-5"></i>Auditoría Nocturna												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ArqueoCaja', '')">
+													<i class="fa fa-bank (alias) m-r-5"></i>Arqueo de caja												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ajustes.listado')">
+													<i class="fa fa-line-chart m-r-5"></i>Ajustes Cargos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'comisiones')">
+													<i class="fa fa-money m-r-5"></i>Comisiones												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Estados Cuentas</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ingresoscobros_pendientes')">
+													<i class="fa fa-exclamation-triangle m-r-5"></i>Cuentas Impagadas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'cityledger.alojamiento')">
+													<i class="fa fa-credit-card m-r-5"></i>CityLedger Hotel												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'cuentas.por.cobrar')">
+													<i class="fa fa-exclamation-triangle m-r-5"></i>Cuentas por Cobrar												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'deudaempresa.alojamiento')">
+													<i class="fa fa-credit-card m-r-5"></i>Deuda Empresas Hotel												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'creditos.pagados')">
+													<i class="fa fa-credit-card m-r-5"></i>Créditos Pagados												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'pagosacredito.empresa')">
+													<i class="fa fa-credit-card m-r-5"></i>Pagos por Empresa												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'estado_cuentas')">
+													<i class="fa fa-bar-chart m-r-5"></i>Situación cuentas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'balance')">
+													<i class="fa 0 m-r-5"></i>Balance												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Producción</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'CargosDiariosCC')">
+													<i class="fa fa-cube m-r-5"></i>Centro Coste												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'produccion.detalle.habitaciones')">
+													<i class="fa fa-file-text m-r-5"></i>Habitaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Clientes', 'produccion.clientes')">
+													<i class="fa fa-users m-r-5"></i>Producción Clientes												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Empresas', 'Produccion_por_empresa')">
+													<i class="fa fa-building-o m-r-5"></i>Empresa												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Empresas', 'Produccion_de_empresas')">
+													<i class="fa fa-building-o m-r-5"></i>Empresas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'produccion_x_usuario')">
+													<i class="fa fa-user m-r-5"></i>Usuario												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'cargos_maestros')">
+													<i class="fa fa-graduation-cap m-r-5"></i>Cargos Maestro												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Auditoría</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.habitaciones')">
+													<i class="fa fa-key m-r-5"></i>Habitaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.restaurante')">
+													<i class="fa fa-cutlery m-r-5"></i>Restaurante												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.pasantes')">
+													<i class="fa fa-male m-r-5"></i>Pasantes												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.estadosinhouse')">
+													<i class="fa fa-bed m-r-5"></i>Inhouse												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Ventas</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ventascanal')">
+													<i class="fa fa-pie-chart m-r-5"></i>Ventas canal												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ventas_x_tarifa')">
+													<i class="fa fa-bar-chart-o m-r-5"></i>Ventas tarifa												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'personasdia')">
+													<i class="fa fa-superscript m-r-5"></i>Pasajeros por Tarifa												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'detalle.ventas.periodo')">
+													<i class="fa fa-arrows-h m-r-5"></i>Detalle venta periodo												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'VentasSegmento')">
+													<i class="fa fa-arrows-h m-r-5"></i>Ventas Segmento												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ventas_x_tarifa_FNS')">
+													<i class="fa fa-table m-r-5"></i>Ventas Tarifas FNS												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ventasalojamiento')">
+													<i class="fa fa-table m-r-5"></i>Ventas en FNS												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ocupacionmensual')">
+													<i class="fa fa-child m-r-5"></i>Ocupación Mensual												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ocupacionanual')">
+													<i class="fa fa-child m-r-5"></i>Ocupación Anual												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes ', 'habitaciones.personas.dia')">
+													<i class="fa fa-users m-r-5"></i>Habitaciones y Pasajeros												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'InfoXProc')">
+													<i class="fa fa-map-marker m-r-5"></i>Procedencia												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'InfoXProcIne')">
+													<i class="fa fa-bar-chart m-r-5"></i>INE												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'InfoXProcIneMensual')">
+													<i class="fa fa-bar-chart m-r-5"></i>Estadísticas INE												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Revenue</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'ocupacionypreciomedio_th')">
+													<i class="fa fa-line-chart m-r-5"></i>Revenue												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Revenue', 'revenue.basico')">
+													<i class="fa fa-line-chart m-r-5"></i>Ponderado												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Revenue', 'revenue.meses')">
+													<i class="fa fa-line-chart m-r-5"></i>Revenue Meses												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Revenue', 'pickup')">
+													<i class="fa fa-signal m-r-5"></i>PickUp												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Revenue', 'forecast')">
+													<i class="fa fa-line-chart m-r-5"></i>Forecast												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Revenue', 'disponibilidad')">
+													<i class="fa fa-calendar-check-o m-r-5"></i>Disponibilidad												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+					</div>
+					
+			</li>
+			<li class="has-submenu ">
+				<a href="javascript:;">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsGastro ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsGastro.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Gastro</span>
+				</a>
+					<div class="punto-segundo-nivel-movil plegado">	
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Restaurante</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroFGPuntosVenta', 'Familias.listado')">
+													<i class="fa fa-cubes m-r-5"></i>Familias												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroFGPuntosVenta', 'Grupos.listado')">
+													<i class="fa fa-cube m-r-5"></i>Grupos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroRecetas', 'Recetas.listado')">
+													<i class="fa fa-file-text-o m-r-5"></i>Recetas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroPuntosVenta', 'PuntoVenta.listado')">
+													<i class="fa fa-location-arrow m-r-5"></i>Puntos de Venta												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'PersonalRestaurante', 'PersonalRestaurante.listado')">
+													<i class="fa fa-users m-r-5"></i>Personal												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Informes</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'listado')">
+													<i class="fa fa-file-text-o m-r-5"></i>Tiquets												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'Platos_devueltos_borrados.listado')">
+													<i class="fa fa-undo m-r-5"></i>Platos Devueltos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'Productos_anulados.listado')">
+													<i class="fa fa-undo m-r-5"></i>Productos Anulados												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.cuentasinternas')">
+													<i class="fa fa-suitcase m-r-5"></i>Ventas Internas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'RecetasVendidas.listado')">
+													<i class="fa fa-file-text-o m-r-5"></i>Ventas Recetas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'CuentasAbiertas.listado')">
+													<i class="fa fa-user m-r-5"></i>Cuentas Abiertas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'Informe.z.listado')">
+													<i class="fa fa-bank m-r-5"></i>Gastro Z												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Comandero</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Comandero', 'Tipologias')">
+													<i class="fa fa-cogs m-r-5"></i>Tipologías												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Comandero', 'GruposComentarios')">
+													<i class="fa fa-comment m-r-5"></i>Grupos de comentarios												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Comandero', 'Comentarios')">
+													<i class="fa fa-comment m-r-5"></i>Comentarios												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Configuración</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroMesas', 'Mesas.listado')">
+													<i class="fa fa-cutlery m-r-5"></i>Mesas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'Descuentos.listado')">
+													<i class="fa fa-tags m-r-5"></i>Descuentos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'cuentasInternas.listado')">
+													<i class="fa fa-suitcase m-r-5"></i>Cuentas Internas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'ConfiguracionGastro.listado')">
+													<i class="fa fa-cogs m-r-5"></i>Configuración												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'FormasDeCobroGastro')">
+													<i class="fa fa-money m-r-5"></i>Formas Pago												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'turnos.gastro')">
+													<i class="fa fa-cogs m-r-5"></i>Turnos Servicios												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'Suplementos.listado')">
+													<i class="fa fa-tags m-r-5"></i>Suplementos												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+					</div>
+					
+			</li>
+			<li class="has-submenu ">
+				<a href="javascript:;">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsBodega ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsBodega.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Bodega</span>
+				</a>
+					<div class="punto-segundo-nivel-movil plegado">	
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Maestro Bodegas</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroBodegas', 'Bodegas.listado')">
+													<i class="fa fa-glass m-r-5"></i>Bodegas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroBodegas', 'Familias.listado')">
+													<i class="fa fa-cubes m-r-5"></i>Familias												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroBodegas', 'Grupos.listado')">
+													<i class="fa fa-cube m-r-5"></i>Grupos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroBodegas', 'Proveedores.listado')">
+													<i class="fa fa-truck m-r-5"></i>Proveedores												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MaestroProductos', 'Productos.listado')">
+													<i class="fa fa-puzzle-piece m-r-5"></i>Productos												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Stock</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'InventarioBodegas', 'Inventario.listado')">
+													<i class="fa fa-archive m-r-5"></i>Inventario												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'AuditoriaBodegas', 'Auditoria.listado')">
+													<i class="fa fa-book m-r-5"></i>Auditorías												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MovimientoProductosBodegas', 'Movimientos.listado')">
+													<i class="fa fa-cubes m-r-5"></i>Movimiento de Productos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ValorizarMovimientos', 'Valorizar.listado')">
+													<i class="fa fa-usd m-r-5"></i>Valorizar Movimientos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'PedidosBodegas', 'PedidosBodegas.listado')">
+													<i class="fa fa-bars m-r-5"></i>Pedidos												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Movimientos</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'ComprasBodegas', 'ComprasBodegas.listado')">
+													<i class="fa fa-shopping-cart m-r-5"></i>Compras												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'VentasBodegas', 'Ventas.listado')">
+													<i class="fa fa-line-chart m-r-5"></i>Ventas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'DespachosBodegas', 'Despachos.listado')">
+													<i class="fa fa-suitcase m-r-5"></i>Despachos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'MermasBodegas', 'Mermas.listado')">
+													<i class="fa fa-trash-o m-r-5"></i>Mermas												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+					</div>
+					
+			</li>
+			<li class="has-submenu ">
+				<a href="javascript:;">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsSites ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsSites.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Página Web</span>
+				</a>
+					<div class="punto-segundo-nivel-movil plegado">	
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Estadísticas Web</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'PortalesAnalytics', '')">
+													<i class="fa fa-bar-chart-o m-r-5"></i>Analytics												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Gestión motor</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Motor', '')">
+													<i class="fa fa-cogs m-r-5"></i>Configuración motor												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'Ventajas')">
+													<i class="fa fa-cogs m-r-5"></i>Ventajas												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Gestión Web</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Actividades', '')">
+													<i class="fa fa-futbol-o m-r-5"></i>Actividades												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+					</div>
+					
+			</li>
+			<li class="has-submenu ">
+				<a href="javascript:;">
+                	<span>
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-left.svg" alt="" class="icono-fns icono-arrow-left ">
+						<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/movil/arrow-down.svg" alt="" class="icono-fns icono-arrow-down  hidden">
+					</span>
+                	
+                	<span class="icono-primer-nivel icono-fnsDatos ">
+						<span>
+							<img src="https://adminchile1.fnsmanager.com/img/iconos/menu/fnsDatos.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Mi cuenta</span>
+				</a>
+					<div class="punto-segundo-nivel-movil plegado">	
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Datos / Configuración</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Datos', '')">
+													<i class="fa fa-user m-r-5"></i>Personales												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Datos', 'Legales')">
+													<i class="fa fa-institution m-r-5"></i>Legales												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Datos', 'gestion_emails')">
+													<i class="fa fa-paper-plane m-r-5"></i>Emails												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'CambioDivisas')">
+													<i class="fa fa-usd m-r-5"></i>Cambio Divisas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'GestorPreferencias.editar')">
+													<i class="fa fa-compass m-r-5"></i>Preferencias												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'GestorPreferenciasMenu.editar')">
+													<i class="fa fa-list-ol m-r-5"></i>Preferencias Menú												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'EditarEmail', 'configuracion.correo')">
+													<i class="fa fa-cogs m-r-5"></i>Cuenta Envío												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Alojamientos</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'datos')">
+													<i class="fa fa-database m-r-5"></i>Datos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'imagenes')">
+													<i class="fa fa-picture-o m-r-5"></i>Imágenes												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'descripciones')">
+													<i class="fa fa-reorder m-r-5"></i>Descripciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'servicios')">
+													<i class="fa fa-server m-r-5"></i>Servicios												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'zonascomunes.listado')">
+													<i class="fa fa-recycle m-r-5"></i>Zonas Comunes												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Habitaciones', 'listadotiposhabitaciones')">
+													<i class="fa fa-bed m-r-5"></i>Habitaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'condiciones_reserva')">
+													<i class="fa fa-book m-r-5"></i>Condiciones reserva												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'condiciones_pago')">
+													<i class="fa fa-book m-r-5"></i>Condiciones Pago												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Politicas', 'listado_politicas')">
+													<i class="fa fa-check-square-o m-r-5"></i>Políticas cancelación												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Alojamientos', 'crear')">
+													<i class="fa fa-plus-square m-r-5"></i>Crear Alojamiento												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'Supletorias.listado')">
+													<i class="fa fa-bed m-r-5"></i>Supletorias y Cunas												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Facturas</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Facturacion', '')">
+													<i class="fa fa-eur m-r-5"></i>Facturas FNS												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Liquidacion', '')">
+													<i class="fa fa-external-link-square m-r-5"></i>Liquidaciones												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Channel Manager</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'ConfigCM.editar')">
+													<i class="fa fa-cogs m-r-5"></i>Configuración												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'Ferias.listado')">
+													<i class="fa fa-calendar-o m-r-5"></i>Editar Festivos												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">PMS</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'TiposCobro.editar')">
+													<i class="fa fa-credit-card m-r-5"></i>Formas de Cobro												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'ListadoCargos')">
+													<i class="fa fa-tasks m-r-5"></i>Maestro de Cargos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'CentrosdeCoste.editar')">
+													<i class="fa fa-cog m-r-5"></i>Centros de Coste												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'CodigoFactura.editar')">
+													<i class="fa fa-cogs m-r-5"></i>Configuración Facturación												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Contabilidad', 'configuracion_general_ampliable.listado')">
+													<i class="fa fa-cogs m-r-5"></i>Configuración Contable General												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'TiposCuentas.editar')">
+													<i class="fa fa-suitcase m-r-5"></i>Tipos de Cuentas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'DocumentosCobro.listado')">
+													<i class="fa fa-file-text m-r-5"></i>Documentos cobro												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'FacturacionItinerarios.listado')">
+													<i class="fa fa-map-signs m-r-5"></i>Itinerarios												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'FormasDePago.listado')">
+													<i class="fa fa-credit-card m-r-5"></i>Formas de pago												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'PMS', 'Conexion.listado')">
+													<i class="fa fa-cogs m-r-5"></i>Conexión PMS												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'motivos.viaje')">
+													<i class="fa fa-suitcase m-r-5"></i>Motivos Viaje												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Autorizaciones', 'configuracion.listado')">
+													<i class="fa fa-check-square-o m-r-5"></i>Autorizaciones												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'ConfigPMS.editar')">
+													<i class="fa fa-cogs m-r-5"></i>PMS												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'GestorPreferenciasEstadosInhouse.editar')">
+													<i class="fa fa-list-alt m-r-5"></i>Estados Inhouse												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'ImpresorasTermicas.editar')">
+													<i class="fa fa-print m-r-5"></i>Impresoras												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'ninos.listado')">
+													<i class="fa fa-child m-r-5"></i>Configuración Niños												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'cierreDias')">
+													<i class="fa fa-lock m-r-5"></i>Cierres de Días												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'CanalesManuales.listado')">
+													<i class="fa fa-tasks m-r-5"></i>Canales manuales												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'MapearAlojamientosIOT.listado')">
+													<i class="fa fa-th-large m-r-5"></i>Mapeos IOT												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'Plantas.listado')">
+													<i class="fa fa-building m-r-5"></i>Plantas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Regimenes', 'listado')">
+													<i class="fa fa-cogs m-r-5"></i>Regímenes												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'Cajas.listado')">
+													<i class="fa fa-cogs m-r-5"></i>Cajas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'Servicios.listado')">
+													<i class="fa fa-cogs m-r-5"></i>Servicios												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'Segmentos.listado')">
+													<i class="fa fa-cogs m-r-5"></i>Segmentos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'TurnosCobro.listado')">
+													<i class="fa fa-cogs m-r-5"></i>Turnos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Maestros', 'TiposMovimientoCaja.listado')">
+													<i class="fa fa-arrows m-r-5"></i>Tipos Movimientos Caja												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'UnidadesNegocio', 'UnidadesNegocio.listado')">
+													<i class="fa fa-bar-chart-o m-r-5"></i>Unidades de Negocio												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Gestión Usuarios</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'GestionUsuarios', 'perfiles.listado')">
+													<i class="fa fa-tachometer m-r-5"></i>Perfiles												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'GestionUsuarios', '')">
+													<i class="fa fa-user m-r-5"></i>Usuarios												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'GestionUsuarios', 'editar.niveles')">
+													<i class="fa fa-sliders m-r-5"></i>Niveles de Permisos												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'GestionUsuarios', 'ips.autorizadas')">
+													<i class="fa fa-tachometer m-r-5"></i>IPs autorizadas												</a>
+											</li>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Logs', 'accesos')">
+													<i class="fa fa-sign-in m-r-5"></i>Log Acceso												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+				
+				               <div class="contenedor">
+									<h2 class="titulo-panel">Histórico</h2>
+									<div class="d-flex">
+										<ul>
+											<li  >
+												<a href="javascript:edit_elemento('7402', 'Historico', 'configuraciones.historico')">
+													<i class="fa fa-suitcase m-r-5"></i>Histórico configuraciones												</a>
+											</li>
+	
+										</ul>
+									</div>
+								</div>
+					</div>
+					
+			</li>
+
+		</ul>
+	</div>
+</div>	
+	</div>
+		
+</div>
+<div id="header" class="header navbar navbar-default navbar-fixed-top">
+    <!-- begin container-fluid -->
+    <div class="container-fluid">
+        <!-- begin mobile sidebar expand / collapse button -->
+        <div class="navbar-header">
+            <a href="index.php?idioma=es&pagina=MenuAdmin" class="navbar-brand">
+            	<span class="navbar-logo">
+					<img src="https://adminchile1.fnsmanager.com/img/logoEmpresa.png" alt="fnsManager" />
+ 
+            	</span>
+            	<div class="m-t-5">
+            		<i class="fa fa-chevron-right  m-r-5" aria-hidden="true"></i>
+            		Producto  <strong> <i class="fa fa-arrow-right  m-r-5 m-l-5" aria-hidden="true"></i> FNSrooms</strong> 
+            	</div>
+            </a>
+        </div>
+            
+        <!-- end mobile sidebar expand / collapse button -->
+        <!-- begin header navigation right -->
+        <ul class="nav navbar-nav navbar-right">
+										<li>
+									<span class='tipo-cambio-cabecera m-t-20'>CL$ - US$: 900</span>
+								</li>
+        
+			<li class='btn-precio-tarifa'>
+				<a href="index.php?idioma=es&pagina=MenuAdmin" target='_blank' class="dropdown-toggle f-s-14 p-5">                                
+                	<span class="navbar-header-contacto custom-tooltip" data-title="Nueva ventana"><i class="fa fa-plus"></i> <i class="fa fa-clone"></i></span>
+				</a>
+			</li>
+        	<li class="btn-contacto-navbar">
+				<a href="javascript:cargar('Incidencias','');" class="dropdown-toggle f-s-14">                                
+                	<span class="navbar-header-contacto custom-tooltip" data-title="Incidencias / Contacto"><i class="fa fa-envelope-o"></i> <span class='txt-contacto-navbar'>Incidencias / Contacto</span></span>
+				</a>
+			</li>
+			<li class="dropdown navbar-user btn-ayuda-navbar">
+				<a href="javascript:;" class="dropdown-toggle" data-toggle="dropdown">
+					<i class="fa fa-question"></i><span class="hidden-xs">Ayuda </span><b class="caret"></b>
+				</a>
+				<ul class="dropdown-menu animated fadeInLeft">
+					<li>
+						<a target="_blank" href=https://soporte.fnsrooms.com >Tu Portal de soporte</a>
+					</li>
+					<li>
+						<a class="m-r-10 f-s-12" href="javascript:mostrar_modal_ayuda('99')">Ver vídeo tutorial</a>
+					</li>
+				</ul>
+			</li>
+            <li>
+                <form class="navbar-form full-width">
+                    <div class="form-group">
+                        						<select id="alojamiento_en_uso_id" name='alojamiento_en_uso' class='form-control custom-tooltip' data-customtitle='Hotel Boutique Black Cat' onchange="javascript:cambiar_alojamiento(this.value, 'Contabilidad', 'edit_elemento')">
+							<option value="7402" selected>7402 - Hotel Boutique Black Cat</option>
+						 </select>
+                       
+                    </div>
+                </form>
+            </li>
+            <li class="dropdown navbar-user custom-tooltip" data-customtitle='Opciones usuario'>
+                <a href="javascript:;" class="dropdown-toggle" data-toggle="dropdown">
+                	<i class="fa fa-user"></i>
+					<span class="hidden-xs custom-tooltip" data-customtitle='Angelica Aballay'>Angelica Aballay</span><b class="caret"></b>
+ 
+                </a>
+                <ul class="dropdown-menu animated fadeInLeft">
+                    <li class="arrow"></li>
+                    <li><a href="#" id="modo-kiosko">Modo kiosko</a></li>
+						<li><a href="javascript:FreshworksWidget('open', 'ticketForm');">Contacto</a></li>
+						<li><a href="javascript:cargar('Maestros','GestorPreferenciasMenu.editar');">Ajustes</a></li>
+						<!-- <li><a href="javascript:cargar('Ayuda','');">Ayuda</a></li>  -->
+						<li><a href="javascript:cargar('Notificaciones','listado');">Notificaciones</a></li>
+						
+					 	<li class="divider"></li>
+						<li><a href="javascript:cargar('Cerrarsesion','cerrar');" title="Cerrar sesi&oacute;n">Cerrar sesi&oacute;n</a></li>
+                </ul>
+            </li>
+        </ul>
+        <!-- end header navigation right -->
+    </div>
+    <!-- end container-fluid -->
+</div>
+<!-- end #header --><div id="main-nav">
+
+	<ul data-init="true" class="nav nav-tabs nav-tabs-inverse primer-nivel" >
+
+			<li >
+				<a aria-expanded="false"  href="javascript:edit_elemento('7402', 'MenuAdmin', '')">
+					
+					<span class="icono-primer-nivel icono-fnsMenu ">
+						<span>
+							<img src="img/iconos/menu/fnsMenu.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Inicio</span>
+				</a>
+			</li>
+			
+			
+			<li >
+				<a aria-expanded="false" data-toggle="tab" href="#tab-1000">
+					
+					<span class="icono-primer-nivel icono-fnsManager ">
+						<span>
+							<img src="img/iconos/menu/fnsManager.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Channel Manager</span>
+				</a>
+			</li>
+			
+			
+			<li >
+				<a aria-expanded="false" data-toggle="tab" href="#tab-1035">
+					
+					<span class="icono-primer-nivel icono-fnsHoteldesk ">
+						<span>
+							<img src="img/iconos/menu/fnsHoteldesk.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">PMS</span>
+				</a>
+			</li>
+			
+			
+			<li >
+				<a aria-expanded="false" data-toggle="tab" href="#tab-1084">
+					
+					<span class="icono-primer-nivel icono-fnsHouskeeping ">
+						<span>
+							<img src="img/iconos/menu/fnsHouskeeping.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">House Keeping</span>
+				</a>
+			</li>
+			
+			
+			<li >
+				<a aria-expanded="false" data-toggle="tab" href="#tab-1065">
+					
+					<span class="icono-primer-nivel icono-fnsReporting ">
+						<span>
+							<img src="img/iconos/menu/fnsReporting.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Informes</span>
+				</a>
+			</li>
+			
+			
+			<li >
+				<a aria-expanded="false" data-toggle="tab" href="#tab-1519">
+					
+					<span class="icono-primer-nivel icono-fnsGastro ">
+						<span>
+							<img src="img/iconos/menu/fnsGastro.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Gastro</span>
+				</a>
+			</li>
+			
+			
+			<li >
+				<a aria-expanded="false" data-toggle="tab" href="#tab-1659">
+					
+					<span class="icono-primer-nivel icono-fnsBodega ">
+						<span>
+							<img src="img/iconos/menu/fnsBodega.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Bodega</span>
+				</a>
+			</li>
+			
+			
+			<li >
+				<a aria-expanded="false" data-toggle="tab" href="#tab-1127">
+					
+					<span class="icono-primer-nivel icono-fnsSites ">
+						<span>
+							<img src="img/iconos/menu/fnsSites.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Página Web</span>
+				</a>
+			</li>
+			
+			
+			<li >
+				<a aria-expanded="false" data-toggle="tab" href="#tab-1086">
+					
+					<span class="icono-primer-nivel icono-fnsDatos ">
+						<span>
+							<img src="img/iconos/menu/fnsDatos.svg" alt="" class="icono-fns ">
+						</span>
+					</span>
+					<span class="texto-primer-nivel">Mi cuenta</span>
+				</a>
+			</li>
+			
+			
+ 		<div id="btn-expandir-menu" class="hidden-xs"><a aria-expanded="false" href="#" data-toggle="tab"><i class="fa fa-angle-double-up"></i>  <span class="texto-primer-nivel"></span></a></div>
+ 	</ul>
+ 	
+ 	<button type="button" class="navbar-toggle" data-click="sidebar-toggled">
+		<span class="icon-bar"></span>
+		<span class="icon-bar"></span>
+		<span class="icon-bar"></span>
+	</button>
+ 	
+ 	<div id="secundary-nav" data-init="true" class="tab-content" >
+			<div id="tab-1126" class="tab-pane fade ">
+			</div>
+			<div id="tab-1000" class="tab-pane fade ">
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Gestión Integral</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'GestionIntegral', '')">
+											<i class="fa fa-calendar m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Días" >Días</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'GestionIntegral', 'periodos')">
+											<i class="fa fa-arrows-h m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Periodos" >Periodos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MapeoHabitaciones', 'verprocesospendientes_cm')">
+											<i class="fa fa-clock-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Procesos Pendientes" >Procesos Pendientes</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Cupos', 'listado.cupos.pactados')">
+											<i class="fa fa-arrow-right m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cupos Pactados" >Cupos Pactados</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Precios</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Tarifas', 'editar_basica')">
+											<i class="fa fa-arrow-up m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Tarifas Rack" >Tarifas Rack</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Configuracion', 'ComisionCM.editar')">
+											<i class="fa fa-eur m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Comisiones OTAS" >Comisiones OTAS</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Tarifas / Promociones</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Ofertas', 'crear_formulario_1')">
+											<i class="fa fa-plus-square m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear" >Crear</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Ofertas', 'listado_ofertas')">
+											<i class="fa fa-edit m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Editar" >Editar</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Tarifas', 'editar_maestras')">
+											<i class="fa fa-sitemap m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Tarifas Maestras" >Tarifas Maestras</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Up-Selling / Cross-Selling</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Productos', 'crear_producto')">
+											<i class="fa fa-plus-square m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear" >Crear</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Productos', 'listado_productos')">
+											<i class="fa fa-edit m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Editar" >Editar</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Dynamic Pricing</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'DynamicPricing', 'listado.notificaciones')">
+											<i class="fa fa-flag m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Notificaciones" >Notificaciones</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'DynamicPricing', 'listado.reglas')">
+											<i class="fa fa-line-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Reglas" >Reglas</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Estado</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MapeoHabitaciones', 'ver')">
+											<i class="fa fa-th-large m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Tabla de Mapeo" >Tabla de Mapeo</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'conexionesPorAlojamiento')">
+											<i class="fa fa-code-fork m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Estado Conexiones" >Estado Conexiones</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+			</div>
+			<div id="tab-1035" class="tab-pane fade ">
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Planning</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'PlanningV2', 'ver')">
+											<i class="fa fa-calendar m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Interactivo" >Interactivo</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Planning', 'ver')">
+											<i class="fa fa-tasks m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Canal" >Canal</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Planning', 'ver_x_estados')">
+											<i class="fa fa-list m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Estado" >Estado</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-3col">
+								
+										<h2 class="titulo-panel">Reservas</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Reservas', 'Crear')">
+											<i class="fa fa-user m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear reserva" >Crear reserva</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Reservas', 'CrearGrupal')">
+											<i class="fa fa-users m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear Reserva Grupal" >Crear Reserva Grupal</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'PreReservas', 'Crear')">
+											<i class="fa fa-calendar-plus-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear pre-reserva" >Crear pre-reserva</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'PreReservas', 'CrearGrupal')">
+											<i class="fa fa-calendar-plus-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear Pre-Reserva Grupal" >Crear Pre-Reserva Grupal</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Presupuestos', 'CrearGrupal')">
+											<i class="fa fa-calculator m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cotizador" >Cotizador</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Reservas', 'CrearPasante')">
+											<i class="fa fa-male m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear Pasante" >Crear Pasante</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Reservas', 'ConsultarDisponibilidad')">
+											<i class="fa fa-calendar-check-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Consulta Disponibilidad" >Consulta Disponibilidad</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Reservas', '')">
+											<i class="fa fa-bookmark m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Reservas" >Reservas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Cancelaciones', '')">
+											<i class="fa fa-ban m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cancelaciones" >Cancelaciones</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'reservas.noshow')">
+											<i class="fa fa-eye-slash m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="No Show" >No Show</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'PreReservas', '')">
+											<i class="fa fa-bookmark-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Pre-reservas" >Pre-reservas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Presupuestos', '')">
+											<i class="fa fa-shopping-cart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cotizaciones" >Cotizaciones</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Reservas', 'BuscaPasantes')">
+											<i class="fa fa-search m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Pasantes" >Pasantes</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Reservas', 'ExportacionExcel')">
+											<i class="fa fa-file-excel-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Exportar a Excel" >Exportar a Excel</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ComentariosAlojamiento', 'ver_comentarios_alojamiento')">
+											<i class="fa fa-comment m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Comentarios Clientes" >Comentarios Clientes</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Check-in Check-out</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'EditarEmail', 'listado.huespedes')">
+											<i class="fa fa-sign-in m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Estado Check-in" >Estado Check-in</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'EditarEmail', 'listado')">
+											<i class="fa fa-envelope-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Configuración Plantillas" >Configuración Plantillas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'EditarEmail', 'listado.emails')">
+											<i class="fa fa-paper-plane m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Control Envíos" >Control Envíos</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Clientes', 'VerificaFichaParteViajeros.dia')">
+											<i class="fa fa-suitcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Parte viajeros" >Parte viajeros</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Clientes', 'VerificaFichaParteViajeros.periodo')">
+											<i class="fa fa-suitcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Libro de Registro" >Libro de Registro</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Facturas</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Facturas', 'ListadoFacturas')">
+											<i class="fa fa-search m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Buscador" >Buscador</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Facturas', 'Descargar.PDF')">
+											<i class="fa fa-file-pdf-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Descargar PDF" >Descargar PDF</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Facturas', 'ListadoFacturasElectronicas')">
+											<i class="fa fa-credit-card m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Facturas Electrónicas" >Facturas Electrónicas</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Clientes</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Clientes', 'Crear')">
+											<i class="fa fa-user-plus m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear" >Crear</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Clientes', '')">
+											<i class="fa fa-search m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Buscar" >Buscar</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Empresas</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Empresas', 'crear')">
+											<i class="fa fa-plus-square m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear" >Crear</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Empresas', '')">
+											<i class="fa fa-search m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Buscar" >Buscar</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Auditoría</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'formularios.auditoria')">
+											<i class="fa fa-check-square-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Formularios Auditoría" >Formularios Auditoría</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Libros', 'libro_recepcion')">
+											<i class="fa fa-book m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Libro Recepción" >Libro Recepción</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'cierreDias')">
+											<i class="fa fa-lock m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cierres de Días" >Cierres de Días</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Autorizaciones', 'listado')">
+											<i class="fa fa-check-square-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Autorizaciones" >Autorizaciones</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+			</div>
+			<div id="tab-1084" class="tab-pane fade ">
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Informes</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Limpieza')">
+											<i class="fa fa-paint-brush m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Limpieza Diaria" >Limpieza Diaria</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'limpieza.periodo')">
+											<i class="fa fa-paint-brush m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Limpieza Periodo" >Limpieza Periodo</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'estadodelimpieza.listado')">
+											<i class="fa fa-trash-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Estado Habitaciones" >Estado Habitaciones</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'rack')">
+											<i class="fa fa-building m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Rack Habitaciones" >Rack Habitaciones</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'limpieza.completo')">
+											<i class="fa fa-list m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Plantilla Limpieza" >Plantilla Limpieza</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'produccion.limpiadoras')">
+											<i class="fa fa-paint-brush m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Limpieza Producción" >Limpieza Producción</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'historico.habitaciones')">
+											<i class="fa fa-history m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Histórico Limpiezas" >Histórico Limpiezas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'habitaciones.sin.uso')">
+											<i class="fa fa-arrow-right m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Habitaciones sin uso" >Habitaciones sin uso</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Gestión Limpieza</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'partesdelimpieza.listado')">
+											<i class="fa fa-list m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Plantillas Housekeeping" >Plantillas Housekeeping</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ObjetosPerdidos', '')">
+											<i class="fa fa-question m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Objetos Perdidos" >Objetos Perdidos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Bloqueos', '')">
+											<i class="fa fa-ban m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Bloqueos" >Bloqueos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'personal.limpieza.listado')">
+											<i class="fa fa-child m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Gestión Personal" >Gestión Personal</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Mantenimiento</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Incidencias.man.crear')">
+											<i class="fa fa-exclamation-triangle m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear Incidencia" >Crear Incidencia</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Incidencias.man.listado')">
+											<i class="fa fa-exclamation-triangle m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Incidencias" >Incidencias</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Ordenes.trabajo.man')">
+											<i class="fa fa-briefcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Órdenes de Trabajo" >Órdenes de Trabajo</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Mis.ordenes.man')">
+											<i class="fa fa-briefcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Mis Órdenes" >Mis Órdenes</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Mantenimiento', 'Tipo.incidencias.man.crear')">
+											<i class="fa fa-exclamation-triangle m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear Tipo Incidencia" >Crear Tipo Incidencia</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+			</div>
+			<div id="tab-1065" class="tab-pane fade ">
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Actividad</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Checkin')">
+											<i class="fa fa-sign-in m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Check-in" >Check-in</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Checkout')">
+											<i class="fa fa-sign-out m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Check-out" >Check-out</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'inhouse')">
+											<i class="fa fa-home m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="In House" >In House</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Activas')">
+											<i class="fa fa-send-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Actividad" >Actividad</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'roomlist')">
+											<i class="fa fa-slideshare m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Room List" >Room List</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Reservas_x_Habitacion')">
+											<i class="fa fa-bookmark m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Reservas x Habitación" >Reservas x Habitación</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Reservas_x_Tipo_Habitacion')">
+											<i class="fa fa-bookmark m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Reservas x TH" >Reservas x TH</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'reservasGrupales')">
+											<i class="fa fa fa-group m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Reservas Grupales" >Reservas Grupales</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'upgrade')">
+											<i class="fa fa-arrow-up m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Upgrades" >Upgrades</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'previsionservicios')">
+											<i class="fa fa-coffee m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Previsión Servicios" >Previsión Servicios</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'serviciosxhab')">
+											<i class="fa fa-coffee m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Servicios x Hab" >Servicios x Hab</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'prevision.supletorias')">
+											<i class="fa fa-bed m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Previsión Supletorias" >Previsión Supletorias</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'prevision.cunas.supletorias')">
+											<i class="fa fa-child m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Previsión Cunas" >Previsión Cunas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Comentarios')">
+											<i class="fa fa-comment m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Comentarios Reservas" >Comentarios Reservas</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-3col">
+								
+										<h2 class="titulo-panel">Financieros</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Cobros')">
+											<i class="fa fa-money m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cobros" >Cobros</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'cobrosPorCheckout')">
+											<i class="fa fa-money m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cobros x Checkout" >Cobros x Checkout</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'CargosDiarios')">
+											<i class="fa fa-shopping-cart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cargos diarios" >Cargos diarios</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ingresoscobros')">
+											<i class="fa fa-dollar m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ingresos-Cobros" >Ingresos-Cobros</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'informe.planillas')">
+											<i class="fa fa-file m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Planillas Turnos" >Planillas Turnos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'cuentas.sobre.dias')">
+											<i class="fa fa-bar-chart-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cuentas sobre días" >Cuentas sobre días</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Pagos.anticipados')">
+											<i class="fa fa-money m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Pagos Anticipados" >Pagos Anticipados</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'Depositos')">
+											<i class="fa fa-money m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Depósitos" >Depósitos</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'iva')">
+											<i class="fa fa-list-alt m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="IVA Mensual" >IVA Mensual</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'libro_contable_verificacion')">
+											<i class="fa fa-search m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Verificar Libro Contable" >Verificar Libro Contable</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'libro_contable')">
+											<i class="fa fa-book m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Libro Contable" >Libro Contable</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Contabilidad', 'movimientos.contables')">
+											<i class="fa fa-arrows m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Movimientos Contables" >Movimientos Contables</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'formularios.auditoria')">
+											<i class="fa fa-check-square-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Formularios Auditoría" >Formularios Auditoría</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'AuditoriaNoctura')">
+											<i class="fa fa-moon-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Auditoría Nocturna" >Auditoría Nocturna</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ArqueoCaja', '')">
+											<i class="fa fa-bank (alias) m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Arqueo de caja" >Arqueo de caja</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ajustes.listado')">
+											<i class="fa fa-line-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ajustes Cargos" >Ajustes Cargos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'comisiones')">
+											<i class="fa fa-money m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Comisiones" >Comisiones</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Estados Cuentas</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ingresoscobros_pendientes')">
+											<i class="fa fa-exclamation-triangle m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cuentas Impagadas" >Cuentas Impagadas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'cityledger.alojamiento')">
+											<i class="fa fa-credit-card m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="CityLedger Hotel" >CityLedger Hotel</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'cuentas.por.cobrar')">
+											<i class="fa fa-exclamation-triangle m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cuentas por Cobrar" >Cuentas por Cobrar</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'deudaempresa.alojamiento')">
+											<i class="fa fa-credit-card m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Deuda Empresas Hotel" >Deuda Empresas Hotel</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'creditos.pagados')">
+											<i class="fa fa-credit-card m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Créditos Pagados" >Créditos Pagados</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'pagosacredito.empresa')">
+											<i class="fa fa-credit-card m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Pagos por Empresa" >Pagos por Empresa</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'estado_cuentas')">
+											<i class="fa fa-bar-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Situación cuentas" >Situación cuentas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'balance')">
+											<i class="fa 0 m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Balance" >Balance</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Producción</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'CargosDiariosCC')">
+											<i class="fa fa-cube m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Centro Coste" >Centro Coste</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'produccion.detalle.habitaciones')">
+											<i class="fa fa-file-text m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Habitaciones" >Habitaciones</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Clientes', 'produccion.clientes')">
+											<i class="fa fa-users m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Producción Clientes" >Producción Clientes</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Empresas', 'Produccion_por_empresa')">
+											<i class="fa fa-building-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Empresa" >Empresa</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Empresas', 'Produccion_de_empresas')">
+											<i class="fa fa-building-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Empresas" >Empresas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'produccion_x_usuario')">
+											<i class="fa fa-user m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Usuario" >Usuario</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'cargos_maestros')">
+											<i class="fa fa-graduation-cap m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cargos Maestro" >Cargos Maestro</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Auditoría</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.habitaciones')">
+											<i class="fa fa-key m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Habitaciones" >Habitaciones</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.restaurante')">
+											<i class="fa fa-cutlery m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Restaurante" >Restaurante</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.pasantes')">
+											<i class="fa fa-male m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Pasantes" >Pasantes</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.estadosinhouse')">
+											<i class="fa fa-bed m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Inhouse" >Inhouse</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-4col">
+								
+										<h2 class="titulo-panel">Ventas</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ventascanal')">
+											<i class="fa fa-pie-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventas canal" >Ventas canal</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ventas_x_tarifa')">
+											<i class="fa fa-bar-chart-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventas tarifa" >Ventas tarifa</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'personasdia')">
+											<i class="fa fa-superscript m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Pasajeros por Tarifa" >Pasajeros por Tarifa</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'detalle.ventas.periodo')">
+											<i class="fa fa-arrows-h m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Detalle venta periodo" >Detalle venta periodo</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'VentasSegmento')">
+											<i class="fa fa-arrows-h m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventas Segmento" >Ventas Segmento</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ventas_x_tarifa_FNS')">
+											<i class="fa fa-table m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventas Tarifas FNS" >Ventas Tarifas FNS</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ventasalojamiento')">
+											<i class="fa fa-table m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventas en FNS" >Ventas en FNS</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ocupacionmensual')">
+											<i class="fa fa-child m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ocupación Mensual" >Ocupación Mensual</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ocupacionanual')">
+											<i class="fa fa-child m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ocupación Anual" >Ocupación Anual</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes ', 'habitaciones.personas.dia')">
+											<i class="fa fa-users m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Habitaciones y Pasajeros" >Habitaciones y Pasajeros</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'InfoXProc')">
+											<i class="fa fa-map-marker m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Procedencia" >Procedencia</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'InfoXProcIne')">
+											<i class="fa fa-bar-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="INE" >INE</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'InfoXProcIneMensual')">
+											<i class="fa fa-bar-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Estadísticas INE" >Estadísticas INE</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Revenue</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'ocupacionypreciomedio_th')">
+											<i class="fa fa-line-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Revenue" >Revenue</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Revenue', 'revenue.basico')">
+											<i class="fa fa-line-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ponderado" >Ponderado</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Revenue', 'revenue.meses')">
+											<i class="fa fa-line-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Revenue Meses" >Revenue Meses</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Revenue', 'pickup')">
+											<i class="fa fa-signal m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="PickUp" >PickUp</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Revenue', 'forecast')">
+											<i class="fa fa-line-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Forecast" >Forecast</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Revenue', 'disponibilidad')">
+											<i class="fa fa-calendar-check-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Disponibilidad" >Disponibilidad</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+			</div>
+			<div id="tab-1519" class="tab-pane fade ">
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Restaurante</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroFGPuntosVenta', 'Familias.listado')">
+											<i class="fa fa-cubes m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Familias" >Familias</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroFGPuntosVenta', 'Grupos.listado')">
+											<i class="fa fa-cube m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Grupos" >Grupos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroRecetas', 'Recetas.listado')">
+											<i class="fa fa-file-text-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Recetas" >Recetas</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroPuntosVenta', 'PuntoVenta.listado')">
+											<i class="fa fa-location-arrow m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Puntos de Venta" >Puntos de Venta</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'PersonalRestaurante', 'PersonalRestaurante.listado')">
+											<i class="fa fa-users m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Personal" >Personal</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Informes</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'listado')">
+											<i class="fa fa-file-text-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Tiquets" >Tiquets</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'Platos_devueltos_borrados.listado')">
+											<i class="fa fa-undo m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Platos Devueltos" >Platos Devueltos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'Productos_anulados.listado')">
+											<i class="fa fa-undo m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Productos Anulados" >Productos Anulados</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Informes', 'auditoria.cuentasinternas')">
+											<i class="fa fa-suitcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventas Internas" >Ventas Internas</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'RecetasVendidas.listado')">
+											<i class="fa fa-file-text-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventas Recetas" >Ventas Recetas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'CuentasAbiertas.listado')">
+											<i class="fa fa-user m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cuentas Abiertas" >Cuentas Abiertas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ConsultaTiquets', 'Informe.z.listado')">
+											<i class="fa fa-bank m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Gastro Z" >Gastro Z</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Comandero</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Comandero', 'Tipologias')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Tipologías" >Tipologías</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Comandero', 'GruposComentarios')">
+											<i class="fa fa-comment m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Grupos de comentarios" >Grupos de comentarios</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Comandero', 'Comentarios')">
+											<i class="fa fa-comment m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Comentarios" >Comentarios</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Configuración</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroMesas', 'Mesas.listado')">
+											<i class="fa fa-cutlery m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Mesas" >Mesas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'Descuentos.listado')">
+											<i class="fa fa-tags m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Descuentos" >Descuentos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'cuentasInternas.listado')">
+											<i class="fa fa-suitcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cuentas Internas" >Cuentas Internas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'ConfiguracionGastro.listado')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Configuración" >Configuración</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'FormasDeCobroGastro')">
+											<i class="fa fa-money m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Formas Pago" >Formas Pago</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'turnos.gastro')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Turnos Servicios" >Turnos Servicios</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'Suplementos.listado')">
+											<i class="fa fa-tags m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Suplementos" >Suplementos</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+			</div>
+			<div id="tab-1659" class="tab-pane fade ">
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Maestro Bodegas</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroBodegas', 'Bodegas.listado')">
+											<i class="fa fa-glass m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Bodegas" >Bodegas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroBodegas', 'Familias.listado')">
+											<i class="fa fa-cubes m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Familias" >Familias</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroBodegas', 'Grupos.listado')">
+											<i class="fa fa-cube m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Grupos" >Grupos</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroBodegas', 'Proveedores.listado')">
+											<i class="fa fa-truck m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Proveedores" >Proveedores</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MaestroProductos', 'Productos.listado')">
+											<i class="fa fa-puzzle-piece m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Productos" >Productos</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Stock</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'InventarioBodegas', 'Inventario.listado')">
+											<i class="fa fa-archive m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Inventario" >Inventario</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'AuditoriaBodegas', 'Auditoria.listado')">
+											<i class="fa fa-book m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Auditorías" >Auditorías</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MovimientoProductosBodegas', 'Movimientos.listado')">
+											<i class="fa fa-cubes m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Movimiento de Productos" >Movimiento de Productos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ValorizarMovimientos', 'Valorizar.listado')">
+											<i class="fa fa-usd m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Valorizar Movimientos" >Valorizar Movimientos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'PedidosBodegas', 'PedidosBodegas.listado')">
+											<i class="fa fa-bars m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Pedidos" >Pedidos</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Movimientos</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'ComprasBodegas', 'ComprasBodegas.listado')">
+											<i class="fa fa-shopping-cart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Compras" >Compras</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'VentasBodegas', 'Ventas.listado')">
+											<i class="fa fa-line-chart m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventas" >Ventas</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'DespachosBodegas', 'Despachos.listado')">
+											<i class="fa fa-suitcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Despachos" >Despachos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'MermasBodegas', 'Mermas.listado')">
+											<i class="fa fa-trash-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Mermas" >Mermas</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+			</div>
+			<div id="tab-1127" class="tab-pane fade ">
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Estadísticas Web</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'PortalesAnalytics', '')">
+											<i class="fa fa-bar-chart-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Analytics" >Analytics</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Gestión motor</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Motor', '')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Configuración motor" >Configuración motor</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'Ventajas')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Ventajas" >Ventajas</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Gestión Web</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Actividades', '')">
+											<i class="fa fa-futbol-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Actividades" >Actividades</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+			</div>
+			<div id="tab-1086" class="tab-pane fade ">
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Datos / Configuración</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Datos', '')">
+											<i class="fa fa-user m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Personales" >Personales</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Datos', 'Legales')">
+											<i class="fa fa-institution m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Legales" >Legales</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Datos', 'gestion_emails')">
+											<i class="fa fa-paper-plane m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Emails" >Emails</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'CambioDivisas')">
+											<i class="fa fa-usd m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cambio Divisas" >Cambio Divisas</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'GestorPreferencias.editar')">
+											<i class="fa fa-compass m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Preferencias" >Preferencias</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'GestorPreferenciasMenu.editar')">
+											<i class="fa fa-list-ol m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Preferencias Menú" >Preferencias Menú</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'EditarEmail', 'configuracion.correo')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cuenta Envío" >Cuenta Envío</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-2col">
+								
+										<h2 class="titulo-panel">Alojamientos</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'datos')">
+											<i class="fa fa-database m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Datos" >Datos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'imagenes')">
+											<i class="fa fa-picture-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Imágenes" >Imágenes</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'descripciones')">
+											<i class="fa fa-reorder m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Descripciones" >Descripciones</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'servicios')">
+											<i class="fa fa-server m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Servicios" >Servicios</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'zonascomunes.listado')">
+											<i class="fa fa-recycle m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Zonas Comunes" >Zonas Comunes</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Habitaciones', 'listadotiposhabitaciones')">
+											<i class="fa fa-bed m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Habitaciones" >Habitaciones</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'condiciones_reserva')">
+											<i class="fa fa-book m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Condiciones reserva" >Condiciones reserva</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'condiciones_pago')">
+											<i class="fa fa-book m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Condiciones Pago" >Condiciones Pago</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Politicas', 'listado_politicas')">
+											<i class="fa fa-check-square-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Políticas cancelación" >Políticas cancelación</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Alojamientos', 'crear')">
+											<i class="fa fa-plus-square m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Crear Alojamiento" >Crear Alojamiento</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'Supletorias.listado')">
+											<i class="fa fa-bed m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Supletorias y Cunas" >Supletorias y Cunas</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Facturas</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Facturacion', '')">
+											<i class="fa fa-eur m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Facturas FNS" >Facturas FNS</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Liquidacion', '')">
+											<i class="fa fa-external-link-square m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Liquidaciones" >Liquidaciones</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Channel Manager</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'ConfigCM.editar')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Configuración" >Configuración</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'Ferias.listado')">
+											<i class="fa fa-calendar-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Editar Festivos" >Editar Festivos</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-3col">
+								
+										<h2 class="titulo-panel">PMS</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'TiposCobro.editar')">
+											<i class="fa fa-credit-card m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Formas de Cobro" >Formas de Cobro</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'ListadoCargos')">
+											<i class="fa fa-tasks m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Maestro de Cargos" >Maestro de Cargos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'CentrosdeCoste.editar')">
+											<i class="fa fa-cog m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Centros de Coste" >Centros de Coste</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'CodigoFactura.editar')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Configuración Facturación" >Configuración Facturación</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Contabilidad', 'configuracion_general_ampliable.listado')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Configuración Contable General" >Configuración Contable General</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'TiposCuentas.editar')">
+											<i class="fa fa-suitcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Tipos de Cuentas" >Tipos de Cuentas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'DocumentosCobro.listado')">
+											<i class="fa fa-file-text m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Documentos cobro" >Documentos cobro</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'FacturacionItinerarios.listado')">
+											<i class="fa fa-map-signs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Itinerarios" >Itinerarios</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'FormasDePago.listado')">
+											<i class="fa fa-credit-card m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Formas de pago" >Formas de pago</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'PMS', 'Conexion.listado')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Conexión PMS" >Conexión PMS</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'motivos.viaje')">
+											<i class="fa fa-suitcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Motivos Viaje" >Motivos Viaje</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Autorizaciones', 'configuracion.listado')">
+											<i class="fa fa-check-square-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Autorizaciones" >Autorizaciones</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'ConfigPMS.editar')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="PMS" >PMS</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'GestorPreferenciasEstadosInhouse.editar')">
+											<i class="fa fa-list-alt m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Estados Inhouse" >Estados Inhouse</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'ImpresorasTermicas.editar')">
+											<i class="fa fa-print m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Impresoras" >Impresoras</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'ninos.listado')">
+											<i class="fa fa-child m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Configuración Niños" >Configuración Niños</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'cierreDias')">
+											<i class="fa fa-lock m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cierres de Días" >Cierres de Días</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'CanalesManuales.listado')">
+											<i class="fa fa-tasks m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Canales manuales" >Canales manuales</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'MapearAlojamientosIOT.listado')">
+											<i class="fa fa-th-large m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Mapeos IOT" >Mapeos IOT</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'Plantas.listado')">
+											<i class="fa fa-building m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Plantas" >Plantas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Regimenes', 'listado')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Regímenes" >Regímenes</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'Cajas.listado')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Cajas" >Cajas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'Servicios.listado')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Servicios" >Servicios</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'Segmentos.listado')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Segmentos" >Segmentos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'TurnosCobro.listado')">
+											<i class="fa fa-cogs m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Turnos" >Turnos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Maestros', 'TiposMovimientoCaja.listado')">
+											<i class="fa fa-arrows m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Tipos Movimientos Caja" >Tipos Movimientos Caja</span>
+										</a>
+									</li>
+									</ul>
+									<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'UnidadesNegocio', 'UnidadesNegocio.listado')">
+											<i class="fa fa-bar-chart-o m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Unidades de Negocio" >Unidades de Negocio</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Gestión Usuarios</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'GestionUsuarios', 'perfiles.listado')">
+											<i class="fa fa-tachometer m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Perfiles" >Perfiles</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'GestionUsuarios', '')">
+											<i class="fa fa-user m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Usuarios" >Usuarios</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'GestionUsuarios', 'editar.niveles')">
+											<i class="fa fa-sliders m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Niveles de Permisos" >Niveles de Permisos</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'GestionUsuarios', 'ips.autorizadas')">
+											<i class="fa fa-tachometer m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="IPs autorizadas" >IPs autorizadas</span>
+										</a>
+									</li>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Logs', 'accesos')">
+											<i class="fa fa-sign-in m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Log Acceso" >Log Acceso</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+							<div class="contenedor contenedor-1col">
+								
+										<h2 class="titulo-panel">Histórico</h2>
+								<div class="d-flex">
+								<ul>
+									<li >
+										<a href="javascript:edit_elemento('7402', 'Historico', 'configuraciones.historico')">
+											<i class="fa fa-suitcase m-r-5"></i> <span class="texto-segundo-nivel text-truncate custom-tooltip" data-customtitle="Histórico configuraciones" >Histórico configuraciones</span>
+										</a>
+									</li>
+								
+								</ul>
+								</div>
+							</div>
+			</div>
+	</div>
+</div>		

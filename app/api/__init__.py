@@ -26,6 +26,7 @@ from app.api import (
     services,
     short_links,
     sliders,
+    customers,
     suppliers,
     tax_documents,
     terms,
@@ -62,3 +63,4 @@ api_router.include_router(audits.router)
 api_router.include_router(logs.router)
 api_router.include_router(roles.router)
 api_router.include_router(suppliers.router)
+api_router.include_router(customers.router)

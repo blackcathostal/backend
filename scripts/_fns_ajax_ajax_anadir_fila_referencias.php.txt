@@ -1,0 +1,19 @@
+<tr>
+    <td>
+        <select id="referencia_tip_doc" class="form-control" name="referencia_tipo_doc_" data-parsley-required="true">
+                            <option value="302" >33 - Factura Nacional</option>
+                            <option value="303" >39 - Boleta Electrónica</option>
+                            <option value="304" >110 - Factura Internacional o Exportación</option>
+                    </select>
+    </td>
+    <td>
+        <input type="text" class="fecha-desglose form-control" name="referencia_fecha_" value="" data-parsley-required="true"/>
+    </td>
+    <td>
+        <input type="text" class="form-control" name="referencia_folio_" value="" data-parsley-required="true"/>
+    </td>
+    <td>
+        <input type="text" class="form-control" name="referencia_razon_" id="cli_nom" value="" data-parsley-required="true"/>
+    </td>
+	<td><a class="eliminar_referencia_factura"></a></td>
+</tr>

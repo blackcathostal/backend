@@ -19,6 +19,7 @@ from app.models.roles import Roles
 from app.models.rooms import Rooms
 from app.models.services import Services
 from app.models.sliders import Sliders
+from app.models.customers import Customers
 from app.models.suppliers import Suppliers
 from app.models.tax_documents import DteStatuses, DteTypes, DteVersions, TaxDocuments
 from app.models.terms import TermsAndConditions
@@ -32,6 +33,7 @@ __all__ = [
     "DteVersions",
     "DteStatuses",
     "Suppliers",
+    "Customers",
     "Audits",
     "Logs",
     "Permissions",
