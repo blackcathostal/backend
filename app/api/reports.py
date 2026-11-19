@@ -245,10 +245,9 @@ def get_eerr_report(
             unclassified_collections=unclassified_collections,
         )
     )
+    # Statement total follows Cobros account rows (not Ingresos-Cobros vendido KPI).
     rows_total = float(sum(row.total for row in rows))
-    if vendido <= 0:
-        vendido = rows_total
-    grand_total = vendido if vendido > 0 else rows_total
+    grand_total = rows_total
     return EerrReportOut(
         period=_period_key(month_start),
         section_title="Ingresos",
@@ -466,9 +465,8 @@ def get_eerr_consolidated(
             )
         )
 
-    grand = float(sum(monthly_vendido.values())) if any(
-        abs(v) > 0.5 for v in monthly_vendido.values()
-    ) else float(sum(column_totals.values()))
+    # Match monthly statement: total = sum of Cobros account columns, not vendido KPI.
+    grand = float(sum(column_totals.values()))
     return EerrConsolidatedOut(
         from_period=_period_key(start),
         to_period=_period_key(end),

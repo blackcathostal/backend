@@ -635,10 +635,11 @@ class TaxDocumentsFetchClient:
         accounts: list,
     ) -> dict[str, Any]:
         """
-        EERR ingresos for a range: Vendido (Ingresos-Cobros) split by Cobros concepts.
+        EERR ingresos by account from Cobros concept columns (statement rows + total).
 
-        Catalog accounts only get labeled concept columns (incl. Varios→4190 when mapped).
-        Remanente is returned separately as pending_sales + unclassified_collections.
+        Ingresos-Cobros vendido/cobrado/pendiente stay as header KPIs only; they do not
+        override the account total. If Cobros concepts are below vendido, the gap is
+        returned as remanente (pending + unclassified).
         """
         if date_to < date_from:
             raise ExtranetWebError("Rango de fechas inválido")
@@ -646,7 +647,7 @@ class TaxDocumentsFetchClient:
         by_code = self._cobros_concept_account_sums(
             date_from, date_to, accounts=accounts
         )
-        concepts_total = float(sum(by_code.values()))
+        concepts_total = float(sum(float(v or 0) for v in by_code.values()))
         vendido = float(sales.get("vendido") or 0)
         cobrado = float(sales.get("cobrado") or 0)
         pendiente = float(sales.get("pendiente") or 0)
@@ -664,7 +665,7 @@ class TaxDocumentsFetchClient:
             "pending_sales": float(pending_sales),
             "unclassified_collections": float(unclassified_collections),
             "by_account_code": by_code,
-            "source": "extranet_vendido",
+            "source": "extranet_cobros",
         }
 
     def fetch_income_detail_lines(
