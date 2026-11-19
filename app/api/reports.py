@@ -23,9 +23,12 @@ from app.schemas.reports import (
     EerrReportOut,
 )
 from app.services import dte_catalog
-from app.services.accounting_concept_map import load_income_accounts
-from app.services.tax_documents_fetch import TaxDocumentsFetchClient
+from app.services.accounting_concept_map import (
+    ensure_concept_labels_from_coa,
+    load_income_accounts,
+)
 from app.services.extranet_web_client import ExtranetWebError
+from app.services.tax_documents_fetch import TaxDocumentsFetchClient
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 logger = logging.getLogger(__name__)
@@ -169,6 +172,7 @@ def get_eerr_report(
     month_finish = min(_month_end(month_start), today) if (
         month_start.year == today.year and month_start.month == today.month
     ) else _month_end(month_start)
+    ensure_concept_labels_from_coa(db)
     accounts = load_income_accounts(db)
 
     source = "extranet_vendido"
@@ -195,14 +199,16 @@ def get_eerr_report(
         cobrado = vendido
 
     rows = _rows_from_code_totals(accounts, by_code)
-    grand_total = float(sum(row.total for row in rows))
-    if vendido <= 0 and grand_total > 0:
-        vendido = grand_total
+    rows_total = float(sum(row.total for row in rows))
+    if vendido <= 0:
+        vendido = rows_total
+    # Vendido is the statement total; row sum may lag if catch-all is missing.
+    grand_total = vendido if vendido > 0 else rows_total
     return EerrReportOut(
         period=_period_key(month_start),
         section_title="Ingresos",
         rows=rows,
-        grand_total=grand_total if grand_total > 0 else vendido,
+        grand_total=grand_total,
         vendido=vendido,
         cobrado=cobrado,
         pendiente=pendiente,
@@ -230,6 +236,7 @@ def get_eerr_consolidated(
     months = _iter_months(start, end)
     period_keys = [_period_key(month) for month in months]
     period_labels = [_period_label(month) for month in months]
+    ensure_concept_labels_from_coa(db)
     accounts = load_income_accounts(db)
 
     monthly_by_code: dict[str, dict[str, float]] = {key: {} for key in period_keys}

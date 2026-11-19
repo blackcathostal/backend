@@ -642,7 +642,7 @@ class TaxDocumentsFetchClient:
             "facturado": float(sales.get("facturado") or 0),
             "concepts_total": concepts_total,
             "by_account_code": by_code,
-            "source": "fns_vendido",
+            "source": "extranet_vendido",
         }
 
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
