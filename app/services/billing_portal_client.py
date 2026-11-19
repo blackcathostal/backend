@@ -1,4 +1,4 @@
-"""Billing portal (facturacion.cl) DTE REST + SOAP sales-ledger client."""
+﻿"""Billing portal (facturacion.cl) DTE REST + SOAP sales-ledger client."""
 from __future__ import annotations
 
 import base64
@@ -372,7 +372,7 @@ class BillingPortalClient:
         return docs
 
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        # Emitidas use FNS Cobros (FnsTaxDocumentsClient). Never call ConsultaLibroVentas.
+        # Emitidas use FNS Cobros (TaxDocumentsFetchClient). Never call ConsultaLibroVentas.
         del date_from, date_to
         raise BillingPortalError(
             "Emitidas ya no usan ConsultaLibroVentas. "

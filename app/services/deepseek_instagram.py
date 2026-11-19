@@ -1,4 +1,4 @@
-"""DeepSeek client for Instagram auto-replies with knowledge tool lookup."""
+﻿"""DeepSeek client for Instagram auto-replies with knowledge tool lookup."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.services.fns_motor import booking_allowed
+from app.services.booking_channel import booking_allowed
 from app.services.instagram_knowledge import DEEPSEEK_TOOLS, hostel_info_dict
 from app.services.mcp_sources import call_reply_tool
 from app.services.reply_context import set_reply_context

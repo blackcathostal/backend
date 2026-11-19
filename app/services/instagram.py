@@ -1,4 +1,4 @@
-"""Instagram Graph API: OAuth, inbox store, comments/DMs, auto-reply pipeline."""
+﻿"""Instagram Graph API: OAuth, inbox store, comments/DMs, auto-reply pipeline."""
 
 from __future__ import annotations
 
@@ -2799,7 +2799,7 @@ async def _recover_cancel_after_soft_fail(
     if str(latest.get("type") or item.get("type") or "") != "message":
         return None
     try:
-        from app.services.fns_motor import (
+        from app.services.booking_channel import (
             cancel_booking,
             list_guest_active_bookings,
         )
@@ -2815,7 +2815,7 @@ async def _recover_cancel_after_soft_fail(
     # Prefer local channel index first (fast). Fall back to Motor list if empty.
     active: list[dict[str, Any]] = []
     try:
-        from app.services.fns_motor import _is_active_unused, _load_booking_index
+        from app.services.booking_channel import _is_active_unused, _load_booking_index
         from datetime import date as _date
 
         today = _date.today()

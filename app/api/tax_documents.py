@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -30,9 +30,9 @@ from app.services.accounting_concept_map import (
     pick_account_from_concepts,
 )
 from app.services.billing_portal_web import BillingPortalError, BillingPortalWebClient
-from app.services.fns_accounting import classify_document
-from app.services.fns_tax_documents import FnsTaxDocumentsClient
-from app.services.fns_web_client import FnsWebError
+from app.services.accounting_classify import classify_document
+from app.services.tax_documents_fetch import TaxDocumentsFetchClient
+from app.services.extranet_web_client import ExtranetWebError
 
 router = APIRouter(tags=["tax-documents"])
 
@@ -767,23 +767,23 @@ async def refresh_tax_documents(
 
     warning = ""
     docs: list[dict] = []
-    source = "fns_web"
+    source = "extranet_web"
     pms_rows: list[dict] = []
 
     try:
         if version_id == received_id:
-            # Recibidas = libro de compras (facturacion.cl). FNS Contabilidad no lo expone.
+            # Recibidas = libro de compras (billing portal). Contabilidad extranet does not expose it.
             source = "web"
             with BillingPortalWebClient() as web:
                 docs = web.fetch_received(date_from, date_to)
         else:
-            # Emitidas = FNS Cobros + estado de cuenta / conceptos.
-            source = "fns_web"
-            with FnsTaxDocumentsClient() as fns:
-                docs = fns.fetch_issued(date_from, date_to)
+            # Emitidas = Cobros + account status / concepts from property extranet.
+            source = "extranet_web"
+            with TaxDocumentsFetchClient() as fetch_client:
+                docs = fetch_client.fetch_issued(date_from, date_to)
     except BillingPortalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FnsWebError as exc:
+    except ExtranetWebError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     for doc in docs:

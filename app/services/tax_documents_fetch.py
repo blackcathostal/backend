@@ -1,4 +1,4 @@
-"""Scrape FNS Contabilidad tax/payment documents for admin Track refresh."""
+﻿"""Scrape FNS Contabilidad tax/payment documents for admin Track refresh."""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,7 @@ from html import unescape
 from typing import Any, Iterator
 
 from app.core.config import settings
-from app.services.fns_web_client import FnsWebClient, FnsWebError
+from app.services.extranet_web_client import ExtranetWebClient, ExtranetWebError
 
 
 def _norm(text: str) -> str:
@@ -139,7 +139,7 @@ def _property_id_from_fields(fields: dict[str, str]) -> str:
 def _require_property_id(fields: dict[str, str]) -> str:
     property_id = _property_id_from_fields(fields) or _property_id_from_settings()
     if not property_id:
-        raise FnsWebError(
+        raise ExtranetWebError(
             "Falta el ID de alojamiento FNS (configurá FNS_HOTEL_PMS_ID / FNS_HOTEL_ID "
             "o iniciá sesión para leer var1 del formulario Contabilidad)"
         )
@@ -282,18 +282,18 @@ def _parse_html_table(html: str, title_hint: str) -> list[dict[str, str]]:
     return rows
 
 
-class FnsTaxDocumentsClient:
+class TaxDocumentsFetchClient:
     """Fetch issued/received Contabilidad documents via FNS web session."""
 
-    def __init__(self, client: FnsWebClient | None = None) -> None:
+    def __init__(self, client: ExtranetWebClient | None = None) -> None:
         self._owns_client = client is None
-        self.client = client or FnsWebClient()
+        self.client = client or ExtranetWebClient()
 
     def close(self) -> None:
         if self._owns_client:
             self.client.close()
 
-    def __enter__(self) -> "FnsTaxDocumentsClient":
+    def __enter__(self) -> "TaxDocumentsFetchClient":
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -316,7 +316,7 @@ class FnsTaxDocumentsClient:
         )
         response = http.post(f"{self.client.base_url}/es/{module}", data=payload)
         if response.status_code >= 400:
-            raise FnsWebError(
+            raise ExtranetWebError(
                 f"FNS Contabilidad HTTP {response.status_code} en {module}/{action}",
                 details=response.text[:300],
             )
@@ -623,7 +623,7 @@ class FnsTaxDocumentsClient:
         from app.services.accounting_concept_map import catch_all_account
 
         if date_to < date_from:
-            raise FnsWebError("Rango de fechas inválido")
+            raise ExtranetWebError("Rango de fechas inválido")
         sales = self._ingresos_cobros_sales_totals(date_from, date_to)
         by_code = self._cobros_concept_account_sums(
             date_from, date_to, accounts=accounts
@@ -648,7 +648,7 @@ class FnsTaxDocumentsClient:
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """Issued sales docs from Informes/Cobros, month-by-month (12-month lookback safe)."""
         if date_to < date_from:
-            raise FnsWebError("Rango de fechas inválido")
+            raise ExtranetWebError("Rango de fechas inválido")
         # FNS Cobros truncates / ignores huge ranges; scrape each calendar month.
         merged: dict[tuple[str, str], dict[str, Any]] = {}
         for window_from, window_to in _month_windows(date_from, date_to):
@@ -685,7 +685,7 @@ class FnsTaxDocumentsClient:
         when they carry document metadata usable as received track lines; otherwise return [].
         """
         if date_to < date_from:
-            raise FnsWebError("Rango de fechas inválido")
+            raise ExtranetWebError("Rango de fechas inválido")
 
         # Prefer explicit purchase-like modules when they eventually return rows.
         for module, action, title in (
@@ -697,7 +697,7 @@ class FnsTaxDocumentsClient:
                 html = self._post_report(
                     module=module, action=action, date_from=date_from, date_to=date_to
                 )
-            except FnsWebError:
+            except ExtranetWebError:
                 continue
             rows = _parse_html_table(html, title)
             docs: list[dict[str, Any]] = []

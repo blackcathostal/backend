@@ -1,4 +1,4 @@
-"""FNSrooms Motor API: availability + booking (Basic Auth)."""
+﻿"""FNSrooms Motor API: availability + booking (Basic Auth)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ _BOOKINGS_LOCK = threading.Lock()
 _BOOKINGS_FILE = settings.uploads_dir / "cache" / "fns_channel_bookings.json"
 
 
-class FnsMotorError(Exception):
+class BookingChannelError(Exception):
     def __init__(self, message: str, details: Any = None):
         super().__init__(message)
         self.details = details
@@ -117,7 +117,7 @@ async def fetch_fns_cambio_usd_clp_rate(*, day: str | None = None) -> dict[str, 
     central = str(settings.fns_central_id or "").strip()
     user, password = _ms_auth()
     if not central or not user or not password:
-        raise FnsMotorError(
+        raise BookingChannelError(
             "FNS Maestros_Cambio no configurado (FNS_CENTRAL_ID + credenciales MS/PMS)"
         )
 
@@ -138,18 +138,18 @@ async def fetch_fns_cambio_usd_clp_rate(*, day: str | None = None) -> dict[str, 
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         response = await client.post(url, json=body, auth=(user, password))
     if response.status_code >= 400:
-        raise FnsMotorError(
+        raise BookingChannelError(
             f"FNS Maestros_Cambio HTTP {response.status_code}",
             details=response.text[:500],
         )
     try:
         payload = response.json()
     except Exception as exc:  # noqa: BLE001
-        raise FnsMotorError("FNS Maestros_Cambio JSON inválido", details=response.text[:500]) from exc
+        raise BookingChannelError("FNS Maestros_Cambio JSON inválido", details=response.text[:500]) from exc
 
     value = _parse_fns_cambio_rate(payload, day=stamp)
     if value is None or value <= 0:
-        raise FnsMotorError("FNS Maestros_Cambio sin tasa usable", details=payload)
+        raise BookingChannelError("FNS Maestros_Cambio sin tasa usable", details=payload)
     return {
         "ok": True,
         "usd_clp_rate": float(value),
@@ -178,7 +178,7 @@ async def fetch_usd_clp_rate() -> dict[str, Any]:
     errors: list[str] = []
     try:
         return await fetch_fns_cambio_usd_clp_rate()
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         errors.append(f"fns_cambio {exc}")
         if getattr(exc, "details", None):
             errors.append(str(exc.details)[:160])
@@ -243,7 +243,7 @@ async def fetch_usd_clp_rate() -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             errors.append(f"currency-api {exc}")
 
-    raise FnsMotorError(
+    raise BookingChannelError(
         "No se pudo obtener el tipo de cambio USD/CLP",
         details="; ".join(errors)[:500],
     )
@@ -276,11 +276,11 @@ async def search_availability(
     children: int = 0,
 ) -> dict[str, Any]:
     if not _motor_configured():
-        raise FnsMotorError("FNS Motor no está configurado en .env")
+        raise BookingChannelError("FNS Motor no está configurado en .env")
     start = str(start_date or "").strip()
     end = str(end_date or "").strip()
     if not start or not end:
-        raise FnsMotorError("Faltan fechas start_date / end_date (YYYY-MM-DD)")
+        raise BookingChannelError("Faltan fechas start_date / end_date (YYYY-MM-DD)")
     body = {
         "auth": {"channel_id": str(settings.fns_channel_id)},
         "params": {
@@ -298,14 +298,14 @@ async def search_availability(
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(url, json=body, auth=_auth())
     if response.status_code >= 400:
-        raise FnsMotorError(
+        raise BookingChannelError(
             f"Motor availability HTTP {response.status_code}",
             details=response.text[:500],
         )
     try:
         payload = response.json()
     except Exception as exc:  # noqa: BLE001
-        raise FnsMotorError("Respuesta inválida del Motor", details=response.text[:500]) from exc
+        raise BookingChannelError("Respuesta inválida del Motor", details=response.text[:500]) from exc
 
     hotels = payload.get("hotelAvailabilities") or []
     if not hotels:
@@ -428,7 +428,7 @@ async def create_booking(
     external_id: str | None = None,
 ) -> dict[str, Any]:
     if not _motor_configured():
-        raise FnsMotorError("FNS Motor no está configurado en .env")
+        raise BookingChannelError("FNS Motor no está configurado en .env")
 
     start = str(start_date or "").strip()
     end = str(end_date or "").strip()
@@ -439,13 +439,13 @@ async def create_booking(
     document = str(guest_document or "").strip()
     doc_type = infer_document_type(document, guest_document_type)
     if not all([start, end, room_code, rate_code, first, last]):
-        raise FnsMotorError(
+        raise BookingChannelError(
             "Faltan datos: fechas, habitación, tarifa, nombre y apellido del huésped"
         )
 
     total = str(amount_after_tax).strip()
     if not total:
-        raise FnsMotorError("Falta amount_after_tax")
+        raise BookingChannelError("Falta amount_after_tax")
     # IG/FB bookings are stored in hostel CLP tariffs.
     cur = (currency or "CLP").strip().upper() or "CLP"
     booking_id = str(external_id or "").strip() or f"BC-{uuid.uuid4().hex[:12].upper()}"
@@ -538,7 +538,7 @@ async def create_booking(
         response = await client.post(url, json=body, auth=_auth())
     text = response.text
     if response.status_code >= 400:
-        raise FnsMotorError(
+        raise BookingChannelError(
             f"Motor booking HTTP {response.status_code}",
             details=text[:800],
         )
@@ -552,7 +552,7 @@ async def create_booking(
     if ota_id:
         booking_id = ota_id
     if not _motor_success(payload):
-        raise FnsMotorError(
+        raise BookingChannelError(
             _motor_error_text(payload) or "Motor no confirmó la reserva",
             details=payload,
         )
@@ -854,11 +854,11 @@ async def list_bookings(
     estado_id: str = "",
 ) -> dict[str, Any]:
     if not _motor_configured():
-        raise FnsMotorError("FNS Motor no está configurado en .env")
+        raise BookingChannelError("FNS Motor no está configurado en .env")
     start = str(start_date or "").strip()[:10]
     end = str(end_date or "").strip()[:10]
     if not start or not end:
-        raise FnsMotorError("Faltan start_date / end_date")
+        raise BookingChannelError("Faltan start_date / end_date")
     params: dict[str, Any] = {
         "lang": "es",
         "hotel_id": str(settings.fns_hotel_id),
@@ -872,14 +872,14 @@ async def list_bookings(
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(url, json=body, auth=_auth())
     if response.status_code >= 400:
-        raise FnsMotorError(
+        raise BookingChannelError(
             f"Motor list bookings HTTP {response.status_code}",
             details=response.text[:500],
         )
     try:
         payload = response.json()
     except Exception as exc:  # noqa: BLE001
-        raise FnsMotorError("List bookings JSON inválido", details=response.text[:500]) from exc
+        raise BookingChannelError("List bookings JSON inválido", details=response.text[:500]) from exc
     rows = [_normalize_booking_row(item) for item in _as_reservation_list(payload)]
     return {"ok": True, "start_date": start, "end_date": end, "bookings": rows, "raw": payload}
 
@@ -1061,10 +1061,10 @@ async def list_guest_active_bookings(
 async def cancel_booking(*, booking_id: str) -> dict[str, Any]:
     """Cancel an existing Motor booking (ResStatus=Cancel)."""
     if not _motor_configured():
-        raise FnsMotorError("FNS Motor no está configurado en .env")
+        raise BookingChannelError("FNS Motor no está configurado en .env")
     bid = str(booking_id or "").strip()
     if not bid:
-        raise FnsMotorError("Falta booking_id")
+        raise BookingChannelError("Falta booking_id")
 
     # Prefer details from local index; Motor list as fallback.
     local: dict[str, Any] | None = None
@@ -1119,7 +1119,7 @@ async def cancel_booking(*, booking_id: str) -> dict[str, Any]:
             None,
         )
         if not match:
-            raise FnsMotorError("No encontré esa reserva para cancelar", details=bid)
+            raise BookingChannelError("No encontré esa reserva para cancelar", details=bid)
         start = str(match.get("start_date") or start)[:10]
         end = str(match.get("end_date") or end)[:10]
         total = str(match.get("amount_after_tax") or total)
@@ -1209,7 +1209,7 @@ async def cancel_booking(*, booking_id: str) -> dict[str, Any]:
         response = await client.post(url, json=body, auth=_auth())
     text = response.text
     if response.status_code >= 400:
-        raise FnsMotorError(
+        raise BookingChannelError(
             f"Motor cancel HTTP {response.status_code}",
             details=text[:800],
         )
@@ -1245,7 +1245,7 @@ async def cancel_booking(*, booking_id: str) -> dict[str, Any]:
                 "already_cancelled": True,
                 "message": f"La reserva {bid} ya estaba cancelada ({start} al {end}).",
             }
-        raise FnsMotorError(err, details=payload)
+        raise BookingChannelError(err, details=payload)
 
     _mark_local_booking_cancelled(bid)
     logger.info("FNS booking cancelled external_id=%s fns_id=%s", bid, fns_id or "-")

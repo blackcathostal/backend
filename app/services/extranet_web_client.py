@@ -1,4 +1,4 @@
-"""FNSrooms web extranet session (adminchile1 login + optional email IP validation)."""
+﻿"""FNSrooms web extranet session (adminchile1 login + optional email IP validation)."""
 from __future__ import annotations
 
 import email
@@ -19,7 +19,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-COOKIE_CACHE = settings.uploads_dir / "cache" / "fns_web_cookies.json"
+COOKIE_CACHE = settings.uploads_dir / "cache" / "extranet_web_cookies.json"
 AUTH_PROBE_PATHS = ("/es/Contabilidad", "/es/Reservas")
 TOKEN_URL_RE = re.compile(
     r"https://adminchile1\.fnsmanager\.com/\?token=[0-9_]+",
@@ -38,13 +38,13 @@ EMAIL_GATE_HINTS = (
 )
 
 
-class FnsWebError(Exception):
+class ExtranetWebError(Exception):
     def __init__(self, message: str, *, details: Any = None) -> None:
         super().__init__(message)
         self.details = details
 
 
-class FnsWebClient:
+class ExtranetWebClient:
     def __init__(
         self,
         *,
@@ -75,7 +75,7 @@ class FnsWebClient:
             if not value
         ]
         if missing:
-            raise FnsWebError(
+            raise ExtranetWebError(
                 "Faltan credenciales web de FNS: " + ", ".join(missing)
             )
 
@@ -103,7 +103,7 @@ class FnsWebClient:
             self._client.close()
             self._client = None
 
-    def __enter__(self) -> "FnsWebClient":
+    def __enter__(self) -> "ExtranetWebClient":
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -255,7 +255,7 @@ class FnsWebClient:
         user = (settings.fns_imap_user or "").strip()
         password = (settings.fns_imap_password or "").strip()
         if not user or not password:
-            raise FnsWebError(
+            raise ExtranetWebError(
                 "FNS pide validación por correo, pero faltan FNS_IMAP_USER / FNS_IMAP_PASSWORD"
             )
         return host, port, user, password
@@ -313,7 +313,7 @@ class FnsWebClient:
     def _approve_email_validation(self, *, since_ts: float) -> str:
         token_url = self._find_validation_token_url(since_ts=since_ts)
         if not token_url:
-            raise FnsWebError(
+            raise ExtranetWebError(
                 "FNS pidió validación por correo: el mail puede haber llegado, "
                 "pero no encontré el link de token a tiempo por IMAP. "
                 "Reintentá Actualizar (no abras el link desde tu PC: valida la IP del servidor)."
@@ -349,7 +349,7 @@ class FnsWebClient:
         # Conditional: only when password login did not open Contabilidad/Reservas.
         email_gate = self._looks_like_email_gate(first.text)
         if not self._imap_ready():
-            raise FnsWebError(
+            raise ExtranetWebError(
                 "Login FNS sin sesión activa"
                 + (
                     " (parece pedir validación por correo; configurá FNS_IMAP_*)"
@@ -366,7 +366,7 @@ class FnsWebClient:
         token_url = self._approve_email_validation(since_ts=started - 90)
         second = self.login()
         if not self.probe_authenticated():
-            raise FnsWebError(
+            raise ExtranetWebError(
                 "Tras validar el correo, FNS sigue sin sesión activa",
                 details={"status": second.status_code, "url": str(second.url)},
             )
@@ -386,7 +386,7 @@ class FnsWebClient:
             self.ensure_session(force_login=True)
             response = self._get(path)
         if response.status_code >= 400:
-            raise FnsWebError(
+            raise ExtranetWebError(
                 f"FNS web HTTP {response.status_code} en {path}",
                 details=response.text[:300],
             )

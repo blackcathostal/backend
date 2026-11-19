@@ -1,4 +1,4 @@
-"""Accounting reports: EERR (income statement) and consolidated by month."""
+﻿"""Accounting reports: EERR (income statement) and consolidated by month."""
 
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ from app.schemas.reports import (
 )
 from app.services import dte_catalog
 from app.services.accounting_concept_map import load_income_accounts
-from app.services.fns_tax_documents import FnsTaxDocumentsClient
-from app.services.fns_web_client import FnsWebError
+from app.services.tax_documents_fetch import TaxDocumentsFetchClient
+from app.services.extranet_web_client import ExtranetWebError
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 logger = logging.getLogger(__name__)
@@ -151,8 +151,8 @@ def _tax_document_code_totals(
     return {str(code or ""): float(total or 0) for code, total in sums if code}
 
 
-def _fetch_fns_month(date_from: date, date_to: date, *, accounts: list) -> dict:
-    client = FnsTaxDocumentsClient()
+def _fetch_extranet_month(date_from: date, date_to: date, *, accounts: list) -> dict:
+    client = TaxDocumentsFetchClient()
     return client.fetch_income_by_account(date_from, date_to, accounts=accounts)
 
 
@@ -171,13 +171,13 @@ def get_eerr_report(
     ) else _month_end(month_start)
     accounts = load_income_accounts(db)
 
-    source = "fns_vendido"
+    source = "extranet_vendido"
     vendido = 0.0
     cobrado = 0.0
     pendiente = 0.0
     by_code: dict[str, float] = {}
     try:
-        payload = _fetch_fns_month(month_start, month_finish, accounts=accounts)
+        payload = _fetch_extranet_month(month_start, month_finish, accounts=accounts)
         by_code = {
             str(code): float(amount or 0)
             for code, amount in (payload.get("by_account_code") or {}).items()
@@ -185,7 +185,7 @@ def get_eerr_report(
         vendido = float(payload.get("vendido") or 0)
         cobrado = float(payload.get("cobrado") or 0)
         pendiente = float(payload.get("pendiente") or 0)
-    except FnsWebError as exc:
+    except ExtranetWebError as exc:
         logger.warning("EERR FNS unavailable, falling back to tax_documents: %s", exc)
         source = "tax_documents"
         by_code = _tax_document_code_totals(
@@ -233,9 +233,9 @@ def get_eerr_consolidated(
     accounts = load_income_accounts(db)
 
     monthly_by_code: dict[str, dict[str, float]] = {key: {} for key in period_keys}
-    source = "fns_vendido"
+    source = "extranet_vendido"
     try:
-        client = FnsTaxDocumentsClient()
+        client = TaxDocumentsFetchClient()
         for month in months:
             key = _period_key(month)
             finish = min(_month_end(month), today) if (
@@ -248,7 +248,7 @@ def get_eerr_consolidated(
                 str(code): float(amount or 0)
                 for code, amount in (payload.get("by_account_code") or {}).items()
             }
-    except FnsWebError as exc:
+    except ExtranetWebError as exc:
         logger.warning(
             "EERR consolidated FNS unavailable, falling back to tax_documents: %s",
             exc,

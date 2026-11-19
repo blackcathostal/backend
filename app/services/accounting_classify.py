@@ -1,4 +1,4 @@
-"""FNS PMS Contabilidad helpers (API service, not web portal login)."""
+﻿"""FNS PMS Contabilidad helpers (API service, not web portal login)."""
 from __future__ import annotations
 
 import logging

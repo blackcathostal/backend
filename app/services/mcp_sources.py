@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -19,8 +19,8 @@ from app.models.ai_sources import AiSources
 from app.models.ai_generation_runs import AiGenerationRuns
 from app.models.users import Users
 from app.services.ai_api_sources import collect_external_api_materials
-from app.services.fns_motor import (
-    FnsMotorError,
+from app.services.booking_channel import (
+    BookingChannelError,
     booking_allowed,
     cancel_booking,
     create_booking,
@@ -786,7 +786,7 @@ async def search_room_availability_tool(
                 f"Usa start_date={start_date} end_date={end_date} al responder."
             ).strip()
         return priced
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         return {
             "ok": False,
             "error": str(exc),
@@ -873,7 +873,7 @@ async def check_guest_bookings_tool(
             guest_last_name=guest_last_name,
             guest_document=guest_document,
         )
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
 
 
@@ -912,7 +912,7 @@ async def cancel_room_booking_tool(
         }
     try:
         return await cancel_booking(booking_id=booking_id)
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
 
 
@@ -1130,7 +1130,7 @@ async def create_room_booking_tool(
             guest_last_name=guest_last_name,
             guest_document=guest_document,
         )
-    except FnsMotorError:
+    except BookingChannelError:
         existing = {"has_active_booking": False, "bookings": []}
 
     active = [row for row in (existing.get("bookings") or []) if isinstance(row, dict)]
@@ -1157,7 +1157,7 @@ async def create_room_booking_tool(
             try:
                 await cancel_booking(booking_id=bid)
                 cancelled_ids.append(bid)
-            except FnsMotorError as exc:
+            except BookingChannelError as exc:
                 return {
                     "ok": False,
                     "error": str(exc),
@@ -1198,7 +1198,7 @@ async def create_room_booking_tool(
                     f"{created.get('booking_id')} ({start_date} al {end_date})."
                 ),
             }
-        except FnsMotorError as exc:
+        except BookingChannelError as exc:
             return {
                 "ok": False,
                 "error": str(exc),
@@ -1251,7 +1251,7 @@ async def create_room_booking_tool(
             remarks=remarks,
             day_rates_json=day_rates_json,
         )
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
 
 
@@ -1329,7 +1329,7 @@ async def change_room_booking_tool(
             guest_last_name=guest_last_name,
             guest_document=document,
         )
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         return {"ok": False, "error": str(exc), "details": getattr(exc, "details", None)}
 
     active = [row for row in (existing.get("bookings") or []) if isinstance(row, dict)]
@@ -1388,7 +1388,7 @@ async def change_room_booking_tool(
         priced = await _attach_guest_pricing(
             avail, start_date=start_date, end_date=end_date
         )
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         return {
             "ok": False,
             "error": str(exc),
@@ -1490,7 +1490,7 @@ async def change_room_booking_tool(
 
     try:
         cancelled = await cancel_booking(booking_id=old_id)
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         return {
             "ok": False,
             "error": str(exc),
@@ -1521,7 +1521,7 @@ async def change_room_booking_tool(
             or f"Cambio de reserva (reemplaza {old_id}) Instagram/Facebook Black Cat",
             day_rates_json=day_rates_json,
         )
-    except FnsMotorError as exc:
+    except BookingChannelError as exc:
         return {
             "ok": False,
             "error": str(exc),

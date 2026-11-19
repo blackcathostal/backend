@@ -30,14 +30,15 @@ Everything that is **not** end-user visible text must be **English**:
 - Do **not** create files like `habitaciones.py`, `recibidas_vista.vue`, `descargar_pdf.js`
 - Do **not** name symbols `razonSocial`, `folioEmitida`, `cargarFoto`, `actualizarRecibidas`
 - Do **not** invent Spanish route segments for new APIs
+- Do **not** put vendor/stack nicknames in **file titles** (`fns_*.py`, `pms_*.py`). Prefer domain names: `extranet_web_client.py`, `tax_documents_fetch.py`, `booking_channel.py`
 
 ## Correct examples
 
 ```text
-OK file:    room_photos.py / tax_documents.py / billing_portal_web.py
+OK file:    room_photos.py / tax_documents_fetch.py / extranet_web_client.py / billing_portal_web.py
 OK symbol:  upload_room_photo, has_pdf, counterpart_name
 OK UI:      "Habitaciones", "Descargar PDF", "Actualizar Recibidas"
-BAD file:   fotos_habitacion.py
+BAD file:   fotos_habitacion.py / fns_web_client.py / pms_tax_documents.py
 BAD symbol: cargar_foto_habitacion
 ```
 
