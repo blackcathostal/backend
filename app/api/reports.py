@@ -255,9 +255,14 @@ def _issued_tax_document_lines(
         amount = float(row.total_amount or 0)
         if abs(amount) <= 0.5:
             continue
+        type_code = ""
         type_name = ""
         if row.dte_type is not None:
-            type_name = str(row.dte_type.name or row.dte_type.code or "").strip()
+            type_code = str(row.dte_type.code or "").strip()
+            type_name = str(row.dte_type.name or type_code).strip()
+        # Portal/FNS often store NC (61) as positive; Facturado must net them out.
+        if type_code == dte_catalog.TYPE_CODE_CREDIT_NOTE:
+            amount = -abs(amount)
         folio = str(row.folio or "").strip()
         lines.append(
             {
@@ -271,32 +276,6 @@ def _issued_tax_document_lines(
             }
         )
     return lines
-
-
-def _merge_detail_lines(
-    primary: list[dict],
-    extra: list[dict],
-) -> list[dict]:
-    """Append extra lines not already present by folio + doc_type."""
-    seen: set[tuple[str, str]] = set()
-    merged: list[dict] = []
-    for item in primary:
-        folio = re.sub(r"\s+", "", str(item.get("folio") or ""))
-        doc_type = str(item.get("doc_type") or "").strip().lower()
-        key = (folio, doc_type)
-        if folio:
-            seen.add(key)
-        merged.append(item)
-    for item in extra:
-        folio = re.sub(r"\s+", "", str(item.get("folio") or ""))
-        doc_type = str(item.get("doc_type") or "").strip().lower()
-        key = (folio, doc_type)
-        if folio and key in seen:
-            continue
-        if folio:
-            seen.add(key)
-        merged.append(item)
-    return merged
 
 
 def _fetch_extranet_month(date_from: date, date_to: date, *, accounts: list) -> dict:
@@ -352,7 +331,8 @@ def get_eerr_report(
         cobrado = vendido
         concepts_total = vendido
 
-    # Prefer Σ facturas emitidas in DB when FNS Facturado column is empty.
+    # Facturado KPI matches drill-down: Σ emitidas 33/34/61 from DB (NC negative).
+    # Fall back to FNS Ingresos-Cobros "Facturado" only when DB has no invoices yet.
     invoice_lines = _issued_tax_document_lines(
         db,
         date_from=month_start,
@@ -360,8 +340,9 @@ def get_eerr_report(
         invoice_only=True,
     )
     invoice_sum = float(sum(float(item.get("amount") or 0) for item in invoice_lines))
-    if invoice_sum > facturado + 0.5:
+    if abs(invoice_sum) > 0.5:
         facturado = invoice_sum
+    # else keep FNS facturado (may be 0)
 
     rows = _rows_from_code_totals(accounts, by_code)
     rows.extend(
@@ -461,17 +442,8 @@ def get_eerr_detail(
             )
         except ExtranetWebError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        if kind == "account" and resolved_id is not None:
-            # Only docs already assigned on Emitidas → Actualizar (no soft-assign here).
-            invoice_lines = _issued_tax_document_lines(
-                db,
-                date_from=month_start,
-                date_to=month_finish,
-                account_id=int(resolved_id),
-                invoice_only=True,
-            )
-            raw_lines = _merge_detail_lines(raw_lines, invoice_lines)
+        # Do not merge facturas into account detail: row totals are Cobros→vendido only.
+        # Invoices live under the Facturado KPI so detail Σ matches the row/KPI.
 
     lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
     total = float(sum(float(item.amount or 0) for item in lines))
