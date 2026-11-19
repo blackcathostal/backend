@@ -12,6 +12,7 @@ from app.api import (
     contacts,
     facebook,
     health,
+    human_resources,
     inquiries,
     instagram,
     items,
@@ -58,6 +59,7 @@ api_router.include_router(analytics.router)
 api_router.include_router(terms.router)
 api_router.include_router(accounting_accounts.router)
 api_router.include_router(reports.router)
+api_router.include_router(human_resources.router)
 api_router.include_router(tax_documents.router, prefix="/tax-documents")
 # Legacy path for older admin builds
 api_router.include_router(tax_documents.router, prefix="/accounting-track")

@@ -10,6 +10,7 @@ from app.models.contact_groups import ContactGroups
 from app.models.contact_inquiries import ContactInquiries
 from app.models.contacts import Contacts
 from app.models.hostel_info import CommonAnswers, HostelInfo
+from app.models.hr_period_amounts import HrPeriodAmounts
 from app.models.logs import Logs
 from app.models.mail_accounts import MailAccounts
 from app.models.medias import Medias
@@ -56,6 +57,7 @@ __all__ = [
     "Services",
     "Rooms",
     "HostelInfo",
+    "HrPeriodAmounts",
     "CommonAnswers",
     "TermsAndConditions",
     "VisitorSessions",
