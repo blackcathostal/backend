@@ -694,17 +694,17 @@ def _upsert_docs(
                 folio=folio,
                 identification_number=identification_number,
                 status_id=initial_status_id,
-                period=period if version_id == issued_id else "",
+                period=period or "",
             )
             db.add(row)
 
         row.dte_version_id = version_id
         row.dte_type_id = type_id
-        # Issued refresh stamps period from document date (MM-YYYY). Recibidas: no period column.
-        if version_id == issued_id and period:
+        # Issued + received: stamp period from document date (MM-YYYY).
+        if period:
             row.period = period
         elif is_new or row.period is None:
-            row.period = period if version_id == issued_id else (row.period or "")
+            row.period = row.period or ""
         # Issued: update paid/pending from FNS. Received: keep user classification;
         # only default En revisión when status is empty.
         if version_id == issued_id and payment_status_id:
