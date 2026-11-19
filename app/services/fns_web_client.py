@@ -52,7 +52,7 @@ class FnsWebClient:
         password: str | None = None,
         base_url: str | None = None,
         timeout: float = 45.0,
-        imap_timeout_sec: int = 90,
+        imap_timeout_sec: int = 180,
     ) -> None:
         self.user = (user if user is not None else settings.fns_web_user or "").strip()
         self.password = (
@@ -62,7 +62,7 @@ class FnsWebClient:
             base_url if base_url is not None else settings.fns_web_base_url or ""
         ).rstrip("/") or "https://adminchile1.fnsmanager.com"
         self.timeout = timeout
-        self.imap_timeout_sec = max(15, int(imap_timeout_sec))
+        self.imap_timeout_sec = max(30, int(imap_timeout_sec))
         self._client: httpx.Client | None = None
 
     def require_credentials(self) -> None:
@@ -261,56 +261,62 @@ class FnsWebClient:
         return host, port, user, password
 
     def _find_validation_token_url(self, *, since_ts: float) -> str:
+        """Poll IMAP for the FNS validation link.
+
+        Gmail IMAP SEARCH with SUBJECT \"Validaci\" returns 0 hits (accent/encoding),
+        even when the mail is already in INBOX. Search by FROM and filter in Python.
+        """
         host, port, user, password = self._imap_settings()
         deadline = time.time() + self.imap_timeout_sec
         seen: set[str] = set()
+        # Prefer newest matching mail; allow a few minutes of clock skew.
+        min_ts = since_ts - 120
         while time.time() < deadline:
             mail = imaplib.IMAP4_SSL(host, port)
             try:
                 mail.login(user, password)
                 mail.select("INBOX")
-                typ, data = mail.search(
-                    None, '(FROM "fnsrooms.com" SUBJECT "Validaci")'
-                )
+                # Do NOT filter SUBJECT in IMAP — accented "Validación" never matches on Gmail.
+                typ, data = mail.search(None, '(FROM "fnsrooms.com")')
                 ids = data[0].split() if data and data[0] else []
-                for num in reversed(ids[-20:]):
+                for num in reversed(ids[-40:]):
                     typ, msgdata = mail.fetch(num, "(RFC822)")
                     if not msgdata or not msgdata[0]:
                         continue
                     msg = email.message_from_bytes(msgdata[0][1])
-                    subject = self._decode_mime(msg.get("Subject"))
-                    if "valid" not in subject.lower():
+                    subject = self._decode_mime(msg.get("Subject")).lower()
+                    if "valid" not in subject and "acceso" not in subject:
                         continue
                     date_hdr = msg.get("Date") or ""
                     try:
                         msg_dt = parsedate_to_datetime(date_hdr)
-                        if msg_dt.tzinfo is None:
-                            msg_ts = msg_dt.timestamp()
-                        else:
-                            msg_ts = msg_dt.timestamp()
-                        if msg_ts + 10 < since_ts:
+                        msg_ts = msg_dt.timestamp()
+                        if msg_ts + 10 < min_ts:
                             continue
                     except Exception:
                         pass
                     body = self._message_body(msg)
+                    # HTML may repeat the same href; take first fresh token URL.
                     for link in TOKEN_URL_RE.findall(body):
                         if link not in seen:
                             seen.add(link)
-                            logger.info("FNS validation token found in mail")
+                            logger.info("FNS validation token found in mail subject=%s", subject[:80])
                             return link
             finally:
                 try:
                     mail.logout()
                 except Exception:
                     pass
-            time.sleep(5)
+            time.sleep(4)
         return ""
 
     def _approve_email_validation(self, *, since_ts: float) -> str:
         token_url = self._find_validation_token_url(since_ts=since_ts)
         if not token_url:
             raise FnsWebError(
-                "FNS pidió validación por correo y no llegó el mail con el token a tiempo"
+                "FNS pidió validación por correo: el mail puede haber llegado, "
+                "pero no encontré el link de token a tiempo por IMAP. "
+                "Reintentá Actualizar (no abras el link desde tu PC: valida la IP del servidor)."
             )
         client = self._ensure_client()
         response = client.get(token_url)
@@ -357,7 +363,7 @@ class FnsWebClient:
             "FNS login without session (email_gate=%s); polling IMAP for validation token",
             email_gate,
         )
-        token_url = self._approve_email_validation(since_ts=started - 15)
+        token_url = self._approve_email_validation(since_ts=started - 90)
         second = self.login()
         if not self.probe_authenticated():
             raise FnsWebError(
