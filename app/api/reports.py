@@ -16,6 +16,7 @@ from app.core.security import get_current_user
 from app.models.accounting_accounts import AccountingAccounts
 from app.models.customers import Customers
 from app.models.hr_period_amounts import HrPeriodAmounts
+from app.models.suppliers import Suppliers
 from app.models.tax_documents import TaxDocuments
 from app.models.users import Users
 from app.schemas.reports import (
@@ -398,6 +399,117 @@ def _customer_names_for(db: Session, identification_numbers: list[str]) -> dict[
     }
 
 
+def _supplier_names_for(db: Session, identification_numbers: list[str]) -> dict[str, str]:
+    ids = sorted({str(x or "").strip() for x in identification_numbers if str(x or "").strip()})
+    if not ids:
+        return {}
+    rows = (
+        db.query(Suppliers)
+        .filter(Suppliers.identification_number.in_(ids))
+        .all()
+    )
+    return {
+        str(row.identification_number or ""): str(row.company_name or "")
+        for row in rows
+    }
+
+
+def _received_tax_document_lines(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+    account_id: int | None = None,
+) -> list[dict]:
+    """Detail lines from received tax_documents (compras) for an expense account."""
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+    if received_id is None:
+        return []
+    query = (
+        db.query(TaxDocuments)
+        .options(joinedload(TaxDocuments.dte_type))
+        .filter(
+            TaxDocuments.dte_version_id == int(received_id),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+        )
+    )
+    if account_id is not None:
+        query = query.filter(TaxDocuments.accounting_account_id == int(account_id))
+
+    rows = query.order_by(TaxDocuments.issued_at.asc(), TaxDocuments.id.asc()).all()
+    names = _supplier_names_for(db, [row.identification_number for row in rows])
+    lines: list[dict] = []
+    for row in rows:
+        amount = float(row.total_amount or 0)
+        if abs(amount) <= 0.5:
+            continue
+        type_code = ""
+        type_name = ""
+        if row.dte_type is not None:
+            type_code = str(row.dte_type.code or "").strip()
+            type_name = str(row.dte_type.name or type_code).strip()
+        if type_code == dte_catalog.TYPE_CODE_CREDIT_NOTE:
+            amount = -abs(amount)
+        folio = str(row.folio or "").strip()
+        lines.append(
+            {
+                "issued_at": row.issued_at.isoformat() if row.issued_at else None,
+                "folio": folio[:40],
+                "doc_type": type_name or "DTE",
+                "company_name": names.get(str(row.identification_number or ""), "")[:220],
+                "locator": str(row.pms_ref or "")[:120],
+                "concept": type_name or "Documento tributario",
+                "amount": amount,
+            }
+        )
+    return lines
+
+
+def _commission_detail_lines_for_account(
+    *,
+    date_from: date,
+    date_to: date,
+    accounts: list[AccountingAccounts],
+    account_id: int,
+) -> list[dict]:
+    """FNS channel commission fees that map to the given expense account."""
+    try:
+        client = TaxDocumentsFetchClient()
+        by_channel = client.fetch_commission_fees_by_channel(date_from, date_to)
+    except ExtranetWebError as exc:
+        logger.warning("EERR commission detail unavailable: %s", exc)
+        return []
+    code_to_id = {
+        str(account.code or "").strip(): int(account.id)
+        for account in accounts
+        if str(account.code or "").strip()
+    }
+    lines: list[dict] = []
+    for channel, fee in by_channel.items():
+        amount = float(fee or 0)
+        if abs(amount) <= 0.5:
+            continue
+        code = account_code_for_concept(channel, accounts, allow_catch_all=False)
+        if not code:
+            continue
+        if code_to_id.get(str(code)) != int(account_id):
+            continue
+        lines.append(
+            {
+                "issued_at": None,
+                "folio": "",
+                "doc_type": "Comisión",
+                "company_name": str(channel or "")[:220],
+                "locator": "",
+                "concept": f"Comisión {channel}".strip(),
+                "amount": amount,
+            }
+        )
+    return lines
+
+
 def _issued_tax_document_lines(
     db: Session,
     *,
@@ -624,19 +736,24 @@ def get_eerr_detail(
     ) else _month_end(month_start)
 
     ensure_concept_labels_from_coa(db)
-    accounts = load_income_accounts(db)
+    income_accounts = load_income_accounts(db)
+    expense_accounts = load_expense_accounts(db)
     kind = str(row_kind or "account").strip().lower()
     code = str(account_code or "").strip()
     account_name = ""
     resolved_id = account_id
+    expense_category = ""
 
     if kind == "account":
         account = None
         if account_id is not None:
-            account = next((row for row in accounts if int(row.id) == int(account_id)), None)
+            account = next(
+                (row for row in income_accounts if int(row.id) == int(account_id)),
+                None,
+            )
         if account is None and code:
             account = next(
-                (row for row in accounts if str(row.code or "") == code),
+                (row for row in income_accounts if str(row.code or "") == code),
                 None,
             )
         if account is None:
@@ -644,6 +761,25 @@ def get_eerr_detail(
         code = str(account.code or "")
         account_name = str(account.name or "")
         resolved_id = int(account.id)
+        title = f"{code} · {account_name}".strip(" ·")
+    elif kind == "expense":
+        account = None
+        if account_id is not None:
+            account = next(
+                (row for row in expense_accounts if int(row.id) == int(account_id)),
+                None,
+            )
+        if account is None and code:
+            account = next(
+                (row for row in expense_accounts if str(row.code or "") == code),
+                None,
+            )
+        if account is None:
+            raise HTTPException(status_code=404, detail="Cuenta de egreso no encontrada")
+        code = str(account.code or "")
+        account_name = str(account.name or "")
+        resolved_id = int(account.id)
+        expense_category = str(account.category or "").strip()
         title = f"{code} · {account_name}".strip(" ·")
     elif kind == "pending":
         title = "Pendiente por cobrar"
@@ -658,7 +794,50 @@ def get_eerr_detail(
         raise HTTPException(status_code=400, detail="row_kind inválido")
 
     raw_lines: list[dict] = []
-    if kind == "invoiced":
+    if kind == "expense":
+        if expense_category.lower() == "remuneraciones" and resolved_id is not None:
+            hr_amount = float(
+                _hr_amounts_by_account_id(db, _period_key(month_start)).get(
+                    int(resolved_id), 0.0
+                )
+            )
+            if abs(hr_amount) > 0.5:
+                raw_lines = [
+                    {
+                        "issued_at": None,
+                        "folio": "",
+                        "doc_type": "RRHH",
+                        "company_name": "",
+                        "locator": "",
+                        "concept": "Remuneraciones del periodo",
+                        "amount": hr_amount,
+                    }
+                ]
+        else:
+            raw_lines = _received_tax_document_lines(
+                db,
+                date_from=month_start,
+                date_to=month_finish,
+                account_id=int(resolved_id) if resolved_id is not None else None,
+            )
+            if resolved_id is not None:
+                commission_lines = _commission_detail_lines_for_account(
+                    date_from=month_start,
+                    date_to=month_finish,
+                    accounts=expense_accounts,
+                    account_id=int(resolved_id),
+                )
+                if commission_lines and not raw_lines:
+                    raw_lines = commission_lines
+                elif commission_lines and raw_lines:
+                    # Prefer document lines; keep commissions only when they exceed docs.
+                    docs_total = float(sum(float(item.get("amount") or 0) for item in raw_lines))
+                    fees_total = float(
+                        sum(float(item.get("amount") or 0) for item in commission_lines)
+                    )
+                    if fees_total > docs_total + 0.5:
+                        raw_lines = commission_lines
+    elif kind == "invoiced":
         raw_lines = _issued_tax_document_lines(
             db,
             date_from=month_start,
@@ -671,7 +850,7 @@ def get_eerr_detail(
             raw_lines = client.fetch_income_detail_lines(
                 month_start,
                 month_finish,
-                accounts=accounts,
+                accounts=income_accounts,
                 row_kind=kind,
                 account_code=code,
             )
