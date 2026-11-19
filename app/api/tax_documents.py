@@ -96,7 +96,7 @@ def _resolve_type_id(db: Session, item: dict) -> int | None:
     raw = item.get("dte_type_id")
     if raw is None or raw == "":
         raw = item.get("doc_type") or item.get("dte_type_code") or ""
-    # Canonical catalog only (33/34/39/61). Voucher/empty/unknown → Boleta.
+    # Voucher stays Voucher; empty/unknown → Boleta.
     return dte_catalog.ensure_type_id(db, raw)
 
 
@@ -161,6 +161,7 @@ _DTE_TYPE_LABELS_ES = {
     dte_catalog.TYPE_CODE_EXEMPT_INVOICE: "Factura Exenta",
     dte_catalog.TYPE_CODE_RECEIPT: "Boleta",
     dte_catalog.TYPE_CODE_CREDIT_NOTE: "Nota de crédito",
+    dte_catalog.TYPE_CODE_VOUCHER: "Voucher",
 }
 
 
@@ -172,9 +173,9 @@ def _dte_type_name_es(*, code: str = "", name: str = "") -> str:
     low = raw.lower()
     if low in {"invoice", "factura"}:
         return "Factura"
-    if low in {"receipt", "boleta", "voucher", "vale", "comprobante", ""}:
-        return "Boleta"
-    if "voucher" in low or "vale" in low:
+    if low in {"voucher", "vale"} or "voucher" in low:
+        return "Voucher"
+    if low in {"receipt", "boleta", "comprobante", ""}:
         return "Boleta"
     if "exempt" in low or "exenta" in low:
         return "Factura Exenta"
@@ -184,7 +185,7 @@ def _dte_type_name_es(*, code: str = "", name: str = "") -> str:
         return "Boleta"
     if "factura" in low or "invoice" in low:
         return "Factura"
-    # Anything else from FNS without a real SII type → show as Boleta.
+    # Empty / unrecognized FNS labels → Boleta.
     return "Boleta"
 
 

@@ -13,7 +13,7 @@ TYPE_CODE_INVOICE = "33"
 TYPE_CODE_EXEMPT_INVOICE = "34"
 TYPE_CODE_RECEIPT = "39"
 TYPE_CODE_CREDIT_NOTE = "61"
-# FNS internal label — always mapped to Boleta, never stored as its own catalog row.
+# FNS internal payment voucher (not a SII DTE) — kept as its own catalog row.
 TYPE_CODE_VOUCHER = "voucher"
 VERSION_CODE_ISSUED = "issued"
 VERSION_CODE_RECEIVED = "received"
@@ -26,6 +26,7 @@ CANONICAL_TYPE_CODES = {
     TYPE_CODE_EXEMPT_INVOICE,
     TYPE_CODE_RECEIPT,
     TYPE_CODE_CREDIT_NOTE,
+    TYPE_CODE_VOUCHER,
 }
 
 
@@ -47,14 +48,19 @@ def type_id_by_code(db: Session, code: str) -> int | None:
     return int(row.id) if row else None
 
 
+def _is_voucher_label(needle: str) -> bool:
+    return needle in {"voucher", "vale"} or "voucher" in needle or needle == "vale"
+
+
 def _alias_type_code(raw: object) -> str | None:
-    """Map FNS/SII free-text labels to a canonical catalog code."""
+    """Map FNS/SII free-text labels to a catalog code."""
     needle = _norm(raw)
     if not needle:
+        # Empty FNS tipo → Boleta
         return TYPE_CODE_RECEIPT
-    if needle in {"voucher", "vale", "comprobante", "unknown", "otro", "other", "n/a", "-"}:
-        return TYPE_CODE_RECEIPT
-    if "voucher" in needle or "vale" in needle or "comprobante" in needle:
+    if _is_voucher_label(needle):
+        return TYPE_CODE_VOUCHER
+    if needle in {"unknown", "otro", "other", "n/a", "-", "comprobante"}:
         return TYPE_CODE_RECEIPT
     if "exent" in needle:
         return TYPE_CODE_EXEMPT_INVOICE
@@ -68,26 +74,23 @@ def _alias_type_code(raw: object) -> str | None:
 
 
 def type_id_from_raw(db: Session, raw: object) -> int | None:
-    """Map label/code/id input to canonical dte_types.id (33/34/39/61)."""
+    """Map label/code/id input to dte_types.id (33/34/39/61/voucher)."""
     text = str(raw or "").strip()
     needle = _norm(text)
 
-    # Empty / voucher / unknown free-text → Boleta before any catalog lookup.
-    alias = _alias_type_code(text)
-    if not text or needle in {"voucher", "vale", "comprobante", "unknown", "otro", "other", "n/a", "-"}:
-        return type_id_by_code(db, alias or TYPE_CODE_RECEIPT)
-    if "voucher" in needle or "vale" in needle:
+    # Empty → Boleta; Voucher label → Voucher.
+    if not text:
         return type_id_by_code(db, TYPE_CODE_RECEIPT)
+    if _is_voucher_label(needle):
+        return type_id_by_code(db, TYPE_CODE_VOUCHER)
 
-    # Direct id / code match against canonical catalog only.
-    # Important: SII boleta is always code "39". A leftover autoincrement id
-    # like 41 (old "Voucher" row) must NOT be treated as a real type.
+    # Direct id / code match against catalog.
     if text.isdigit():
         by_id = db.query(DteTypes).filter(DteTypes.id == int(text)).first()
         if by_id is not None:
             if str(by_id.code) in CANONICAL_TYPE_CODES:
                 return int(by_id.id)
-            # Non-canonical PK (e.g. id=41 voucher) → Boleta (code 39)
+            # Unknown leftover PK → Boleta
             return type_id_by_code(db, TYPE_CODE_RECEIPT)
         by_code = type_id_by_code(db, text)
         if by_code is not None:
@@ -98,7 +101,6 @@ def type_id_from_raw(db: Session, raw: object) -> int | None:
         row = db.query(DteTypes).filter(DteTypes.id == by_code).first()
         if row is not None and str(row.code) in CANONICAL_TYPE_CODES:
             return by_code
-        # Leftover non-canonical rows (e.g. voucher) → Boleta
         return type_id_by_code(db, TYPE_CODE_RECEIPT)
 
     rows = db.query(DteTypes).filter(DteTypes.code.in_(sorted(CANONICAL_TYPE_CODES))).all()
@@ -113,13 +115,15 @@ def type_id_from_raw(db: Session, raw: object) -> int | None:
         if name_n and (name_n in needle or needle in name_n):
             return int(row.id)
 
+    alias = _alias_type_code(text)
     if alias:
         return type_id_by_code(db, alias)
-    return None
+    # Unrecognized free-text → Boleta (not a new catalog row)
+    return type_id_by_code(db, TYPE_CODE_RECEIPT)
 
 
 def ensure_type_id(db: Session, raw: object) -> int | None:
-    """Resolve type from canonical catalog only. Never create Voucher/unknown rows."""
+    """Resolve type from catalog. Empty → Boleta; Voucher stays Voucher."""
     existing = type_id_from_raw(db, raw)
     if existing is not None:
         return existing

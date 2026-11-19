@@ -510,6 +510,15 @@ def seed_database(db: Session) -> None:
         else:
             db.add(DteTypes(id=type_id, code=code, name=name))
 
+    # FNS Voucher: keep as its own type (not a SII DTE). Lookup by code only.
+    voucher = db.query(DteTypes).filter(
+        DteTypes.code == dte_catalog.TYPE_CODE_VOUCHER
+    ).first()
+    if voucher is None:
+        db.add(DteTypes(code=dte_catalog.TYPE_CODE_VOUCHER, name="Voucher"))
+    else:
+        voucher.name = "Voucher"
+
     dte_statuses = (
         (1, dte_catalog.STATUS_CODE_PENDING_PAYMENT, "Imputada por Pagar", "red"),
         (2, dte_catalog.STATUS_CODE_PAID, "Imputada Pagada", "green"),
@@ -587,7 +596,7 @@ def seed_database(db: Session) -> None:
     ).all():
         db.delete(legacy)
 
-    # Remap FNS extras (Voucher, unknown, …) to Boleta and drop non-canonical types.
+    # Drop unknown extras; keep Voucher. Empty type_id → Boleta.
     receipt_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_RECEIPT)
     canonical = set(dte_catalog.CANONICAL_TYPE_CODES)
     if receipt_id:
