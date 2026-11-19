@@ -75,7 +75,7 @@ def _resolve_type_id(db: Session, item: dict) -> int | None:
     raw = item.get("dte_type_id")
     if raw is None or raw == "":
         raw = item.get("doc_type") or item.get("dte_type_code") or ""
-    # Resolve against DB catalog; create from FNS/SII label if missing (no hard-coded map).
+    # Canonical catalog only (33/34/39/61). Voucher/empty/unknown → Boleta.
     return dte_catalog.ensure_type_id(db, raw)
 
 
@@ -151,13 +151,20 @@ def _dte_type_name_es(*, code: str = "", name: str = "") -> str:
     low = raw.lower()
     if low in {"invoice", "factura"}:
         return "Factura"
-    if low in {"receipt", "boleta"}:
+    if low in {"receipt", "boleta", "voucher", "vale", "comprobante", ""}:
+        return "Boleta"
+    if "voucher" in low or "vale" in low:
         return "Boleta"
     if "exempt" in low or "exenta" in low:
         return "Factura Exenta"
     if "credit" in low or "crédito" in low or "credito" in low:
         return "Nota de crédito"
-    return raw
+    if "boleta" in low or "receipt" in low:
+        return "Boleta"
+    if "factura" in low or "invoice" in low:
+        return "Factura"
+    # Anything else from FNS without a real SII type → show as Boleta.
+    return "Boleta"
 
 
 def _serialize_doc(row: TaxDocuments, *, company_name: str = "") -> TaxDocumentOut:

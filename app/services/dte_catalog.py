@@ -13,12 +13,20 @@ TYPE_CODE_INVOICE = "33"
 TYPE_CODE_EXEMPT_INVOICE = "34"
 TYPE_CODE_RECEIPT = "39"
 TYPE_CODE_CREDIT_NOTE = "61"
+# FNS internal label — always mapped to Boleta, never stored as its own catalog row.
 TYPE_CODE_VOUCHER = "voucher"
 VERSION_CODE_ISSUED = "issued"
 VERSION_CODE_RECEIVED = "received"
 STATUS_CODE_WAITING = "waiting"
 STATUS_CODE_PENDING_PAYMENT = "pending_payment"
 STATUS_CODE_PAID = "paid"
+
+CANONICAL_TYPE_CODES = {
+    TYPE_CODE_INVOICE,
+    TYPE_CODE_EXEMPT_INVOICE,
+    TYPE_CODE_RECEIPT,
+    TYPE_CODE_CREDIT_NOTE,
+}
 
 
 def _norm(text: object) -> str:
@@ -39,16 +47,42 @@ def type_id_by_code(db: Session, code: str) -> int | None:
     return int(row.id) if row else None
 
 
-def type_id_from_raw(db: Session, raw: object) -> int | None:
-    """Map label/code/id input to dte_types.id using only catalog rows in DB."""
-    text = str(raw or "").strip()
-    if not text:
-        return None
+def _alias_type_code(raw: object) -> str | None:
+    """Map FNS/SII free-text labels to a canonical catalog code."""
+    needle = _norm(raw)
+    if not needle:
+        return TYPE_CODE_RECEIPT
+    if needle in {"voucher", "vale", "comprobante", "unknown", "otro", "other", "n/a", "-"}:
+        return TYPE_CODE_RECEIPT
+    if "voucher" in needle or "vale" in needle or "comprobante" in needle:
+        return TYPE_CODE_RECEIPT
+    if "exent" in needle:
+        return TYPE_CODE_EXEMPT_INVOICE
+    if "credito" in needle or "credit" in needle or needle in {"61", "nc"}:
+        return TYPE_CODE_CREDIT_NOTE
+    if "boleta" in needle or "receipt" in needle or needle in {"39"}:
+        return TYPE_CODE_RECEIPT
+    if "factura" in needle or "invoice" in needle or needle in {"33"}:
+        return TYPE_CODE_INVOICE
+    return None
 
-    # Direct id / code match against catalog
+
+def type_id_from_raw(db: Session, raw: object) -> int | None:
+    """Map label/code/id input to canonical dte_types.id (33/34/39/61)."""
+    text = str(raw or "").strip()
+    needle = _norm(text)
+
+    # Empty / voucher / unknown free-text → Boleta before any catalog lookup.
+    alias = _alias_type_code(text)
+    if not text or needle in {"voucher", "vale", "comprobante", "unknown", "otro", "other", "n/a", "-"}:
+        return type_id_by_code(db, alias or TYPE_CODE_RECEIPT)
+    if "voucher" in needle or "vale" in needle:
+        return type_id_by_code(db, TYPE_CODE_RECEIPT)
+
+    # Direct id / code match against canonical catalog only
     if text.isdigit():
         by_id = db.query(DteTypes).filter(DteTypes.id == int(text)).first()
-        if by_id is not None:
+        if by_id is not None and str(by_id.code) in CANONICAL_TYPE_CODES:
             return int(by_id.id)
         by_code = type_id_by_code(db, text)
         if by_code is not None:
@@ -56,15 +90,16 @@ def type_id_from_raw(db: Session, raw: object) -> int | None:
 
     by_code = type_id_by_code(db, text)
     if by_code is not None:
-        return by_code
+        row = db.query(DteTypes).filter(DteTypes.id == by_code).first()
+        if row is not None and str(row.code) in CANONICAL_TYPE_CODES:
+            return by_code
+        # Leftover non-canonical rows (e.g. voucher) → Boleta
+        return type_id_by_code(db, TYPE_CODE_RECEIPT)
 
-    needle = _norm(text)
-    rows = db.query(DteTypes).all()
-    # Exact normalized name/code
+    rows = db.query(DteTypes).filter(DteTypes.code.in_(sorted(CANONICAL_TYPE_CODES))).all()
     for row in rows:
         if _norm(row.code) == needle or _norm(row.name) == needle:
             return int(row.id)
-    # Contained match (FNS "Boleta electrónica" vs catalog "Boleta")
     for row in rows:
         code_n = _norm(row.code)
         name_n = _norm(row.name)
@@ -72,25 +107,19 @@ def type_id_from_raw(db: Session, raw: object) -> int | None:
             return int(row.id)
         if name_n and (name_n in needle or needle in name_n):
             return int(row.id)
+
+    if alias:
+        return type_id_by_code(db, alias)
     return None
 
 
 def ensure_type_id(db: Session, raw: object) -> int | None:
-    """Resolve type from catalog; if missing, create from the raw FNS/SII label."""
+    """Resolve type from canonical catalog only. Never create Voucher/unknown rows."""
     existing = type_id_from_raw(db, raw)
     if existing is not None:
         return existing
-    label = str(raw or "").strip()
-    if not label:
-        return None
-    code = _slug_code(label)
-    row = db.query(DteTypes).filter(DteTypes.code == code).first()
-    if row is not None:
-        return int(row.id)
-    row = DteTypes(code=code, name=label[:80])
-    db.add(row)
-    db.flush()
-    return int(row.id)
+    alias = _alias_type_code(raw) or TYPE_CODE_RECEIPT
+    return type_id_by_code(db, alias)
 
 
 def paid_status_id(db: Session) -> int | None:

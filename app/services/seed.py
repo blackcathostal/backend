@@ -569,6 +569,28 @@ def seed_database(db: Session) -> None:
     ).all():
         db.delete(legacy)
 
+    # Remap FNS extras (Voucher, unknown, …) to Boleta and drop non-canonical types.
+    receipt_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_RECEIPT)
+    canonical = set(dte_catalog.CANONICAL_TYPE_CODES)
+    if receipt_id:
+        extras = [
+            row
+            for row in db.query(DteTypes).all()
+            if str(row.code or "").strip() not in canonical
+        ]
+        extra_ids = [int(row.id) for row in extras]
+        if extra_ids:
+            db.query(TaxDocuments).filter(TaxDocuments.dte_type_id.in_(extra_ids)).update(
+                {TaxDocuments.dte_type_id: receipt_id},
+                synchronize_session=False,
+            )
+            for extra in extras:
+                db.delete(extra)
+        db.query(TaxDocuments).filter(TaxDocuments.dte_type_id.is_(None)).update(
+            {TaxDocuments.dte_type_id: receipt_id},
+            synchronize_session=False,
+        )
+
     db.commit()
     ensure_default_terms(db)
     # Refresh packaged Instagram rates cache when defaults are newer.
