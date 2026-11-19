@@ -313,6 +313,38 @@ def _period_from_issued_at(issued_at: date | None) -> str:
     return f"{issued_at.month:02d}-{issued_at.year}"
 
 
+def _received_auto_paid_through(today: date | None = None) -> date:
+    """
+    Received docs on or before this day are auto Imputada Pagada.
+
+    Once October starts, September of that year (and earlier) is closed as paid.
+    Before October, the cutoff stays last year's September 30.
+    """
+    day = today or date.today()
+    year = day.year if day.month >= 10 else day.year - 1
+    return date(year, 9, 30)
+
+
+def _mark_received_through_cutoff_paid(db: Session) -> int:
+    """Set Imputada Pagada on received docs dated through the September cutoff."""
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+    paid_id = dte_catalog.paid_status_id(db)
+    if received_id is None or paid_id is None:
+        return 0
+    cutoff = _received_auto_paid_through()
+    updated = (
+        db.query(TaxDocuments)
+        .filter(
+            TaxDocuments.dte_version_id == int(received_id),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at <= cutoff,
+            TaxDocuments.status_id != int(paid_id),
+        )
+        .update({TaxDocuments.status_id: int(paid_id)}, synchronize_session=False)
+    )
+    return int(updated or 0)
+
+
 def _is_missing_customer_name(company_name: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(company_name or "").strip()).lower()
     for src, dst in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ñ", "n")):
@@ -684,10 +716,20 @@ def _upsert_docs(
         ):
             payment_status_id = dte_catalog.paid_status_id(db) or payment_status_id
 
+        paid_id = dte_catalog.paid_status_id(db)
+        received_auto_paid = (
+            version_id == received_id
+            and issued_at is not None
+            and issued_at <= _received_auto_paid_through()
+            and paid_id is not None
+        )
+
         is_new = row is None
         if is_new:
             if version_id == received_id:
-                initial_status_id = under_review_status_id
+                initial_status_id = (
+                    int(paid_id) if received_auto_paid else under_review_status_id
+                )
             else:
                 initial_status_id = payment_status_id or default_status_id
             row = TaxDocuments(
@@ -708,9 +750,12 @@ def _upsert_docs(
         elif is_new or row.period is None:
             row.period = row.period or ""
         # Issued: update paid/pending from FNS. Received: keep user classification;
-        # only default En revisión when status is empty.
+        # only default En revisión when status is empty. Exception: through September
+        # cutoff → Imputada Pagada (closed months).
         if version_id == issued_id and payment_status_id:
             row.status_id = payment_status_id
+        elif received_auto_paid:
+            row.status_id = int(paid_id)
         elif not row.status_id:
             row.status_id = (
                 under_review_status_id
@@ -1165,6 +1210,16 @@ async def refresh_tax_documents(
                 note = (
                     f"Se asignó Hospedaje a {accounts_assigned} documento(s) "
                     "sin cuenta contable."
+                )
+                warning = f"{warning} · {note}" if warning else note
+        if received_id is not None and int(version_id) == int(received_id):
+            paid_marked = _mark_received_through_cutoff_paid(db)
+            if paid_marked:
+                db.commit()
+                cutoff = _received_auto_paid_through()
+                note = (
+                    f"Se marcó Imputada Pagada en {paid_marked} recibida(s) "
+                    f"hasta {cutoff.strftime('%d-%m-%Y')}."
                 )
                 warning = f"{warning} · {note}" if warning else note
     except IntegrityError as exc:
