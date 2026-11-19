@@ -1080,8 +1080,8 @@ def _scrape_tax_documents_sync(
         with BillingPortalWebClient() as web:
             docs = web.fetch_received(date_from, date_to)
     else:
-        # Emitidas = FNS Ingresos-Cobros (vendido / cobrado / pendiente) for Track + EERR.
-        source = "extranet_ingresos_cobros"
+        # Issued Track = FNS income-collections (sold / collected / pending) for Track + EERR.
+        source = "extranet_income_collections"
         with TaxDocumentsFetchClient() as fetch_client:
             docs = fetch_client.fetch_issued(date_from, date_to)
 
@@ -1131,8 +1131,8 @@ async def refresh_tax_documents(
     accounts_assigned = 0
     try:
         issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
-        # Replace Emitidas in the refreshed window so Cobros/portal leftovers
-        # do not double-count beside Ingresos-Cobros reservation rows.
+        # Replace issued docs in the refreshed window so prior Cobros/portal
+        # leftovers do not double-count beside income-collections reservation rows.
         if issued_id is not None and int(version_id) == int(issued_id):
             (
                 db.query(TaxDocuments)

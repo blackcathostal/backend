@@ -357,7 +357,7 @@ class TaxDocumentsFetchClient:
             response = http.post(f"{self.client.base_url}/es/{module}", data=payload)
         return response.text
 
-    def _normalize_cobro_row(self, row: dict[str, str], *, direction: str) -> dict[str, Any] | None:
+    def _normalize_collection_row(self, row: dict[str, str], *, direction: str) -> dict[str, Any] | None:
         doc_type = _find_col(row, "Tipo documento", "Tipo")
         folio = _find_col(row, "Nº documento", "N° documento", "No documento", "Folio")
         folio = re.sub(r"\s+", "", folio)
@@ -373,7 +373,7 @@ class TaxDocumentsFetchClient:
         concepts = _concept_breakdown(row)
         has_concepts = bool(concepts)
         # Cobros rows are payments: blank Restante usually means that payment settled.
-        # Final paid/pending is refined with Ingresos-Cobros Pendiente by locator.
+        # Final paid/pending is refined with income-collections pending by locator.
         if remaining_raw:
             paid = remaining_amount <= 0.5 and amount > 0
         else:
@@ -411,23 +411,24 @@ class TaxDocumentsFetchClient:
             "has_concepts": has_concepts,
             "concepts": concepts,
             "pms_ref": locator[:120],
-            "pms_class": "FNS Cobros",
+            "pms_class": "FNS Collections",
             "sales_channel": channel[:80],
             "raw": {
                 **row,
                 "concepts": concepts,
                 "payment_status_code": status_code,
                 "remaining_amount": remaining_amount,
-                "source_report": "Cobros",
+                "source_report": "collections",
+                "fns_action": "Cobros",
                 "doc_type": raw_type,
                 "sales_channel": channel,
             },
         }
 
-    def _ingresos_cobros_index(
+    def _income_collections_index(
         self, date_from: date, date_to: date
     ) -> tuple[dict[str, str], dict[str, float]]:
-        """From Ingresos-Cobros: locator -> guest name, locator -> pending amount (CLP)."""
+        """From FNS income-collections: locator -> guest name, locator -> pending (CLP)."""
         html = self._post_report(
             module="Informes",
             action="ingresoscobros",
@@ -474,14 +475,14 @@ class TaxDocumentsFetchClient:
     def _client_name_by_locator(
         self, date_from: date, date_to: date
     ) -> dict[str, str]:
-        """Map reservation locator -> customer name from Ingresos-Cobros."""
-        names, _pending = self._ingresos_cobros_index(date_from, date_to)
+        """Map reservation locator -> customer name from FNS income-collections."""
+        names, _pending = self._income_collections_index(date_from, date_to)
         return names
 
     def _apply_locator_payment_status(
         self, doc: dict[str, Any], *, pending_by_locator: dict[str, float]
     ) -> None:
-        """Override Cobros paid/pending using reservation Pendiente from Ingresos-Cobros."""
+        """Override collections paid/pending using reservation pending from income-collections."""
         locator = re.sub(r"\s+", "", str(doc.get("pms_ref") or ""))
         if not locator:
             return
@@ -512,7 +513,7 @@ class TaxDocumentsFetchClient:
         locator = str(doc.get("pms_ref") or "").strip()
         ingreso_name = client_by_locator.get(locator, "")
         cobro_name = str(doc.get("company_name") or "").strip()
-        # Prefer real guest name from Ingresos-Cobros when Cobros has empty/generic name.
+        # Prefer real guest name from income-collections when collections name is empty/generic.
         if ingreso_name and (
             not cobro_name or _norm(cobro_name) in {"consumos consumos", "consumos"}
         ):
@@ -563,8 +564,8 @@ class TaxDocumentsFetchClient:
             current["company_name"] = doc["company_name"]
             current["counterpart_name"] = doc["company_name"]
 
-    def _ingresos_cobros_rows(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        """Raw CLP rows from Ingresos-Cobros."""
+    def _income_collections_rows(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
+        """Raw CLP rows from FNS income-collections report."""
         html = self._post_report(
             module="Informes",
             action="ingresoscobros",
@@ -597,19 +598,20 @@ class TaxDocumentsFetchClient:
             rows.append(row)
         return rows
 
-    def _ingresos_cobros_sales_totals(
+    def _income_collections_sales_totals(
         self, date_from: date, date_to: date
     ) -> dict[str, float]:
-        """Sum Imp. Total / Cobrado / Pendiente from Ingresos-Cobros (CLP rows only)."""
-        totals = {"vendido": 0.0, "cobrado": 0.0, "pendiente": 0.0, "facturado": 0.0}
-        for row in self._ingresos_cobros_rows(date_from, date_to):
-            totals["vendido"] += _money(row.get("Imp. Total"))
-            totals["cobrado"] += _money(row.get("Cobrado"))
-            totals["pendiente"] += _money(row.get("Pendiente"))
-            totals["facturado"] += _money(row.get("Facturado"))
+        """Sum sold / collected / pending / invoiced from FNS income-collections (CLP)."""
+        totals = {"sold": 0.0, "collected": 0.0, "pending": 0.0, "invoiced": 0.0}
+        for row in self._income_collections_rows(date_from, date_to):
+            # FNS HTML column labels stay Spanish; map into English keys here.
+            totals["sold"] += _money(row.get("Imp. Total"))
+            totals["collected"] += _money(row.get("Cobrado"))
+            totals["pending"] += _money(row.get("Pendiente"))
+            totals["invoiced"] += _money(row.get("Facturado"))
         return totals
 
-    def _iter_cobros_rows(
+    def _iter_collection_rows(
         self, date_from: date, date_to: date
     ) -> Iterator[dict[str, str]]:
         for window_from, window_to in _month_windows(date_from, date_to):
@@ -622,7 +624,7 @@ class TaxDocumentsFetchClient:
             for row in _parse_html_table(html, "Informe de cobros"):
                 yield row
 
-    def _cobros_concept_account_sums(
+    def _collection_concept_account_sums(
         self,
         date_from: date,
         date_to: date,
@@ -725,27 +727,25 @@ class TaxDocumentsFetchClient:
         accounts: list,
     ) -> dict[str, Any]:
         """
-        EERR ingresos for the month: Ingresos-Cobros vendido is the source of truth.
+        Legacy helper: income-collections sold total split by collections concepts.
 
-        Cobros concept columns only provide the mix to split that vendido by account.
-        If Cobros concepts exceed vendido, amounts are scaled down so rows sum to vendido.
-        Gap below vendido is remanente (pending + unclassified).
+        Prefer issued tax_documents for EERR rows; this remains for KPI fallbacks.
         """
         if date_to < date_from:
             raise ExtranetWebError("Rango de fechas inválido")
-        sales = self._ingresos_cobros_sales_totals(date_from, date_to)
-        by_code_raw = self._cobros_concept_account_sums(
+        sales = self._income_collections_sales_totals(date_from, date_to)
+        by_code_raw = self._collection_concept_account_sums(
             date_from, date_to, accounts=accounts
         )
         concepts_raw_total = float(sum(float(v or 0) for v in by_code_raw.values()))
-        vendido = float(sales.get("vendido") or 0)
-        cobrado = float(sales.get("cobrado") or 0)
-        pendiente = float(sales.get("pendiente") or 0)
+        sold = float(sales.get("sold") or 0)
+        collected = float(sales.get("collected") or 0)
+        pending = float(sales.get("pending") or 0)
 
-        if vendido > 0.5 and concepts_raw_total > vendido + 0.5:
-            by_code = _scale_amounts_to_target(by_code_raw, vendido)
+        if sold > 0.5 and concepts_raw_total > sold + 0.5:
+            by_code = _scale_amounts_to_target(by_code_raw, sold)
             concepts_total = float(sum(by_code.values()))
-            scale = vendido / concepts_raw_total if concepts_raw_total else 1.0
+            scale = sold / concepts_raw_total if concepts_raw_total else 1.0
         else:
             by_code = {
                 str(code): float(amount or 0) for code, amount in by_code_raw.items()
@@ -753,21 +753,21 @@ class TaxDocumentsFetchClient:
             concepts_total = concepts_raw_total
             scale = 1.0
 
-        remanente = round(max(vendido - concepts_total, 0.0))
-        pending_sales = round(min(max(pendiente, 0.0), remanente))
-        unclassified_collections = round(max(remanente - pending_sales, 0.0))
+        remainder = round(max(sold - concepts_total, 0.0))
+        pending_sales = round(min(max(pending, 0.0), remainder))
+        unclassified_collections = round(max(remainder - pending_sales, 0.0))
         return {
-            "vendido": vendido,
-            "cobrado": cobrado,
-            "pendiente": pendiente,
-            "facturado": float(sales.get("facturado") or 0),
+            "sold": sold,
+            "collected": collected,
+            "pending": pending,
+            "invoiced": float(sales.get("invoiced") or 0),
             "concepts_total": concepts_total,
             "concepts_raw_total": concepts_raw_total,
             "scale": float(scale),
             "pending_sales": float(pending_sales),
             "unclassified_collections": float(unclassified_collections),
             "by_account_code": by_code,
-            "source": "extranet_vendido",
+            "source": "extranet_income_collections",
         }
 
     def fetch_income_detail_lines(
@@ -782,9 +782,9 @@ class TaxDocumentsFetchClient:
         """
         Drill-down lines for EERR:
         - account: Cobros concept amounts mapped to account_code
-        - pending: Ingresos-Cobros rows with Pendiente > 0
-        - collected: Ingresos-Cobros rows with Cobrado > 0
-        - unclassified: Cobros importe not covered by concept columns
+        - pending: income-collections rows with pending > 0
+        - collected: income-collections rows with collected > 0
+        - unclassified: collections amount not covered by concept columns
         """
         from app.services.accounting_concept_map import account_code_for_concept
 
@@ -795,7 +795,7 @@ class TaxDocumentsFetchClient:
         if kind in {"pending", "collected"}:
             amount_key = "Pendiente" if kind == "pending" else "Cobrado"
             concept_label = "Pendiente" if kind == "pending" else "Cobrado"
-            for row in self._ingresos_cobros_rows(date_from, date_to):
+            for row in self._income_collections_rows(date_from, date_to):
                 amount = _money(row.get(amount_key))
                 if amount <= 0.5:
                     continue
@@ -811,7 +811,7 @@ class TaxDocumentsFetchClient:
                     {
                         "issued_at": arrival or None,
                         "folio": "",
-                        # Empty Documento in Ingresos-Cobros ⇒ no DTE/boleta yet (not in Emitidas).
+                        # Empty FNS Documento ⇒ no tax doc yet (user-visible Spanish label OK).
                         "doc_type": doc_blob or "Sin documento emitido",
                         "company_name": guest,
                         "locator": locator,
@@ -823,18 +823,18 @@ class TaxDocumentsFetchClient:
 
         scale = 1.0
         if kind == "account":
-            sales = self._ingresos_cobros_sales_totals(date_from, date_to)
-            vendido = float(sales.get("vendido") or 0)
-            by_code_raw = self._cobros_concept_account_sums(
+            sales = self._income_collections_sales_totals(date_from, date_to)
+            sold = float(sales.get("sold") or 0)
+            by_code_raw = self._collection_concept_account_sums(
                 date_from, date_to, accounts=accounts
             )
             concepts_raw_total = float(
                 sum(float(v or 0) for v in by_code_raw.values())
             )
-            if vendido > 0.5 and concepts_raw_total > vendido + 0.5:
-                scale = vendido / concepts_raw_total
+            if sold > 0.5 and concepts_raw_total > sold + 0.5:
+                scale = sold / concepts_raw_total
 
-        for row in self._iter_cobros_rows(date_from, date_to):
+        for row in self._iter_collection_rows(date_from, date_to):
             concepts = _concept_breakdown(row, accounts=accounts)
             concepts_sum = float(sum(float(v or 0) for v in concepts.values()))
             importe = _money(
@@ -876,7 +876,7 @@ class TaxDocumentsFetchClient:
                 )
                 continue
 
-            # account drill-down (scaled to month vendido when Cobros exceed it)
+            # account drill-down (scaled to month sold when collections exceed it)
             if not code:
                 continue
             for header, amount in concepts.items():
@@ -899,12 +899,12 @@ class TaxDocumentsFetchClient:
                 )
         return lines
 
-    def _normalize_ingresos_cobros_row(
+    def _normalize_income_collections_row(
         self, row: dict[str, Any]
     ) -> dict[str, Any] | None:
         """
-        One Emitidas row per Ingresos-Cobros reservation:
-        Imp. Total = vendido, Cobrado/Pendiente → paid vs pending.
+        One issued Track row per FNS income-collections reservation.
+        Imp. Total = sold; Cobrado/Pendiente → paid vs pending.
         """
         reservation_id = re.sub(r"\s+", "", str(row.get("ID") or ""))
         locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
@@ -913,11 +913,11 @@ class TaxDocumentsFetchClient:
             return None
 
         total = float(_money(row.get("Imp. Total")) or 0)
-        cobrado = float(_money(row.get("Cobrado")) or 0)
-        pendiente = float(_money(row.get("Pendiente")) or 0)
-        if abs(total) <= 0.5 and abs(cobrado) <= 0.5:
+        collected = float(_money(row.get("Cobrado")) or 0)
+        pending = float(_money(row.get("Pendiente")) or 0)
+        if abs(total) <= 0.5 and abs(collected) <= 0.5:
             return None
-        amount = total if abs(total) > 0.5 else cobrado
+        amount = total if abs(total) > 0.5 else collected
 
         arrival = _parse_date(row.get("Llegada"))
         departure = _parse_date(row.get("Salida"))
@@ -925,18 +925,21 @@ class TaxDocumentsFetchClient:
         guest = re.sub(r"\s+", " ", str(row.get("Datos cliente") or "")).strip()
         channel = re.sub(r"\s+", " ", str(row.get("Canal") or "")).strip()
         doc_blob = re.sub(r"\s+", " ", str(row.get("Documento") or "")).strip(" ,")
-        # Reservation sales: typed as boleta when FNS lists documentos, else voucher.
+        # Reservation sales: receipt when FNS lists documents, else voucher.
         type_code = (
             dte_catalog.TYPE_CODE_RECEIPT
             if doc_blob
             else dte_catalog.TYPE_CODE_VOUCHER
         )
+        # User-visible doc label (Spanish OK).
         doc_type_label = doc_blob or "Sin documento emitido"
-        status_code = "paid" if pendiente <= 0.5 and cobrado > 0.5 else "pending_payment"
+        status_code = (
+            "paid" if pending <= 0.5 and collected > 0.5 else "pending_payment"
+        )
         net_amount, exempt_amount, tax_amount = _split_cl_iva(
             amount, doc_type=doc_type_label
         )
-        # Default concept → Hospedaje via accounting_accounts.concept_labels.
+        # Catalog concept_labels match FNS lodging column ("Alojamiento").
         concepts = {"Alojamiento": amount}
         return {
             "dte_type_code": type_code,
@@ -957,17 +960,18 @@ class TaxDocumentsFetchClient:
             "has_concepts": True,
             "concepts": concepts,
             "pms_ref": locator[:120],
-            "pms_class": "FNS Ingresos-Cobros",
+            "pms_class": "FNS Income Collections",
             "sales_channel": channel[:80],
             "raw": {
                 **{str(k): v for k, v in row.items()},
                 "concepts": concepts,
                 "payment_status_code": status_code,
-                "vendido_amount": amount,
-                "cobrado_amount": cobrado,
-                "pendiente_amount": pendiente,
-                "remaining_amount": pendiente,
-                "source_report": "ingresoscobros",
+                "sold_amount": amount,
+                "collected_amount": collected,
+                "pending_amount": pending,
+                "remaining_amount": pending,
+                "source_report": "income_collections",
+                "fns_action": "ingresoscobros",
                 "doc_type": doc_type_label,
                 "sales_channel": channel,
             },
@@ -975,7 +979,7 @@ class TaxDocumentsFetchClient:
 
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """
-        Emitidas refresh source: FNS Ingresos-Cobros (vendido / cobrado / pendiente).
+        Issued Track refresh: FNS income-collections (sold / collected / pending).
 
         One row per reservation in the period; month windows keep large ranges stable.
         """
@@ -983,8 +987,8 @@ class TaxDocumentsFetchClient:
             raise ExtranetWebError("Rango de fechas inválido")
         merged: dict[str, dict[str, Any]] = {}
         for window_from, window_to in _month_windows(date_from, date_to):
-            for row in self._ingresos_cobros_rows(window_from, window_to):
-                doc = self._normalize_ingresos_cobros_row(row)
+            for row in self._income_collections_rows(window_from, window_to):
+                doc = self._normalize_income_collections_row(row)
                 if not doc:
                     continue
                 issued = _parse_date(doc.get("issued_at"))

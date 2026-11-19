@@ -8,9 +8,9 @@ class EerrAccountRow(BaseModel):
     code: str = ""
     name: str = ""
     total: float = 0
-    # account = chart row; pending / unclassified = remanente detail (not a CoA dump)
+    # account = chart row; pending / unclassified = remainder detail (not a CoA dump)
     row_kind: str = "account"
-    # Expense grouping label from accounting_accounts.category (e.g. Remuneraciones).
+    # Expense grouping label from accounting_accounts.category (UI may be Spanish).
     category: str = ""
 
 
@@ -19,21 +19,21 @@ class EerrReportOut(BaseModel):
     section_title: str = "Ingresos"
     rows: list[EerrAccountRow] = Field(default_factory=list)
     grand_total: float = 0
-    # Chilean VAT breakdown of grand_total (bruto): neto + IVA ≈ bruto.
+    # Chilean VAT breakdown of grand_total (gross): net + tax ≈ gross.
     grand_net: float = 0
     grand_tax: float = 0
     expense_section_title: str = "Egresos"
     expense_rows: list[EerrAccountRow] = Field(default_factory=list)
     expenses_total: float = 0
     result_total: float = 0
-    vendido: float = 0
-    cobrado: float = 0
-    pendiente: float = 0
-    facturado: float = 0
+    sold: float = 0
+    collected: float = 0
+    pending: float = 0
+    invoiced: float = 0
     concepts_total: float = 0
     pending_sales: float = 0
     unclassified_collections: float = 0
-    source: str = "extranet_vendido"
+    source: str = "tax_documents_issued"
 
 
 class EerrConsolidatedRow(BaseModel):
@@ -54,7 +54,7 @@ class EerrConsolidatedOut(BaseModel):
     rows: list[EerrConsolidatedRow] = Field(default_factory=list)
     column_totals: dict[str, float] = Field(default_factory=dict)
     grand_total: float = 0
-    source: str = "extranet_vendido"
+    source: str = "tax_documents_issued"
 
 
 class EerrDetailLine(BaseModel):

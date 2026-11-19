@@ -83,7 +83,7 @@ def _parse_period(value: str | None, *, fallback: date | None = None) -> date:
 
 
 def _period_key(day: date) -> str:
-    """Canonical period key for UI/API: MM-YYYY (same as Emitidas Track)."""
+    """Canonical period key for UI/API: MM-YYYY (same as issued Track)."""
     return f"{day.month:02d}-{day.year:04d}"
 
 
@@ -206,7 +206,7 @@ def _commission_fees_by_account_id(
     }
     totals: dict[int, float] = {}
     for channel, fee in by_channel.items():
-        # Do not fall through to ingreso catch-all (*) for OTA channel names.
+        # Do not fall through to income catch-all (*) for OTA channel names.
         code = account_code_for_concept(channel, accounts, allow_catch_all=False)
         if not code:
             continue
@@ -385,7 +385,7 @@ def _income_rows_from_issued(
     *,
     unassigned_total: float = 0.0,
 ) -> list[EerrAccountRow]:
-    """Build ingreso rows from Emitidas assigned totals (mirror of recibidas egresos)."""
+    """Build income rows from issued assigned totals (mirror of received expenses)."""
     rows: list[EerrAccountRow] = [
         EerrAccountRow(
             account_id=int(account.id),
@@ -676,9 +676,9 @@ def get_eerr_report(
     """
     Income statement for one month.
 
-    Ingresos ← Emitidas (boletas/facturas/NC) by account — same idea as Recibidas for egresos.
-    Egresos ← Recibidas + RRHH + OTA commissions (Informes/Comisiones).
-    Cobrado/Pendiente KPIs still come from FNS Ingresos-Cobros when available.
+    Income ← issued tax documents by account (same idea as received docs for expenses).
+    Expenses ← received docs + HR + OTA commissions (FNS commissions report).
+    Collected/pending KPIs still come from FNS income-collections when available.
     """
     month_start = _parse_period(period)
     # Cap "this month" to today so mid-month matches FNS open range.
@@ -705,25 +705,25 @@ def get_eerr_report(
     concepts_total = float(sum(float(v or 0) for v in issued_by_account.values()))
     unclassified_collections = float(unassigned_total)
     pending_sales = 0.0
-    vendido = float(grand_total)
-    cobrado = 0.0
-    pendiente = 0.0
+    sold = float(grand_total)
+    collected = 0.0
+    pending = 0.0
 
     # Optional cash KPIs from FNS (do not drive income rows).
     try:
-        sales = TaxDocumentsFetchClient()._ingresos_cobros_sales_totals(
+        sales = TaxDocumentsFetchClient()._income_collections_sales_totals(
             month_start, month_finish
         )
-        cobrado = float(sales.get("cobrado") or 0)
-        pendiente = float(sales.get("pendiente") or 0)
+        collected = float(sales.get("collected") or 0)
+        pending = float(sales.get("pending") or 0)
     except ExtranetWebError as exc:
-        logger.warning("EERR cobrado/pendiente unavailable: %s", exc)
+        logger.warning("EERR collected/pending unavailable: %s", exc)
 
-    # Facturado KPI: facturas/NC 33/34/61 (assigned + unassigned).
+    # Invoiced KPI: invoices/credit notes 33/34/61 (assigned + unassigned).
     invoice_by_account = _invoice_totals_by_account_id(
         db, date_from=month_start, date_to=month_finish
     )
-    facturado = float(sum(invoice_by_account.values()))
+    invoiced = float(sum(invoice_by_account.values()))
     unassigned_invoice_lines = _issued_tax_document_lines(
         db,
         date_from=month_start,
@@ -731,7 +731,7 @@ def get_eerr_report(
         invoice_only=True,
         unassigned_only=True,
     )
-    facturado += float(
+    invoiced += float(
         sum(float(item.get("amount") or 0) for item in unassigned_invoice_lines)
     )
 
@@ -756,10 +756,10 @@ def get_eerr_report(
         expense_rows=expense_rows,
         expenses_total=expenses_total,
         result_total=result_total,
-        vendido=vendido,
-        cobrado=cobrado,
-        pendiente=pendiente,
-        facturado=facturado,
+        sold=sold,
+        collected=collected,
+        pending=pending,
+        invoiced=invoiced,
         concepts_total=concepts_total,
         pending_sales=pending_sales,
         unclassified_collections=unclassified_collections,
@@ -776,7 +776,7 @@ def get_eerr_detail(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrDetailOut:
-    """Drill-down lines for an EERR account or remanente row."""
+    """Drill-down lines for an EERR account or remainder row."""
     month_start = _parse_period(period)
     today = date.today()
     month_finish = min(_month_end(month_start), today) if (
@@ -909,7 +909,7 @@ def get_eerr_detail(
             unassigned_only=True,
         )
     else:
-        # pending / collected: still from FNS Ingresos-Cobros
+        # pending / collected: still from FNS income-collections
         try:
             client = TaxDocumentsFetchClient()
             raw_lines = client.fetch_income_detail_lines(
@@ -943,7 +943,7 @@ def get_eerr_consolidated(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrConsolidatedOut:
-    """Income statement by account with one total column per month (Emitidas)."""
+    """Income statement by account with one total column per month (issued docs)."""
     today = date.today()
     default_to = date(today.year, today.month, 1)
     default_from = date(today.year, 1, 1)
