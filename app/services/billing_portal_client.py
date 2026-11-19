@@ -256,7 +256,16 @@ class BillingPortalClient:
         dte_type_code = self.resolve_dte_type_code(raw_type, book_type=book_type)
         dte_version_code = self.resolve_dte_version_code(direction)
         identification_number = str(
-            pick("rut", "rutcliente", "rut_cliente", "rut proveedor", "rutproveedor") or ""
+            pick(
+                "rut",
+                "rutcliente",
+                "rut_cliente",
+                "rutreceptor",
+                "rut_receptor",
+                "rut proveedor",
+                "rutproveedor",
+            )
+            or ""
         ).strip()
         company_name = str(
             pick(
@@ -265,10 +274,20 @@ class BillingPortalClient:
                 "razon_social",
                 "nombre",
                 "cliente",
+                "receptor",
                 "proveedor",
             )
             or ""
         ).strip()
+        if not identification_number:
+            # Recover RUT embedded in the name/cell text from portal exports.
+            rut_match = re.search(
+                r"\b(\d{1,2}(?:\.\d{3}){2}-[\dkK]|\d{7,8}-[\dkK])\b",
+                f"{identification_number} {company_name} {pick('documento') or ''}",
+                flags=re.I,
+            )
+            if rut_match:
+                identification_number = rut_match.group(1).strip()
         return {
             "dte_type_code": dte_type_code,
             "dte_version_code": dte_version_code,

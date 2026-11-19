@@ -137,6 +137,31 @@ class BillingPortalWebClient:
             )
 
     @staticmethod
+    def _extract_chilean_rut(value: object) -> str:
+        """Pull a Chilean RUT from HTML/text (ventas grid often embeds it outside seenopago)."""
+        text = unescape(str(value or ""))
+        # Prefer explicit attributes / JS hooks used by the portal.
+        for pattern in (
+            r'data-rut=["\']([^"\']+)["\']',
+            r"(?:seenopago|vercliente|verreceptor|verproveedor|detallecliente)\(\s*['\"]([^'\"]+)['\"]",
+            r"rut[=:]\s*['\"]?(\d{1,2}\.?\d{3}\.?\d{3}-[\dkK])",
+        ):
+            match = re.search(pattern, text, flags=re.I)
+            if match:
+                return re.sub(r"\s+", "", match.group(1)).strip()
+        match = re.search(
+            r"\b(\d{1,2}(?:\.\d{3}){2}-[\dkK])\b",
+            text,
+            flags=re.I,
+        )
+        if match:
+            return match.group(1).strip()
+        match = re.search(r"\b(\d{7,8}-[\dkK])\b", text, flags=re.I)
+        if match:
+            return match.group(1).strip()
+        return ""
+
+    @staticmethod
     def _strip_html(value: str) -> str:
         text = re.sub(r"<[^>]+>", " ", value or "")
         text = unescape(text)
@@ -403,30 +428,39 @@ class BillingPortalWebClient:
                         )
                         if pdf_match:
                             cells["PDF_DATA"] = pdf_match.group(1).strip()
-                elif name == "RAZONSOCIAL":
-                    rut_match = re.search(
-                        r"seenopago\(['\"]([^'\"]+)['\"]\)",
-                        body,
-                        re.I,
-                    )
-                    if rut_match:
-                        cells["RUT"] = rut_match.group(1).strip()
-                    cells[name] = self._strip_html(body)
+                elif name in {"RAZONSOCIAL", "CLIENTE", "RECEPTOR", "NOMBRE"}:
+                    if not cells.get("RUT"):
+                        found = self._extract_chilean_rut(body)
+                        if found:
+                            cells["RUT"] = found
+                    cells["RAZONSOCIAL"] = self._strip_html(body)
+                elif name in {"RUT", "RUTCLIENTE", "RUTRECEPTOR", "RUT_CLIENTE"}:
+                    found = self._extract_chilean_rut(body) or self._strip_html(body)
+                    if found:
+                        cells["RUT"] = re.sub(r"\s+", "", found).strip()
                 else:
                     cells[name] = self._strip_html(body)
 
             folio = cells.get("FOLIO") or ""
-            rut = cells.get("RUT") or ""
+            rut = (
+                cells.get("RUT")
+                or self._extract_chilean_rut(cells.get("RAZONSOCIAL") or "")
+                or self._extract_chilean_rut(row_html)
+            )
             if not folio and not rut:
                 continue
             fecha = self._parse_local_date(cells.get("FECHA") or "") or cells.get("FECHA")
+            company = cells.get("RAZONSOCIAL") or cells.get("CLIENTE") or ""
+            # Drop trailing branch tags like [CASA MATRIZ] from display name only when RUT exists.
             rows.append(
                 {
                     "folio": folio,
                     "tipo": cells.get("DOCUMENTO") or "",
                     "fecha": fecha,
-                    "razonsocial": cells.get("RAZONSOCIAL") or "",
+                    "razonsocial": company,
                     "montototal": cells.get("TOTAL") or "",
+                    "montoneto": cells.get("NETO") or cells.get("MONTONETO") or "",
+                    "montoiva": cells.get("IVA") or cells.get("MONTOIVA") or "",
                     "rut": rut,
                     "pdf_data": cells.get("PDF_DATA") or "",
                 }
