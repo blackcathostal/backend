@@ -53,8 +53,8 @@ class TaxDocuments(Base):
     __tablename__ = "tax_documents"
     __table_args__ = (
         UniqueConstraint(
-            "dte_version_id",
             "dte_type_id",
+            "dte_version_id",
             "folio",
             "identification_number",
             name="uq_tax_documents_doc",
@@ -62,21 +62,27 @@ class TaxDocuments(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    dte_version_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("dte_versions.id"),
-        nullable=False,
-        index=True,
-    )
     dte_type_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("dte_types.id"),
         nullable=True,
         index=True,
     )
+    dte_version_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("dte_versions.id"),
+        nullable=False,
+        index=True,
+    )
     status_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("dte_statuses.id"),
+        nullable=True,
+        index=True,
+    )
+    accounting_account_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("accounting_accounts.id"),
         nullable=True,
         index=True,
     )
@@ -103,3 +109,4 @@ class TaxDocuments(Base):
     dte_type = relationship("DteTypes")
     dte_version = relationship("DteVersions")
     status = relationship("DteStatuses")
+    accounting_account = relationship("AccountingAccounts")

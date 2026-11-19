@@ -30,16 +30,19 @@ class DteVersionOut(BaseModel):
 
 class TaxDocumentOut(BaseModel):
     id: int
-    dte_version_id: int
-    dte_version_code: str = ""
-    dte_version_name: str = ""
     dte_type_id: int | None = None
     dte_type_code: str = ""
     dte_type_name: str = ""
+    dte_version_id: int
+    dte_version_code: str = ""
+    dte_version_name: str = ""
     status_id: int | None = None
     status_name: str = ""
     status_code: str = ""
     status_tip_color: str = "red"
+    accounting_account_id: int | None = None
+    accounting_account_code: str = ""
+    accounting_account_name: str = ""
     period: str = ""
     folio: str
     identification_number: str = ""
@@ -63,6 +66,7 @@ class TaxDocumentOut(BaseModel):
 class TaxDocumentPatch(BaseModel):
     status_id: int | None = None
     period: str | None = Field(default=None, max_length=40)
+    accounting_account_id: int | None = None
 
 
 class TaxDocumentRefreshResult(BaseModel):

@@ -388,6 +388,54 @@ def _ensure_schema_patches() -> None:
                             "VARCHAR(80) NOT NULL DEFAULT ''"
                         )
                     )
+            if not column_exists("tax_documents", "accounting_account_id"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "ADD COLUMN accounting_account_id INT NULL"
+                    )
+                )
+                # Best-effort FK; ignore if accounting_accounts missing in odd envs.
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE tax_documents "
+                            "ADD CONSTRAINT fk_tax_documents_accounting_account "
+                            "FOREIGN KEY (accounting_account_id) "
+                            "REFERENCES accounting_accounts(id)"
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            # Column order: dte_type_id, then dte_version_id, then status, then account.
+            if column_exists("tax_documents", "dte_type_id"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "MODIFY COLUMN dte_type_id INT NULL AFTER id"
+                    )
+                )
+            if column_exists("tax_documents", "dte_version_id"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "MODIFY COLUMN dte_version_id INT NOT NULL AFTER dte_type_id"
+                    )
+                )
+            if column_exists("tax_documents", "status_id"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "MODIFY COLUMN status_id INT NULL AFTER dte_version_id"
+                    )
+                )
+            if column_exists("tax_documents", "accounting_account_id"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "MODIFY COLUMN accounting_account_id INT NULL AFTER status_id"
+                    )
+                )
 
 
 @asynccontextmanager

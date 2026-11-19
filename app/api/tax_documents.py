@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.accounting_accounts import AccountingAccounts
 from app.models.customers import Customers
 from app.models.suppliers import Suppliers
 from app.models.tax_documents import DteStatuses, TaxDocuments
@@ -35,6 +36,26 @@ router = APIRouter(tags=["tax-documents"])
 GENERIC_CUSTOMER_RUT = "66.666.666-6"
 GENERIC_CUSTOMER_NAME = "Sin cliente"
 _GENERIC_NAME_HINTS = {"", "consumos", "consumos consumos"}
+
+# FNS Cobros concept columns → chart of accounts code (ingresos).
+_CONCEPT_ACCOUNT_CODES = (
+    ("aloj", "4101"),
+    ("lavan", "4130"),
+    ("parking", "4103"),
+    ("transfer", "4120"),
+    ("tour", "4120"),
+    ("bar", "4102"),
+    ("caf", "4102"),
+    ("frig", "4102"),
+    ("desay", "4102"),
+    ("deliv", "4102"),
+    ("refri", "4102"),
+    ("amen", "4110"),
+    ("sauna", "4110"),
+    ("varios", "4190"),
+    ("tasas", "4190"),
+)
+_DEFAULT_ISSUED_ACCOUNT_CODE = "4101"
 
 
 def _extract_pdf_token(payload: object) -> str:
@@ -167,6 +188,42 @@ def _dte_type_name_es(*, code: str = "", name: str = "") -> str:
     return "Boleta"
 
 
+def _concept_account_code(concepts: dict | None) -> str:
+    """Pick account code from the concept with the largest absolute amount."""
+    rows = concepts if isinstance(concepts, dict) else {}
+    best_name = ""
+    best_amount = 0.0
+    for name, amount in rows.items():
+        value = abs(float(amount or 0))
+        if value >= best_amount:
+            best_amount = value
+            best_name = str(name or "")
+    needle = re.sub(r"\s+", " ", best_name.strip()).lower()
+    for src, dst in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ñ", "n")):
+        needle = needle.replace(src, dst)
+    for token, code in _CONCEPT_ACCOUNT_CODES:
+        if token in needle:
+            return code
+    return _DEFAULT_ISSUED_ACCOUNT_CODE
+
+
+def _resolve_accounting_account_id(db: Session, item: dict) -> int | None:
+    code = str(item.get("accounting_account_code") or "").strip()
+    if not code:
+        concepts = item.get("concepts")
+        if not isinstance(concepts, dict):
+            raw = item.get("raw")
+            if isinstance(raw, dict):
+                concepts = raw.get("concepts")
+        code = _concept_account_code(concepts if isinstance(concepts, dict) else {})
+    row = (
+        db.query(AccountingAccounts)
+        .filter(AccountingAccounts.code == code)
+        .first()
+    )
+    return int(row.id) if row is not None else None
+
+
 def _serialize_doc(row: TaxDocuments, *, company_name: str = "") -> TaxDocumentOut:
     item = TaxDocumentOut.model_validate(row)
     item.has_pdf = _has_pdf(row)
@@ -184,6 +241,10 @@ def _serialize_doc(row: TaxDocuments, *, company_name: str = "") -> TaxDocumentO
         item.status_name = row.status.name or ""
         item.status_code = row.status.code or ""
         item.status_tip_color = row.status.tip_color or "red"
+    if row.accounting_account is not None:
+        item.accounting_account_id = row.accounting_account_id
+        item.accounting_account_code = row.accounting_account.code or ""
+        item.accounting_account_name = row.accounting_account.name or ""
     return item
 
 
@@ -452,6 +513,10 @@ def _upsert_docs(
             row.pms_ref = str(item.get("pms_ref") or "")[:120]
         else:
             row.pms_ref = str(class_info.get("pms_ref") or "")[:120]
+        if version_id == issued_id:
+            account_id = _resolve_accounting_account_id(db, item)
+            if account_id:
+                row.accounting_account_id = account_id
         row.source = source
         try:
             row.raw_json = json.dumps(item.get("raw") or item, ensure_ascii=False, default=str)
@@ -476,6 +541,7 @@ def _list_version(
             joinedload(TaxDocuments.status),
             joinedload(TaxDocuments.dte_type),
             joinedload(TaxDocuments.dte_version),
+            joinedload(TaxDocuments.accounting_account),
         )
         .filter(TaxDocuments.dte_version_id == dte_version_id)
     )
@@ -581,6 +647,7 @@ def patch_document(
             joinedload(TaxDocuments.status),
             joinedload(TaxDocuments.dte_type),
             joinedload(TaxDocuments.dte_version),
+            joinedload(TaxDocuments.accounting_account),
         )
         .filter(TaxDocuments.id == doc_id)
         .first()
@@ -597,6 +664,19 @@ def patch_document(
     if payload.period is not None:
         row.period = str(payload.period or "").strip()[:40]
 
+    if payload.accounting_account_id is not None:
+        if payload.accounting_account_id == 0:
+            row.accounting_account_id = None
+        else:
+            account = (
+                db.query(AccountingAccounts)
+                .filter(AccountingAccounts.id == payload.accounting_account_id)
+                .first()
+            )
+            if account is None:
+                raise HTTPException(status_code=400, detail="accounting_account_id inválido")
+            row.accounting_account_id = payload.accounting_account_id
+
     db.add(row)
     db.commit()
     row = (
@@ -605,6 +685,7 @@ def patch_document(
             joinedload(TaxDocuments.status),
             joinedload(TaxDocuments.dte_type),
             joinedload(TaxDocuments.dte_version),
+            joinedload(TaxDocuments.accounting_account),
         )
         .filter(TaxDocuments.id == doc_id)
         .first()
