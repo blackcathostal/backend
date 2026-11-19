@@ -25,5 +25,6 @@ class UsersOut(BaseModel):
     full_name: str
     is_active: bool
     role: RolesOut | None = None
+    permission_codes: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

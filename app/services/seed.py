@@ -294,6 +294,8 @@ DEFAULT_SIDEBAR_PERMISSIONS = (
     ("dashboard", "Inicio", "dashboard", "Access dashboard"),
     ("accounting", "Contabilidad", "accounting", "Accounting section"),
     ("track", "Track", "track", "Tax documents Track section"),
+    ("reports", "Informes", "reports", "Reports section"),
+    ("human_resources", "Recursos humanos", "human_resources", "Human resources section"),
     ("sliders", "Sliders", "sliders", "Sliders section"),
     ("rooms", "Habitaciones", "rooms", "Rooms section"),
     ("services", "Servicios", "services", "Services section"),
@@ -308,26 +310,28 @@ DEFAULT_SIDEBAR_PERMISSIONS = (
     ("roles", "Roles", "maintainers", "Roles and permissions management"),
 )
 
+ACTIVE_ROLES = {
+    "Comunicador": "Communications-focused access",
+    "Recursos Humanos": "Human resources only",
+}
+
+REMOVED_ROLE_NAMES = frozenset({"admin", "Administrador", "editor", "viewer"})
+
+COMMUNICATOR_PERMISSION_CODES = frozenset(
+    {
+        "dashboard",
+        "communications",
+        "blog",
+        "settings",
+    }
+)
+
+HUMAN_RESOURCES_PERMISSION_CODES = frozenset({"human_resources"})
+
+DEFAULT_APP_PASSWORD = "123456"
+
 
 def seed_database(db: Session) -> None:
-    roles = {
-        "admin": "Full access to the administration panel (legacy)",
-        "Administrador": "Full access to the administration panel",
-        "Comunicador": "Communications-focused access",
-        "editor": "Can manage content such as sliders, posts and media",
-        "viewer": "Read-only access",
-    }
-    role_by_name: dict[str, Roles] = {}
-    for name, description in roles.items():
-        role = db.query(Roles).filter(Roles.name == name).first()
-        if not role:
-            role = Roles(name=name, description=description)
-            db.add(role)
-            db.flush()
-        else:
-            role.description = description
-        role_by_name[name] = role
-
     permission_by_code: dict[str, Permissions] = {}
     for code, label, section, description in DEFAULT_SIDEBAR_PERMISSIONS:
         row = db.query(Permissions).filter(Permissions.code == code).first()
@@ -343,44 +347,104 @@ def seed_database(db: Session) -> None:
 
     db.flush()
 
-    all_permission_ids = [p.id for p in permission_by_code.values()]
-    communicator_codes = {
-        "dashboard",
-        "communications",
-        "blog",
-        "settings",
-    }
+    role_by_name: dict[str, Roles] = {}
+    for name, description in ACTIVE_ROLES.items():
+        role = db.query(Roles).filter(Roles.name == name).first()
+        if not role:
+            role = Roles(name=name, description=description)
+            db.add(role)
+            db.flush()
+        else:
+            role.description = description
+        role_by_name[name] = role
 
-    def ensure_role_permissions(role: Roles, codes: set[str] | None = None) -> None:
-        wanted = (
-            all_permission_ids
-            if codes is None
-            else [permission_by_code[c].id for c in codes if c in permission_by_code]
+    db.flush()
+
+    def sync_role_permissions(role: Roles, codes: frozenset[str]) -> None:
+        wanted = {permission_by_code[c].id for c in codes if c in permission_by_code}
+        links = (
+            db.query(RolePermissions).filter(RolePermissions.role_id == role.id).all()
         )
-        existing = {
-            link.permission_id
-            for link in db.query(RolePermissions).filter(RolePermissions.role_id == role.id).all()
-        }
+        existing = {link.permission_id: link for link in links}
+        for permission_id, link in list(existing.items()):
+            if permission_id not in wanted:
+                db.delete(link)
         for permission_id in wanted:
             if permission_id not in existing:
                 db.add(RolePermissions(role_id=role.id, permission_id=permission_id))
 
-    ensure_role_permissions(role_by_name["Administrador"])
-    ensure_role_permissions(role_by_name["admin"])
-    ensure_role_permissions(role_by_name["Comunicador"], communicator_codes)
+    sync_role_permissions(role_by_name["Comunicador"], COMMUNICATOR_PERMISSION_CODES)
+    sync_role_permissions(role_by_name["Recursos Humanos"], HUMAN_RESOURCES_PERMISSION_CODES)
 
-    admin_role = role_by_name.get(settings.admin_role_name) or role_by_name["Administrador"]
+    communicator_role = role_by_name["Comunicador"]
+    human_resources_role = role_by_name["Recursos Humanos"]
+
+    # Move users off removed roles, then delete those roles.
+    removed_roles = db.query(Roles).filter(Roles.name.in_(REMOVED_ROLE_NAMES)).all()
+    removed_ids = [role.id for role in removed_roles]
+    if removed_ids:
+        db.query(Users).filter(Users.role_id.in_(removed_ids)).update(
+            {Users.role_id: communicator_role.id},
+            synchronize_session=False,
+        )
+        db.query(RolePermissions).filter(RolePermissions.role_id.in_(removed_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Roles).filter(Roles.id.in_(removed_ids)).delete(synchronize_session=False)
+        db.flush()
+
+    def upsert_user(
+        *,
+        email: str,
+        full_name: str,
+        role: Roles,
+        password: str,
+    ) -> None:
+        user = db.query(Users).filter(Users.email == email).first()
+        password_hash = hash_password(password)
+        if not user:
+            db.add(
+                Users(
+                    role_id=role.id,
+                    email=email,
+                    full_name=full_name,
+                    password=password_hash,
+                    is_active=True,
+                )
+            )
+            return
+        user.role_id = role.id
+        user.full_name = full_name
+        user.password = password_hash
+        user.is_active = True
+
+    upsert_user(
+        email="comunicador@blackcathostal.com",
+        full_name="Comunicador",
+        role=communicator_role,
+        password=DEFAULT_APP_PASSWORD,
+    )
+    upsert_user(
+        email="hr@blackcathostal.com",
+        full_name="Recursos Humanos",
+        role=human_resources_role,
+        password=DEFAULT_APP_PASSWORD,
+    )
+
+    # Keep legacy admin email usable under Comunicador (password from settings).
     admin = db.query(Users).filter(Users.email == settings.admin_email).first()
     if not admin:
         db.add(
             Users(
-                role_id=admin_role.id,
+                role_id=communicator_role.id,
                 email=settings.admin_email,
                 full_name=settings.admin_full_name,
                 password=hash_password(settings.admin_password),
                 is_active=True,
             )
         )
+    else:
+        admin.role_id = communicator_role.id
 
     if db.query(Sliders).count() == 0:
         for item in DEFAULT_SLIDERS:
