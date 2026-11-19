@@ -269,9 +269,11 @@ def _pdf_token(row: TaxDocuments) -> str:
 
 
 def _resolve_type_id(db: Session, item: dict) -> int | None:
+    # Prefer explicit catalog code over free-text doc_type (FNS Documento can be a
+    # folio list like "3398, 33..." which falsely substring-matches type 33 Factura).
     raw = item.get("dte_type_id")
     if raw is None or raw == "":
-        raw = item.get("doc_type") or item.get("dte_type_code") or ""
+        raw = item.get("dte_type_code") or item.get("doc_type") or ""
     # Voucher stays Voucher; empty/unknown → Boleta.
     return dte_catalog.ensure_type_id(db, raw)
 

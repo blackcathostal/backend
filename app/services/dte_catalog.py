@@ -110,9 +110,10 @@ def type_id_from_raw(db: Session, raw: object) -> int | None:
     for row in rows:
         code_n = _norm(row.code)
         name_n = _norm(row.name)
-        if code_n and (code_n in needle or needle in code_n):
+        # Avoid false positives: folio lists like "3398" must not match code "33".
+        if code_n and re.search(rf"(?<!\d){re.escape(code_n)}(?!\d)", needle):
             return int(row.id)
-        if name_n and (name_n in needle or needle in name_n):
+        if name_n and len(name_n) >= 4 and (name_n in needle or needle in name_n):
             return int(row.id)
 
     alias = _alias_type_code(text)

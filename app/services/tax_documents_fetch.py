@@ -926,13 +926,15 @@ class TaxDocumentsFetchClient:
         channel = re.sub(r"\s+", " ", str(row.get("Canal") or "")).strip()
         doc_blob = re.sub(r"\s+", " ", str(row.get("Documento") or "")).strip(" ,")
         # Reservation sales: receipt when FNS lists documents, else voucher.
+        # Never pass the Documento folio list as dte_type_code (e.g. "3398" contains
+        # "33" and was misclassified as Factura).
         type_code = (
             dte_catalog.TYPE_CODE_RECEIPT
             if doc_blob
             else dte_catalog.TYPE_CODE_VOUCHER
         )
-        # User-visible doc label (Spanish OK).
-        doc_type_label = doc_blob or "Sin documento emitido"
+        # User-visible doc label (Spanish OK) — short, not the folio dump.
+        doc_type_label = "Boleta" if doc_blob else "Sin documento emitido"
         status_code = (
             "paid" if pending <= 0.5 and collected > 0.5 else "pending_payment"
         )
