@@ -1,6 +1,7 @@
 [
   {"code": "4101", "name": "Hospedaje", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 10, "concept_labels": ["Alojamiento", "aloj", "hosped"]},
-  {"code": "4102", "name": "Consumos", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 20, "concept_labels": ["Bar", "Cafetería", "Cafeteria", "Frigobar", "Desayuno", "Delivery", "Refrigerios", "caf", "frig", "desay", "deliv", "refri", "bar"]},
+  {"code": "4102", "name": "Bar", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 20, "concept_labels": ["Bar", "bar"]},
+  {"code": "4104", "name": "Cafetería", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 25, "concept_labels": ["Cafetería", "Cafeteria", "caf", "Frigobar", "Desayuno", "Delivery", "Refrigerios", "frig", "desay", "deliv", "refri"]},
   {"code": "4103", "name": "Estacionamiento", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 30, "concept_labels": ["Parking", "Estacionamiento", "park"]},
   {"code": "4110", "name": "Ingresos por servicios adicionales", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 40, "concept_labels": ["Amenities", "Sauna", "amen", "sauna"]},
   {"code": "4120", "name": "Ingresos por tours / actividades", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 50, "concept_labels": ["Transfer/Tour", "Transfer", "Tour", "transfer", "tour"]},

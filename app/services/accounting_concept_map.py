@@ -67,36 +67,101 @@ def load_income_accounts(db: Session) -> list[AccountingAccounts]:
     return ingresos + others if ingresos else rows
 
 
-def ensure_concept_labels_from_coa(db: Session) -> int:
-    """
-    Backfill empty concept_labels from blackcat_eerr_coa.json.
-    Returns number of accounts updated.
-    """
+def _load_coa_rows() -> list[dict]:
     try:
         raw = json.loads(COA_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return 0
+        return []
     if not isinstance(raw, list):
+        return []
+    rows: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "").strip()
+        name = str(item.get("name") or "").strip()
+        if not code or not name:
+            continue
+        rows.append(item)
+    return rows
+
+
+def ensure_concept_labels_from_coa(db: Session) -> int:
+    """
+    Sync income chart rows from blackcat_eerr_coa.json:
+    create missing accounts and refresh name/labels/sort for codes present in the file.
+    Returns number of accounts created or updated.
+    """
+    catalog = _load_coa_rows()
+    if not catalog:
         return 0
-    by_code = {
-        str(item.get("code") or "").strip(): parse_concept_labels(item.get("concept_labels"))
-        for item in raw
-        if isinstance(item, dict) and str(item.get("code") or "").strip()
+
+    existing = {
+        str(row.code or "").strip(): row
+        for row in db.query(AccountingAccounts).all()
+        if str(row.code or "").strip()
     }
-    updated = 0
-    for row in db.query(AccountingAccounts).all():
-        code = str(row.code or "").strip()
-        existing = parse_concept_labels(getattr(row, "concept_labels", None))
-        if existing:
+    changed = 0
+    for item in catalog:
+        code = str(item.get("code") or "").strip()
+        name = str(item.get("name") or "").strip()
+        category = str(item.get("category") or "").strip() or "Ingresos"
+        account_type = str(item.get("account_type") or "ingreso").strip().lower()
+        # EERR only needs income rows; full chart stays on the import endpoint.
+        if account_type != "ingreso":
             continue
-        labels = by_code.get(code) or []
-        if not labels:
+        nature = str(item.get("nature") or "acreedora").strip().lower()
+        try:
+            sort_order = int(item.get("sort_order") or 0)
+        except (TypeError, ValueError):
+            sort_order = 0
+        labels_json = serialize_concept_labels(parse_concept_labels(item.get("concept_labels")))
+        row = existing.get(code)
+        if row is None:
+            account = AccountingAccounts(
+                code=code,
+                name=name,
+                category=category,
+                account_type=account_type,
+                nature=nature,
+                sort_order=sort_order,
+                description=None,
+                concept_labels=labels_json,
+                is_active=True,
+            )
+            db.add(account)
+            existing[code] = account
+            changed += 1
             continue
-        row.concept_labels = serialize_concept_labels(labels)
-        updated += 1
-    if updated:
+
+        row_changed = False
+        if (row.name or "") != name:
+            row.name = name
+            row_changed = True
+        if (row.category or "") != category:
+            row.category = category
+            row_changed = True
+        if (row.account_type or "") != account_type:
+            row.account_type = account_type
+            row_changed = True
+        if (row.nature or "") != nature:
+            row.nature = nature
+            row_changed = True
+        if int(row.sort_order or 0) != sort_order:
+            row.sort_order = sort_order
+            row_changed = True
+        if (row.concept_labels or "[]") != labels_json:
+            row.concept_labels = labels_json
+            row_changed = True
+        if not row.is_active:
+            row.is_active = True
+            row_changed = True
+        if row_changed:
+            changed += 1
+
+    if changed:
         db.commit()
-    return updated
+    return changed
 
 
 def catch_all_account(
