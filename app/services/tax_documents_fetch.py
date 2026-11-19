@@ -9,6 +9,7 @@ from html import unescape
 from typing import Any, Iterator
 
 from app.core.config import settings
+from app.services import dte_catalog
 from app.services.extranet_web_client import ExtranetWebClient, ExtranetWebError
 
 
@@ -898,35 +899,115 @@ class TaxDocumentsFetchClient:
                 )
         return lines
 
+    def _normalize_ingresos_cobros_row(
+        self, row: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """
+        One Emitidas row per Ingresos-Cobros reservation:
+        Imp. Total = vendido, Cobrado/Pendiente → paid vs pending.
+        """
+        reservation_id = re.sub(r"\s+", "", str(row.get("ID") or ""))
+        locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
+        folio = reservation_id or locator
+        if not folio:
+            return None
+
+        total = float(_money(row.get("Imp. Total")) or 0)
+        cobrado = float(_money(row.get("Cobrado")) or 0)
+        pendiente = float(_money(row.get("Pendiente")) or 0)
+        if abs(total) <= 0.5 and abs(cobrado) <= 0.5:
+            return None
+        amount = total if abs(total) > 0.5 else cobrado
+
+        arrival = _parse_date(row.get("Llegada"))
+        departure = _parse_date(row.get("Salida"))
+        issued_at = departure or arrival
+        guest = re.sub(r"\s+", " ", str(row.get("Datos cliente") or "")).strip()
+        channel = re.sub(r"\s+", " ", str(row.get("Canal") or "")).strip()
+        doc_blob = re.sub(r"\s+", " ", str(row.get("Documento") or "")).strip(" ,")
+        # Reservation sales: typed as boleta when FNS lists documentos, else voucher.
+        type_code = (
+            dte_catalog.TYPE_CODE_RECEIPT
+            if doc_blob
+            else dte_catalog.TYPE_CODE_VOUCHER
+        )
+        doc_type_label = doc_blob or "Sin documento emitido"
+        status_code = "paid" if pendiente <= 0.5 and cobrado > 0.5 else "pending_payment"
+        net_amount, exempt_amount, tax_amount = _split_cl_iva(
+            amount, doc_type=doc_type_label
+        )
+        # Default concept → Hospedaje via accounting_accounts.concept_labels.
+        concepts = {"Alojamiento": amount}
+        return {
+            "dte_type_code": type_code,
+            "doc_type": doc_type_label,
+            "dte_version_code": "issued",
+            "folio": folio[:40],
+            "identification_number": "",
+            "company_name": guest[:220],
+            "counterpart_rut": "",
+            "counterpart_name": guest[:220],
+            "issued_at": issued_at.isoformat() if issued_at else None,
+            "net_amount": net_amount,
+            "exempt_amount": exempt_amount,
+            "tax_amount": tax_amount,
+            "total_amount": amount,
+            "branch": "",
+            "payment_status_code": status_code,
+            "has_concepts": True,
+            "concepts": concepts,
+            "pms_ref": locator[:120],
+            "pms_class": "FNS Ingresos-Cobros",
+            "sales_channel": channel[:80],
+            "raw": {
+                **{str(k): v for k, v in row.items()},
+                "concepts": concepts,
+                "payment_status_code": status_code,
+                "vendido_amount": amount,
+                "cobrado_amount": cobrado,
+                "pendiente_amount": pendiente,
+                "remaining_amount": pendiente,
+                "source_report": "ingresoscobros",
+                "doc_type": doc_type_label,
+                "sales_channel": channel,
+            },
+        }
+
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
-        """Issued sales docs from Informes/Cobros, month-by-month (12-month lookback safe)."""
+        """
+        Emitidas refresh source: FNS Ingresos-Cobros (vendido / cobrado / pendiente).
+
+        One row per reservation in the period; month windows keep large ranges stable.
+        """
         if date_to < date_from:
             raise ExtranetWebError("Rango de fechas inválido")
-        # FNS Cobros truncates / ignores huge ranges; scrape each calendar month.
-        merged: dict[tuple[str, str], dict[str, Any]] = {}
+        merged: dict[str, dict[str, Any]] = {}
         for window_from, window_to in _month_windows(date_from, date_to):
-            html = self._post_report(
-                module="Informes",
-                action="Cobros",
-                date_from=window_from,
-                date_to=window_to,
-            )
-            client_by_locator, pending_by_locator = self._ingresos_cobros_index(
-                window_from, window_to
-            )
-            rows = _parse_html_table(html, "Informe de cobros")
-            for row in rows:
-                doc = self._normalize_cobro_row(row, direction="issued")
+            for row in self._ingresos_cobros_rows(window_from, window_to):
+                doc = self._normalize_ingresos_cobros_row(row)
                 if not doc:
                     continue
-                self._merge_issued_row(
-                    merged,
-                    doc,
-                    client_by_locator=client_by_locator,
-                    pending_by_locator=pending_by_locator,
-                    date_from=date_from,
-                    date_to=date_to,
-                )
+                issued = _parse_date(doc.get("issued_at"))
+                if issued is not None and (issued < date_from or issued > date_to):
+                    # Keep rows FNS returned for the window even if checkout falls
+                    # just outside; clamp into the refresh range for Track/EERR.
+                    if issued < date_from:
+                        doc["issued_at"] = date_from.isoformat()
+                    elif issued > date_to:
+                        doc["issued_at"] = date_to.isoformat()
+                folio = str(doc.get("folio") or "")
+                if not folio:
+                    continue
+                current = merged.get(folio)
+                if current is None:
+                    merged[folio] = doc
+                    continue
+                # Same reservation across overlapping windows: keep the richer paid flag.
+                if (
+                    str(doc.get("payment_status_code") or "") == "paid"
+                    and str(current.get("payment_status_code") or "") != "paid"
+                ):
+                    merged[folio] = doc
         return list(merged.values())
 
     def fetch_received(self, date_from: date, date_to: date) -> list[dict[str, Any]]:

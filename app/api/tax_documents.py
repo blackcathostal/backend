@@ -1080,38 +1080,10 @@ def _scrape_tax_documents_sync(
         with BillingPortalWebClient() as web:
             docs = web.fetch_received(date_from, date_to)
     else:
-        # Emitidas = FNS Cobros + facturas missing from FNS via facturacion.cl Libro de Ventas.
-        source = "extranet_web"
+        # Emitidas = FNS Ingresos-Cobros (vendido / cobrado / pendiente) for Track + EERR.
+        source = "extranet_ingresos_cobros"
         with TaxDocumentsFetchClient() as fetch_client:
-            fns_docs = fetch_client.fetch_issued(date_from, date_to)
-
-        portal_docs: list[dict] = []
-        portal_error = ""
-        try:
-            with BillingPortalWebClient() as web:
-                portal_docs = web.fetch_issued(date_from, date_to)
-        except BillingPortalError as portal_exc:
-            portal_error = str(portal_exc)
-            try:
-                portal_docs = BillingPortalClient().fetch_issued(
-                    date_from, date_to, book_types=("V", "B")
-                )
-                portal_error = ""
-            except BillingPortalError as soap_exc:
-                portal_error = (
-                    f"{portal_error}; SOAP: {soap_exc}"
-                    if portal_error
-                    else str(soap_exc)
-                )
-
-        docs, merge_warning = _merge_issued_with_billing_portal(fns_docs, portal_docs)
-        warning = merge_warning
-        if portal_error:
-            warning = (
-                f"{warning} · Portal: {portal_error}"
-                if warning
-                else f"Portal: {portal_error}"
-            )
+            docs = fetch_client.fetch_issued(date_from, date_to)
 
     return docs, source, warning, pms_rows
 
@@ -1158,6 +1130,22 @@ async def refresh_tax_documents(
 
     accounts_assigned = 0
     try:
+        issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+        # Replace Emitidas in the refreshed window so Cobros/portal leftovers
+        # do not double-count beside Ingresos-Cobros reservation rows.
+        if issued_id is not None and int(version_id) == int(issued_id):
+            (
+                db.query(TaxDocuments)
+                .filter(
+                    TaxDocuments.dte_version_id == int(issued_id),
+                    TaxDocuments.issued_at.isnot(None),
+                    TaxDocuments.issued_at >= date_from,
+                    TaxDocuments.issued_at <= date_to,
+                )
+                .delete(synchronize_session=False)
+            )
+            db.commit()
+
         upserted, classified, suppliers_upserted, customers_upserted = _upsert_docs(
             db,
             docs,
@@ -1167,7 +1155,7 @@ async def refresh_tax_documents(
             match_fns=False,
         )
         # Explicit pass: any issued doc still without account in this range → Hospedaje.
-        if version_id == dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED):
+        if issued_id is not None and int(version_id) == int(issued_id):
             accounts_assigned = _backfill_unassigned_issued_to_lodging(
                 db, date_from=date_from, date_to=date_to
             )
