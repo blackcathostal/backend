@@ -278,6 +278,28 @@ def _issued_tax_document_lines(
     return lines
 
 
+def _merge_detail_lines(
+    primary: list[dict],
+    extra: list[dict],
+) -> list[dict]:
+    """Append extra lines; skip extras whose folio already appears in primary."""
+    seen_folios: set[str] = set()
+    merged: list[dict] = []
+    for item in primary:
+        folio = re.sub(r"\s+", "", str(item.get("folio") or ""))
+        if folio:
+            seen_folios.add(folio)
+        merged.append(item)
+    for item in extra:
+        folio = re.sub(r"\s+", "", str(item.get("folio") or ""))
+        if folio and folio in seen_folios:
+            continue
+        if folio:
+            seen_folios.add(folio)
+        merged.append(item)
+    return merged
+
+
 def _fetch_extranet_month(date_from: date, date_to: date, *, accounts: list) -> dict:
     client = TaxDocumentsFetchClient()
     return client.fetch_income_by_account(date_from, date_to, accounts=accounts)
@@ -443,8 +465,30 @@ def get_eerr_detail(
             )
         except ExtranetWebError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        # Do not merge facturas into account detail: row totals are Cobros→vendido only.
-        # Invoices live under the Facturado KPI so detail Σ matches the row/KPI.
+
+        if kind == "account" and resolved_id is not None:
+            # Show Emitidas facturas already assigned to this account (e.g. Hospedaje).
+            cobros_total = float(sum(float(item.get("amount") or 0) for item in raw_lines))
+            invoice_lines = _issued_tax_document_lines(
+                db,
+                date_from=month_start,
+                date_to=month_finish,
+                account_id=int(resolved_id),
+                invoice_only=True,
+            )
+            raw_lines = _merge_detail_lines(raw_lines, invoice_lines)
+            lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
+            # Header total stays Cobros/row amount; facturas are listed but not double-counted.
+            return EerrDetailOut(
+                period=_period_key(month_start),
+                row_kind=kind,
+                account_id=resolved_id,
+                account_code=code,
+                account_name=account_name,
+                title=title,
+                total=cobros_total,
+                lines=lines,
+            )
 
     lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
     total = float(sum(float(item.amount or 0) for item in lines))
