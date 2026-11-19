@@ -360,6 +360,9 @@ def _upsert_docs(
         elif identification_number:
             if _upsert_supplier(db, identification_number, company_name):
                 suppliers_upserted += 1
+        # tax_documents.identification_number is VARCHAR(80); keep in sync with customers.
+        identification_number = str(identification_number or "").strip()[:80]
+        folio = str(folio or "").strip()[:40]
 
         # Keep classify_document compatible during transition
         classify_payload = {
@@ -749,6 +752,19 @@ async def refresh_tax_documents(
                 "Reintentá Actualizar."
             ),
         ) from exc
+    except Exception as exc:
+        # Surface DataError (e.g. column too long) as 400 instead of opaque 500.
+        db.rollback()
+        message = str(exc)
+        if "Data too long" in message or "1406" in message:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Un RUT/identificador de cliente es demasiado largo para guardar. "
+                    "Actualizá el API (git pull + restart) si sigue pasando."
+                ),
+            ) from exc
+        raise
     return TaxDocumentRefreshResult(
         dte_version_id=version_id,
         fetched=len(docs),

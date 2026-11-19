@@ -367,6 +367,27 @@ def _ensure_schema_patches() -> None:
                 conn.execute(text("ALTER TABLE tax_documents DROP COLUMN direction"))
             if column_exists("tax_documents", "doc_type"):
                 conn.execute(text("ALTER TABLE tax_documents DROP COLUMN doc_type"))
+            # Customer name-keys (name:slug) can exceed the old VARCHAR(40).
+            if column_exists("tax_documents", "identification_number"):
+                col_len = conn.execute(
+                    text(
+                        """
+                        SELECT CHARACTER_MAXIMUM_LENGTH
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'tax_documents'
+                          AND COLUMN_NAME = 'identification_number'
+                        """
+                    )
+                ).scalar()
+                if col_len is not None and int(col_len) < 80:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE tax_documents "
+                            "MODIFY COLUMN identification_number "
+                            "VARCHAR(80) NOT NULL DEFAULT ''"
+                        )
+                    )
 
 
 @asynccontextmanager

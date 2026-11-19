@@ -82,7 +82,7 @@ class TaxDocuments(Base):
     )
     period: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     folio: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
-    identification_number: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
+    identification_number: Mapped[str] = mapped_column(String(80), nullable=False, default="", index=True)
     issued_at: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     net_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     exempt_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
