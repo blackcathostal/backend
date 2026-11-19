@@ -1127,10 +1127,38 @@ def _scrape_tax_documents_sync(
         with BillingPortalWebClient() as web:
             docs = web.fetch_received(date_from, date_to)
     else:
-        # Issued Track = FNS income-collections (sold / collected / pending) for Track + EERR.
+        # Issued = FNS income-collections (sold/collected) + facturas from facturacion.cl.
         source = "extranet_income_collections"
         with TaxDocumentsFetchClient() as fetch_client:
-            docs = fetch_client.fetch_issued(date_from, date_to)
+            fns_docs = fetch_client.fetch_issued(date_from, date_to)
+
+        portal_docs: list[dict] = []
+        portal_error = ""
+        try:
+            with BillingPortalWebClient() as web:
+                portal_docs = web.fetch_issued(date_from, date_to)
+        except BillingPortalError as portal_exc:
+            portal_error = str(portal_exc)
+            try:
+                portal_docs = BillingPortalClient().fetch_issued(
+                    date_from, date_to, book_types=("V", "B")
+                )
+                portal_error = ""
+            except BillingPortalError as soap_exc:
+                portal_error = (
+                    f"{portal_error}; SOAP: {soap_exc}"
+                    if portal_error
+                    else str(soap_exc)
+                )
+
+        docs, merge_warning = _merge_issued_with_billing_portal(fns_docs, portal_docs)
+        warning = merge_warning
+        if portal_error:
+            warning = (
+                f"{warning} · Portal: {portal_error}"
+                if warning
+                else f"Portal: {portal_error}"
+            )
 
     return docs, source, warning, pms_rows
 

@@ -285,9 +285,16 @@ def _issued_totals_by_account_id(
     *,
     date_from: date,
     date_to: date,
+    exclude_invoice_types: bool = False,
 ) -> dict[int, float]:
-    """Σ emitidas (boletas/facturas/NC) by assigned accounting account for the month."""
+    """
+    Σ issued docs by assigned accounting account for the month.
+
+    When exclude_invoice_types=True, skip 33/34/61 so EERR income rows use
+    income-collections lines and Facturado stays a separate KPI (no double count).
+    """
     issued_id = _issued_version_id(db)
+    invoice_type_ids = set(_invoice_type_ids(db)) if exclude_invoice_types else set()
     rows = (
         db.query(
             TaxDocuments.accounting_account_id,
@@ -306,6 +313,8 @@ def _issued_totals_by_account_id(
     totals: dict[int, float] = {}
     for account_id, type_id, amount in rows:
         if account_id is None:
+            continue
+        if invoice_type_ids and type_id is not None and int(type_id) in invoice_type_ids:
             continue
         value = _issued_doc_signed_amount(db, type_id=type_id, amount=float(amount or 0))
         if abs(value) <= 0.5:
@@ -359,9 +368,11 @@ def _unassigned_issued_total(
     *,
     date_from: date,
     date_to: date,
+    exclude_invoice_types: bool = False,
 ) -> float:
-    """Σ emitidas still without accounting_account_id (NC negative)."""
+    """Σ issued docs still without accounting_account_id (NC negative)."""
     issued_id = _issued_version_id(db)
+    invoice_type_ids = set(_invoice_type_ids(db)) if exclude_invoice_types else set()
     rows = (
         db.query(TaxDocuments.dte_type_id, TaxDocuments.total_amount)
         .filter(
@@ -375,6 +386,8 @@ def _unassigned_issued_total(
     )
     total = 0.0
     for type_id, amount in rows:
+        if invoice_type_ids and type_id is not None and int(type_id) in invoice_type_ids:
+            continue
         total += _issued_doc_signed_amount(db, type_id=type_id, amount=float(amount or 0))
     return float(total)
 
@@ -690,11 +703,18 @@ def get_eerr_report(
     accounts = load_income_accounts(db)
 
     source = "tax_documents_issued"
+    # Income rows: income-collections / boletas — not facturacion.cl invoices (Facturado KPI).
     issued_by_account = _issued_totals_by_account_id(
-        db, date_from=month_start, date_to=month_finish
+        db,
+        date_from=month_start,
+        date_to=month_finish,
+        exclude_invoice_types=True,
     )
     unassigned_total = _unassigned_issued_total(
-        db, date_from=month_start, date_to=month_finish
+        db,
+        date_from=month_start,
+        date_to=month_finish,
+        exclude_invoice_types=True,
     )
     rows = _income_rows_from_issued(
         accounts,
@@ -709,11 +729,12 @@ def get_eerr_report(
     collected = 0.0
     pending = 0.0
 
-    # Optional cash KPIs from FNS (do not drive income rows).
+    # Cash KPIs from FNS income-collections (sold/collected/pending).
     try:
         sales = TaxDocumentsFetchClient()._income_collections_sales_totals(
             month_start, month_finish
         )
+        sold = float(sales.get("sold") or 0) or sold
         collected = float(sales.get("collected") or 0)
         pending = float(sales.get("pending") or 0)
     except ExtranetWebError as exc:
