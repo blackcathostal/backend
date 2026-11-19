@@ -166,6 +166,17 @@ def _merge_issued_with_billing_portal(
                     raw["billing_portal_rut_enriched"] = True
                     item["raw"] = raw
                 enriched_ruts += 1
+        # Prefer portal totals/neto when FNS payment row has no usable amount.
+        if portal and float(item.get("total_amount") or 0) <= 0.5:
+            for field in ("total_amount", "net_amount", "tax_amount", "exempt_amount"):
+                portal_amount = float(portal.get(field) or 0)
+                if portal_amount:
+                    item[field] = portal_amount
+        elif portal and float(item.get("net_amount") or 0) <= 0.5:
+            for field in ("net_amount", "tax_amount", "exempt_amount"):
+                portal_amount = float(portal.get(field) or 0)
+                if portal_amount:
+                    item[field] = portal_amount
         merged.append(item)
 
     added_invoices = 0

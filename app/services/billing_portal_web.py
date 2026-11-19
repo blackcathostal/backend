@@ -458,9 +458,32 @@ class BillingPortalWebClient:
                     "tipo": cells.get("DOCUMENTO") or "",
                     "fecha": fecha,
                     "razonsocial": company,
-                    "montototal": cells.get("TOTAL") or "",
-                    "montoneto": cells.get("NETO") or cells.get("MONTONETO") or "",
-                    "montoiva": cells.get("IVA") or cells.get("MONTOIVA") or "",
+                    "montototal": (
+                        cells.get("TOTAL")
+                        or cells.get("MONTOTOTAL")
+                        or cells.get("VALORTOTAL")
+                        or cells.get("IMPORTE")
+                        or ""
+                    ),
+                    "montoneto": (
+                        cells.get("NETO")
+                        or cells.get("MONTONETO")
+                        or cells.get("VALORNETO")
+                        or cells.get("SUBTOTAL")
+                        or ""
+                    ),
+                    "montoiva": (
+                        cells.get("IVA")
+                        or cells.get("MONTOIVA")
+                        or cells.get("VALORIVA")
+                        or ""
+                    ),
+                    "montoexento": (
+                        cells.get("EXENTO")
+                        or cells.get("MONTOEXENTO")
+                        or cells.get("VALOREXENTO")
+                        or ""
+                    ),
                     "rut": rut,
                     "pdf_data": cells.get("PDF_DATA") or "",
                 }
@@ -589,7 +612,12 @@ class BillingPortalWebClient:
                     doc["total_amount"] = _parse_amount(raw.get("montototal"))
                 month_docs.append(doc)
 
-            if not month_docs:
+            # HTML grid often has rows with empty TOTAL (e.g. some exentas). Prefer Excel
+            # when the month has no rows or every row lacks a usable total.
+            need_excel = (not month_docs) or all(
+                not float(doc.get("total_amount") or 0) for doc in month_docs
+            )
+            if need_excel:
                 html = self._search_month(
                     year=cursor.year,
                     month=cursor.month,
@@ -608,11 +636,16 @@ class BillingPortalWebClient:
                         f"{excel_name}.xlsx" if excel[:2] == b"PK" else f"{excel_name}.xls"
                     )
                     try:
-                        month_docs = normalizer.parse_ledger_file(
+                        excel_docs = normalizer.parse_ledger_file(
                             excel, direction=direction, filename=filename
                         )
                     except BillingPortalError:
-                        month_docs = []
+                        excel_docs = []
+                    if excel_docs and (
+                        not month_docs
+                        or any(float(doc.get("total_amount") or 0) for doc in excel_docs)
+                    ):
+                        month_docs = excel_docs
 
             for doc in month_docs:
                 issued = _parse_date(doc.get("issued_at"))

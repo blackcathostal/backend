@@ -48,6 +48,34 @@ def _parse_amount(value: Any) -> float:
         return 0.0
 
 
+def _compact_key(value: object) -> str:
+    """Normalize ledger headers so 'Monto Total' / 'montoneto' match the same pick()."""
+    return re.sub(r"[^0-9a-z]", "", str(value or "").strip().lower())
+
+
+def _derive_net_tax_from_total(
+    total: float,
+    *,
+    doc_type: object = "",
+    net_amount: float = 0.0,
+    exempt_amount: float = 0.0,
+    tax_amount: float = 0.0,
+) -> tuple[float, float, float]:
+    """
+    facturacion.cl HTML ledger often exposes only TOTAL (no NETO/IVA columns).
+    Reuse FNS Cobros IVA split so Neto/subtotal and IVA are filled from total.
+    """
+    from app.services.tax_documents_fetch import _split_cl_iva
+
+    return _split_cl_iva(
+        total,
+        doc_type=doc_type,
+        net_amount=net_amount,
+        exempt_amount=exempt_amount,
+        tax_amount=tax_amount,
+    )
+
+
 def _parse_date(value: Any) -> date | None:
     if value is None:
         return None
@@ -241,18 +269,19 @@ class BillingPortalClient:
         direction: str,
         book_type: str | None = None,
     ) -> dict[str, Any]:
-        keys = {str(k).strip().lower(): v for k, v in raw.items()}
+        keys = {_compact_key(k): v for k, v in raw.items() if _compact_key(k)}
 
         def pick(*names: str) -> Any:
             for name in names:
-                if name.lower() in keys:
-                    return keys[name.lower()]
+                key = _compact_key(name)
+                if key in keys:
+                    return keys[key]
             return None
 
         issued_at = _parse_date(
             pick("fecha", "fechadocumento", "fecha_documento", "fechaemision", "fecha_emision")
         )
-        raw_type = pick("tipodte", "tipo_dte", "tipo", "tipo documento", "tipodocumento") or ""
+        raw_type = pick("tipodte", "tipo_dte", "tipo", "tipo documento", "tipodocumento", "documento") or ""
         dte_type_code = self.resolve_dte_type_code(raw_type, book_type=book_type)
         dte_version_code = self.resolve_dte_version_code(direction)
         identification_number = str(
@@ -288,6 +317,24 @@ class BillingPortalClient:
             )
             if rut_match:
                 identification_number = rut_match.group(1).strip()
+        total_amount = _parse_amount(
+            pick("montototal", "monto_total", "valortotal", "total", "importe")
+        )
+        net_amount = _parse_amount(
+            pick("montoneto", "monto_neto", "valorneto", "neto", "subtotal")
+        )
+        exempt_amount = _parse_amount(
+            pick("montoexento", "monto_exento", "valorexento", "exento")
+        )
+        tax_amount = _parse_amount(pick("montoiva", "monto_iva", "valoriva", "iva"))
+        # Portal HTML grid usually only has TOTAL; back out Neto/IVA at 19%.
+        net_amount, exempt_amount, tax_amount = _derive_net_tax_from_total(
+            total_amount,
+            doc_type=raw_type or dte_type_code,
+            net_amount=net_amount,
+            exempt_amount=exempt_amount,
+            tax_amount=tax_amount,
+        )
         return {
             "dte_type_code": dte_type_code,
             "dte_version_code": dte_version_code,
@@ -301,10 +348,10 @@ class BillingPortalClient:
             "counterpart_rut": identification_number,
             "counterpart_name": company_name,
             "issued_at": issued_at.isoformat() if issued_at else None,
-            "net_amount": _parse_amount(pick("montoneto", "monto_neto", "neto")),
-            "exempt_amount": _parse_amount(pick("montoexento", "monto_exento", "exento")),
-            "tax_amount": _parse_amount(pick("montoiva", "monto_iva", "iva")),
-            "total_amount": _parse_amount(pick("montototal", "monto_total", "total")),
+            "net_amount": net_amount,
+            "exempt_amount": exempt_amount,
+            "tax_amount": tax_amount,
+            "total_amount": total_amount,
             "branch": str(pick("sucursal", "branch") or "").strip(),
             "raw": raw,
         }
