@@ -712,6 +712,7 @@ class TaxDocumentsFetchClient:
         Drill-down lines for EERR:
         - account: Cobros concept amounts mapped to account_code
         - pending: Ingresos-Cobros rows with Pendiente > 0
+        - collected: Ingresos-Cobros rows with Cobrado > 0
         - unclassified: Cobros importe not covered by concept columns
         """
         from app.services.accounting_concept_map import account_code_for_concept
@@ -720,10 +721,12 @@ class TaxDocumentsFetchClient:
         code = str(account_code or "").strip()
         lines: list[dict[str, Any]] = []
 
-        if kind == "pending":
+        if kind in {"pending", "collected"}:
+            amount_key = "Pendiente" if kind == "pending" else "Cobrado"
+            concept_label = "Pendiente" if kind == "pending" else "Cobrado"
             for row in self._ingresos_cobros_rows(date_from, date_to):
-                pending = _money(row.get("Pendiente"))
-                if pending <= 0.5:
+                amount = _money(row.get(amount_key))
+                if amount <= 0.5:
                     continue
                 locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
                 guest = re.sub(
@@ -737,8 +740,8 @@ class TaxDocumentsFetchClient:
                         "doc_type": str(row.get("Documento") or "").strip(),
                         "company_name": guest,
                         "locator": locator,
-                        "concept": "Pendiente",
-                        "amount": float(pending),
+                        "concept": concept_label,
+                        "amount": float(amount),
                     }
                 )
             return lines

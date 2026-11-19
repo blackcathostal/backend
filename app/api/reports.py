@@ -305,8 +305,10 @@ def get_eerr_detail(
         title = f"{code} · {account_name}".strip(" ·")
     elif kind == "pending":
         title = "Pendiente por cobrar"
+    elif kind == "collected":
+        title = "Cobrado"
     elif kind == "unclassified":
-        title = "Cobros sin clasificar"
+        title = "Vendido sin clasificar"
     else:
         raise HTTPException(status_code=400, detail="row_kind inválido")
 
