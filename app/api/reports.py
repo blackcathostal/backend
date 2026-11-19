@@ -28,6 +28,7 @@ from app.schemas.reports import (
 )
 from app.services import dte_catalog
 from app.services.accounting_concept_map import (
+    account_code_for_concept,
     ensure_concept_labels_from_coa,
     load_expense_accounts,
     load_income_accounts,
@@ -178,6 +179,43 @@ def _received_totals_by_account_id(
     }
 
 
+def _commission_fees_by_account_id(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+    accounts: list[AccountingAccounts],
+) -> dict[int, float]:
+    """
+    Map FNS Informes/Comisiones channel fees (Booking, Expedia, …) to gasto accounts
+    via accounting_accounts.concept_labels.
+    """
+    if not accounts:
+        return {}
+    try:
+        client = TaxDocumentsFetchClient()
+        by_channel = client.fetch_commission_fees_by_channel(date_from, date_to)
+    except ExtranetWebError as exc:
+        logger.warning("EERR commissions unavailable: %s", exc)
+        return {}
+    code_to_id = {
+        str(account.code or "").strip(): int(account.id)
+        for account in accounts
+        if str(account.code or "").strip()
+    }
+    totals: dict[int, float] = {}
+    for channel, fee in by_channel.items():
+        # Do not fall through to ingreso catch-all (*) for OTA channel names.
+        code = account_code_for_concept(channel, accounts, allow_catch_all=False)
+        if not code:
+            continue
+        account_id = code_to_id.get(str(code))
+        if account_id is None:
+            continue
+        totals[account_id] = float(totals.get(account_id, 0.0) + float(fee or 0))
+    return totals
+
+
 def _expense_rows_for_period(
     db: Session,
     *,
@@ -187,7 +225,9 @@ def _expense_rows_for_period(
 ) -> list[EerrAccountRow]:
     """
     Egresos: all active gasto accounts.
-    Remuneraciones ← hr_period_amounts; other categories ← recibidas assigned totals.
+    Remuneraciones ← hr_period_amounts;
+    OTA commissions ← FNS Informes/Comisiones (Booking/Expedia/…);
+    other categories ← recibidas assigned totals.
     """
     accounts = load_expense_accounts(db)
     if not accounts:
@@ -196,12 +236,23 @@ def _expense_rows_for_period(
     received_amounts = _received_totals_by_account_id(
         db, date_from=date_from, date_to=date_to
     )
+    commission_amounts = _commission_fees_by_account_id(
+        db, date_from=date_from, date_to=date_to, accounts=accounts
+    )
     rows: list[EerrAccountRow] = []
     for account in accounts:
         category = str(account.category or "").strip()
         account_id = int(account.id)
         if category.lower() == "remuneraciones":
             amount = float(hr_amounts.get(account_id, 0.0))
+        elif account_id in commission_amounts and abs(
+            float(commission_amounts.get(account_id, 0.0))
+        ) > 0.5:
+            # Prefer FNS channel commission when present; keep recibidas if higher.
+            amount = max(
+                float(commission_amounts.get(account_id, 0.0)),
+                float(received_amounts.get(account_id, 0.0)),
+            )
         else:
             amount = float(received_amounts.get(account_id, 0.0))
         rows.append(

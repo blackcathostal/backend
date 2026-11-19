@@ -390,6 +390,7 @@ class TaxDocumentsFetchClient:
         issued_at = _parse_date(_find_col(row, "Fecha", "Creado el"))
         company_name = _find_col(row, "Nombre", "Cliente", "Titular")
         locator = _find_col(row, "Localizador")
+        channel = _find_col(row, "Canal")
         return {
             "dte_type_code": raw_type,
             "doc_type": raw_type,
@@ -410,6 +411,7 @@ class TaxDocumentsFetchClient:
             "concepts": concepts,
             "pms_ref": locator[:120],
             "pms_class": "FNS Cobros",
+            "sales_channel": channel[:80],
             "raw": {
                 **row,
                 "concepts": concepts,
@@ -417,6 +419,7 @@ class TaxDocumentsFetchClient:
                 "remaining_amount": remaining_amount,
                 "source_report": "Cobros",
                 "doc_type": raw_type,
+                "sales_channel": channel,
             },
         }
 
@@ -645,6 +648,73 @@ class TaxDocumentsFetchClient:
                         continue
                     by_code[code] = float(by_code.get(code) or 0) + float(amount or 0)
         return by_code
+
+    @staticmethod
+    def _parse_usd_clp_rate(html: str) -> float:
+        """Read header FX like 'CL$ - US$: 900' from FNS pages."""
+        match = re.search(
+            r"CL\$\s*-\s*US\$\s*:\s*([\d.,]+)",
+            html or "",
+            flags=re.I,
+        )
+        if not match:
+            return 0.0
+        return float(_money(match.group(1)) or 0.0)
+
+    def fetch_commission_fees_by_channel(
+        self,
+        date_from: date,
+        date_to: date,
+    ) -> dict[str, float]:
+        """
+        FNS Informes → Comisiones: OTA fee totals by channel (Booking, Expedia, …).
+
+        Prefers CL$ summary rows; converts US$ fees with the page FX rate when needed.
+        Returns channel label → commission fee in CLP.
+        """
+        if date_to < date_from:
+            raise ExtranetWebError("Rango de fechas inválido")
+        html = self._post_report(
+            module="Informes",
+            action="comisiones",
+            date_from=date_from,
+            date_to=date_to,
+        )
+        fx = self._parse_usd_clp_rate(html)
+        pattern = re.compile(
+            r"<td[^>]*colspan=['\"]5['\"][^>]*>\s*([^<]+?)\s*</td>\s*"
+            r"<td[^>]*class=['\"]text-right['\"][^>]*>\s*<strong>(.*?)</strong>\s*</td>\s*"
+            r"<td[^>]*class=['\"]text-right['\"][^>]*>\s*<strong>(.*?)</strong>\s*</td>",
+            re.I | re.S,
+        )
+        clp_fees: dict[str, float] = {}
+        usd_fees: dict[str, float] = {}
+        for match in pattern.finditer(html or ""):
+            channel = re.sub(r"\s+", " ", match.group(1)).strip()
+            if not channel:
+                continue
+            fee_raw = re.sub(r"<[^>]+>", "", match.group(3) or "").strip()
+            fee = float(_money(fee_raw) or 0)
+            if abs(fee) <= 0.5:
+                continue
+            upper = fee_raw.upper()
+            if "US$" in upper or "USD" in upper:
+                usd_fees[channel] = float(usd_fees.get(channel, 0.0) + fee)
+            else:
+                # CL$ (or bare Chilean amount)
+                clp_fees[channel] = float(clp_fees.get(channel, 0.0) + fee)
+
+        out: dict[str, float] = dict(clp_fees)
+        for channel, usd_fee in usd_fees.items():
+            if channel in out and abs(out[channel]) > 0.5:
+                # Already have a CL$ total for this channel.
+                continue
+            if fx > 0.5:
+                out[channel] = round(usd_fee * fx)
+            else:
+                # No FX available; skip USD-only rows rather than invent CLP.
+                continue
+        return out
 
     def fetch_income_by_account(
         self,

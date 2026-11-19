@@ -105,7 +105,7 @@ def _load_coa_rows() -> list[dict]:
 
 def ensure_concept_labels_from_coa(db: Session) -> int:
     """
-    Sync income chart rows from blackcat_eerr_coa.json:
+    Sync chart rows from blackcat_eerr_coa.json (ingreso + gasto + …):
     create missing accounts and refresh name/labels/sort for codes present in the file.
     Returns number of accounts created or updated.
     """
@@ -124,9 +124,6 @@ def ensure_concept_labels_from_coa(db: Session) -> int:
         name = str(item.get("name") or "").strip()
         category = str(item.get("category") or "").strip() or "Ingresos"
         account_type = str(item.get("account_type") or "ingreso").strip().lower()
-        # EERR only needs income rows; full chart stays on the import endpoint.
-        if account_type != "ingreso":
-            continue
         nature = str(item.get("nature") or "acreedora").strip().lower()
         try:
             sort_order = int(item.get("sort_order") or 0)
@@ -254,11 +251,13 @@ def _token_matches(needle: str, token: str) -> bool:
 def match_account_for_concept(
     concept: object,
     accounts: list[AccountingAccounts],
+    *,
+    allow_catch_all: bool = True,
 ) -> AccountingAccounts | None:
     """Match a Cobros concept column/header via concept_labels only (not account name)."""
     needle = _norm(concept)
     if not needle:
-        return catch_all_account(accounts)
+        return catch_all_account(accounts) if allow_catch_all else None
 
     exact: AccountingAccounts | None = None
     partial: tuple[int, AccountingAccounts] | None = None
@@ -278,14 +277,18 @@ def match_account_for_concept(
             return exact
     if partial is not None:
         return partial[1]
-    return catch_all_account(accounts)
+    return catch_all_account(accounts) if allow_catch_all else None
 
 
 def account_code_for_concept(
     concept: object,
     accounts: list[AccountingAccounts],
+    *,
+    allow_catch_all: bool = True,
 ) -> str | None:
-    account = match_account_for_concept(concept, accounts)
+    account = match_account_for_concept(
+        concept, accounts, allow_catch_all=allow_catch_all
+    )
     return str(account.code) if account is not None else None
 
 
