@@ -21,6 +21,7 @@
   {"code": "5109", "name": "Honorarios Profesionales", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 90},
   {"code": "5110", "name": "Finiquitos", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 100},
   {"code": "5111", "name": "Gastos previsionales", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 110},
+  {"code": "5112", "name": "Gasto notarial", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 120},
 
   {"code": "5201", "name": "Insumos Bar", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
   {"code": "5202", "name": "Insumos Cafeteria", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
