@@ -18,6 +18,7 @@ from app.schemas.human_resources import (
     HrPeriodOut,
     HrPeriodUpdate,
 )
+from app.services.accounting_concept_map import ensure_concept_labels_from_coa
 
 router = APIRouter(prefix="/human-resources", tags=["human-resources"])
 
@@ -92,6 +93,7 @@ def get_hr_period(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> HrPeriodOut:
+    ensure_concept_labels_from_coa(db)
     return _period_payload(db, _normalize_period(period))
 
 
@@ -103,6 +105,7 @@ def update_hr_period(
     _: Users = Depends(get_current_user),
 ) -> HrPeriodOut:
     period_key = _normalize_period(payload.period)
+    ensure_concept_labels_from_coa(db)
     accounts = _load_remuneracion_accounts(db)
     allowed = {int(account.id) for account in accounts}
     if not allowed:

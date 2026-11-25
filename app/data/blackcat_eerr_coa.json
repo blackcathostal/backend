@@ -19,6 +19,7 @@
   {"code": "5107", "name": "Uniformes", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 70},
   {"code": "5108", "name": "Honorarios Apoyo", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 80},
   {"code": "5109", "name": "Honorarios Profesionales", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 90},
+  {"code": "5110", "name": "Finiquitos", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 100},
 
   {"code": "5201", "name": "Insumos Bar", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
   {"code": "5202", "name": "Insumos Cafeteria", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
