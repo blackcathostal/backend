@@ -155,9 +155,10 @@ def _received_totals_by_account_id(
     date_from: date,
     date_to: date,
 ) -> dict[int, float]:
-    """Σ recibidas (compras) by assigned accounting account for the month."""
+    """Σ recibidas Imputada Pagada by assigned accounting account for the month."""
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
-    if received_id is None:
+    paid_id = dte_catalog.paid_status_id(db)
+    if received_id is None or paid_id is None:
         return {}
     rows = (
         db.query(
@@ -166,6 +167,7 @@ def _received_totals_by_account_id(
         )
         .filter(
             TaxDocuments.dte_version_id == int(received_id),
+            TaxDocuments.status_id == int(paid_id),
             TaxDocuments.accounting_account_id.isnot(None),
             TaxDocuments.issued_at.isnot(None),
             TaxDocuments.issued_at >= date_from,
@@ -229,7 +231,7 @@ def _expense_rows_for_period(
     Egresos: all active gasto accounts.
     Remuneraciones ← hr_period_amounts;
     OTA commissions ← FNS Informes/Comisiones (Booking/Expedia/…);
-    other categories ← recibidas assigned totals.
+    other categories ← recibidas Imputada Pagada assigned totals.
     """
     accounts = load_expense_accounts(db)
     if not accounts:
@@ -504,15 +506,17 @@ def _received_tax_document_lines(
     date_to: date,
     account_id: int | None = None,
 ) -> list[dict]:
-    """Detail lines from received tax_documents (compras) for an expense account."""
+    """Detail lines from received tax_documents Imputada Pagada for an expense account."""
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
-    if received_id is None:
+    paid_id = dte_catalog.paid_status_id(db)
+    if received_id is None or paid_id is None:
         return []
     query = (
         db.query(TaxDocuments)
         .options(joinedload(TaxDocuments.dte_type))
         .filter(
             TaxDocuments.dte_version_id == int(received_id),
+            TaxDocuments.status_id == int(paid_id),
             TaxDocuments.issued_at.isnot(None),
             TaxDocuments.issued_at >= date_from,
             TaxDocuments.issued_at <= date_to,
