@@ -36,7 +36,7 @@
   {"code": "5305", "name": "Mantención Termos", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 50},
 
   {"code": "5401", "name": "Comisiones Booking", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 10, "concept_labels": ["Booking", "Booking.com", "booking"]},
-  {"code": "5402", "name": "Comisión Expidia", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 20, "concept_labels": ["Expedia", "Expidia", "expedia"]},
+  {"code": "5402", "name": "Comisión Expedia", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 20, "concept_labels": ["Expedia", "Expidia", "expedia", "expidia"]},
   {"code": "5403", "name": "Comisión HotelBeds", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 30, "concept_labels": ["HotelBeds", "Hotel Beds", "hotelbeds"]},
   {"code": "5404", "name": "Comisión FNS", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 40, "concept_labels": ["FNS", "FNSmanager"]},
   {"code": "5405", "name": "Comisiones Transbank", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 50, "concept_labels": ["Transbank"]},
