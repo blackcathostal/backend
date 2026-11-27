@@ -779,48 +779,15 @@ def _build_eerr_report_for_month(
         except ExtranetWebError as exc:
             logger.warning("EERR collected/pending unavailable: %s", exc)
 
-    # Bruto must match Emitido (Cobros FNS) when remote. Unknown gap → "Otros".
+    # Bruto (grand_total) matches Emitido FNS when remote. Do not dump the
+    # sold−classified plug into "Otros" — that account only shows real docs.
     grand_total = float(classified_total)
-    if use_remote and sold > classified_total + 0.5:
-        gap = float(round(sold - classified_total))
-        other = catch_all_account(accounts)
-        if other is not None:
-            other_id = int(other.id)
-            matched = next(
-                (
-                    row
-                    for row in rows
-                    if row.account_id is not None and int(row.account_id) == other_id
-                ),
-                None,
-            )
-            if matched is not None:
-                matched.total = float(matched.total or 0) + gap
-            else:
-                rows.append(
-                    EerrAccountRow(
-                        account_id=other_id,
-                        code=str(other.code or ""),
-                        name=str(other.name or "Otros"),
-                        total=gap,
-                        row_kind="account",
-                        category=str(other.category or ""),
-                    )
-                )
-        else:
-            rows.append(
-                EerrAccountRow(
-                    account_id=None,
-                    code="",
-                    name="Otros",
-                    total=gap,
-                    row_kind="unclassified",
-                )
-            )
-            unclassified_collections = float(unclassified_collections) + gap
+    if use_remote and sold > 0.5:
         grand_total = float(sold)
-    elif use_remote and sold > 0.5:
-        grand_total = float(sold)
+        if sold > classified_total + 0.5:
+            unclassified_collections = float(
+                unclassified_collections + round(sold - classified_total)
+            )
 
     invoice_by_account = _invoice_totals_by_account_id(
         db, date_from=month_start, date_to=month_finish
@@ -1098,6 +1065,7 @@ def get_eerr_detail(
         )
     elif kind == "account":
         # Same scope as EERR income rows: skip facturas 33/34/61 (Facturado KPI).
+        # "Otros" detail = real issued docs on that account only (no synthetic FNS plug).
         raw_lines = _issued_tax_document_lines(
             db,
             date_from=month_start,
@@ -1106,46 +1074,6 @@ def get_eerr_detail(
             invoice_only=False,
             exclude_invoice_types=True,
         )
-        # "Otros" holds the Emitido − emitidas clasificadas plug already computed
-        # on the EERR row / snapshot. Never call FNS again here — only local docs + gap.
-        other = catch_all_account(income_accounts)
-        if (
-            other is not None
-            and resolved_id is not None
-            and int(resolved_id) == int(other.id)
-        ):
-            docs_total = float(
-                sum(float(item.get("amount") or 0) for item in raw_lines)
-            )
-            row_total = target_total
-            if row_total is None:
-                snapshot = load_eerr_month_snapshot(db, _period_key(month_start))
-                if snapshot is not None:
-                    matched = next(
-                        (
-                            row
-                            for row in (snapshot.rows or [])
-                            if row.account_id is not None
-                            and int(row.account_id) == int(other.id)
-                        ),
-                        None,
-                    )
-                    if matched is not None and abs(float(matched.total or 0)) > 0.5:
-                        row_total = float(matched.total or 0)
-            if row_total is not None:
-                gap = float(round(row_total - docs_total))
-                if abs(gap) > 0.5:
-                    raw_lines.append(
-                        {
-                            "issued_at": None,
-                            "folio": "",
-                            "doc_type": "Ajuste",
-                            "company_name": "",
-                            "locator": "",
-                            "concept": "Diferencia Emitido vs emitidas clasificadas",
-                            "amount": gap,
-                        }
-                    )
     elif kind == "unclassified":
         raw_lines = _issued_tax_document_lines(
             db,
