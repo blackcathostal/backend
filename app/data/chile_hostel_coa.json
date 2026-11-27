@@ -35,7 +35,6 @@
   {"code": "4102", "name": "Ingresos por camas compartidas", "account_type": "ingreso", "nature": "acreedora"},
   {"code": "4103", "name": "Ingresos por habitaciones privadas", "account_type": "ingreso", "nature": "acreedora"},
   {"code": "4110", "name": "Piscina y quincho", "account_type": "ingreso", "nature": "acreedora"},
-  {"code": "4130", "name": "Ingresos por lavandería", "account_type": "ingreso", "nature": "acreedora"},
   {"code": "4140", "name": "Ingresos por arriendo / lockers", "account_type": "ingreso", "nature": "acreedora"},
   {"code": "4190", "name": "Otros ingresos", "account_type": "ingreso", "nature": "acreedora"},
   {"code": "5101", "name": "Costo de servicios de hospedaje", "account_type": "gasto", "nature": "deudora"},
