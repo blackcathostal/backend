@@ -47,6 +47,7 @@
   {"code": "5405", "name": "Comisiones Transbank", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 50, "concept_labels": ["Transbank"]},
   {"code": "5406", "name": "Comisión Getnet", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 60, "concept_labels": ["Getnet", "Banco", "Comision Banco", "Comisión Banco", "Comisión Getnet"]},
   {"code": "5415", "name": "Comisión Airbnb", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 65, "concept_labels": ["Airbnb", "AirBNB", "airbnb"]},
+  {"code": "5416", "name": "Comisión HotelNow", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 66, "concept_labels": ["HotelNow", "Hotel Now", "hotelnow", "Hotelnow"]},
   {"code": "5407", "name": "Comisión Fee Cafeteria", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 70, "concept_labels": ["Fee Cafeteria", "Comisión Fee Cafeteria"]},
   {"code": "5408", "name": "Plataforma Internet", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 80, "concept_labels": ["Plataforma Internet"]},
   {"code": "5409", "name": "Seguro", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 90},

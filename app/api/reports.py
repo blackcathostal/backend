@@ -8,7 +8,7 @@ from calendar import monthrange
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -630,6 +630,7 @@ def _issued_tax_document_lines(
     account_id: int | None = None,
     invoice_only: bool = False,
     unassigned_only: bool = False,
+    exclude_invoice_types: bool = False,
 ) -> list[dict]:
     """Detail lines from issued tax_documents (includes facturas from facturacion.cl)."""
     issued_id = _issued_version_id(db)
@@ -652,6 +653,15 @@ def _issued_tax_document_lines(
         if not type_ids:
             return []
         query = query.filter(TaxDocuments.dte_type_id.in_(type_ids))
+    elif exclude_invoice_types:
+        invoice_type_ids = _invoice_type_ids(db)
+        if invoice_type_ids:
+            query = query.filter(
+                or_(
+                    TaxDocuments.dte_type_id.is_(None),
+                    TaxDocuments.dte_type_id.notin_(invoice_type_ids),
+                )
+            )
 
     rows = query.order_by(TaxDocuments.issued_at.asc(), TaxDocuments.id.asc()).all()
     names = _customer_names_for(db, [row.identification_number for row in rows])
@@ -1074,13 +1084,58 @@ def get_eerr_detail(
             invoice_only=True,
         )
     elif kind == "account":
+        # Same scope as EERR income rows: skip facturas 33/34/61 (Facturado KPI).
         raw_lines = _issued_tax_document_lines(
             db,
             date_from=month_start,
             date_to=month_finish,
             account_id=int(resolved_id) if resolved_id is not None else None,
             invoice_only=False,
+            exclude_invoice_types=True,
         )
+        # "Otros" often holds the Emitido FNS − emitidas clasificadas plug; surface it.
+        other = catch_all_account(income_accounts)
+        if (
+            other is not None
+            and resolved_id is not None
+            and int(resolved_id) == int(other.id)
+        ):
+            issued_by = _issued_totals_by_account_id(
+                db,
+                date_from=month_start,
+                date_to=month_finish,
+                exclude_invoice_types=True,
+            )
+            unassigned_total = _unassigned_issued_total(
+                db,
+                date_from=month_start,
+                date_to=month_finish,
+                exclude_invoice_types=True,
+            )
+            classified_total = float(
+                sum(float(v or 0) for v in issued_by.values()) + float(unassigned_total)
+            )
+            sold = float(classified_total)
+            try:
+                sales = TaxDocumentsFetchClient()._income_collections_sales_totals(
+                    month_start, month_finish
+                )
+                sold = float(sales.get("sold") or 0) or sold
+            except ExtranetWebError as exc:
+                logger.warning("EERR Otros detail sold unavailable: %s", exc)
+            if sold > classified_total + 0.5:
+                gap = float(round(sold - classified_total))
+                raw_lines.append(
+                    {
+                        "issued_at": None,
+                        "folio": "",
+                        "doc_type": "Ajuste",
+                        "company_name": "",
+                        "locator": "",
+                        "concept": "Diferencia Emitido (FNS) vs emitidas clasificadas",
+                        "amount": gap,
+                    }
+                )
     elif kind == "unclassified":
         raw_lines = _issued_tax_document_lines(
             db,
@@ -1088,6 +1143,7 @@ def get_eerr_detail(
             date_to=month_finish,
             invoice_only=False,
             unassigned_only=True,
+            exclude_invoice_types=True,
         )
     else:
         # pending / collected: still from FNS income-collections
