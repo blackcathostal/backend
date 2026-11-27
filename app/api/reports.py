@@ -30,6 +30,7 @@ from app.schemas.reports import (
 from app.services import dte_catalog
 from app.services.accounting_concept_map import (
     account_code_for_concept,
+    catch_all_account,
     ensure_concept_labels_from_coa,
     load_expense_accounts,
     load_income_accounts,
@@ -757,20 +758,45 @@ def get_eerr_report(
     except ExtranetWebError as exc:
         logger.warning("EERR collected/pending unavailable: %s", exc)
 
-    # Bruto must match Emitido (Cobros FNS). Bridge any gap as remanente.
+    # Bruto must match Emitido (Cobros FNS). Unknown gap → catch-all "Otros".
     grand_total = float(classified_total)
     if sold > classified_total + 0.5:
-        gap = round(sold - classified_total)
-        rows.append(
-            EerrAccountRow(
-                account_id=None,
-                code="",
-                name="Cobros no clasificados",
-                total=float(gap),
-                row_kind="unclassified",
+        gap = float(round(sold - classified_total))
+        other = catch_all_account(accounts)
+        if other is not None:
+            other_id = int(other.id)
+            matched = next(
+                (
+                    row
+                    for row in rows
+                    if row.account_id is not None and int(row.account_id) == other_id
+                ),
+                None,
             )
-        )
-        unclassified_collections = float(unclassified_collections) + float(gap)
+            if matched is not None:
+                matched.total = float(matched.total or 0) + gap
+            else:
+                rows.append(
+                    EerrAccountRow(
+                        account_id=other_id,
+                        code=str(other.code or ""),
+                        name=str(other.name or "Otros"),
+                        total=gap,
+                        row_kind="account",
+                        category=str(other.category or ""),
+                    )
+                )
+        else:
+            rows.append(
+                EerrAccountRow(
+                    account_id=None,
+                    code="",
+                    name="Otros",
+                    total=gap,
+                    row_kind="unclassified",
+                )
+            )
+            unclassified_collections = float(unclassified_collections) + gap
         grand_total = float(sold)
     elif sold > 0.5:
         grand_total = float(sold)
@@ -891,7 +917,7 @@ def get_eerr_detail(
     elif kind == "collected":
         title = "Cobrado"
     elif kind == "unclassified":
-        title = "Cobros no clasificados"
+        title = "Otros"
     elif kind in {"invoiced", "facturado"}:
         kind = "invoiced"
         title = "Facturado"

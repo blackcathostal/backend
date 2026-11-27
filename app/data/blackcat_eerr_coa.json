@@ -7,7 +7,7 @@
   {"code": "4120", "name": "Ingresos por tours / actividades", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 50, "concept_labels": ["Transfer/Tour", "Transfer", "Tour", "transfer", "tour"]},
   {"code": "4130", "name": "Ingresos por lavandería", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 60, "concept_labels": ["Lavandería", "Lavanderia", "lavan"]},
   {"code": "4140", "name": "Ingresos por arriendo / lockers", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 70, "concept_labels": ["Locker", "Lockers", "Arriendo", "lock"]},
-  {"code": "4190", "name": "Otros ingresos", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 80, "concept_labels": ["Varios", "Tasas", "varios", "tasas", "*"]},
+  {"code": "4190", "name": "Otros", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 80, "concept_labels": ["Otros", "Varios", "Tasas", "varios", "tasas", "*"]},
   {"code": "4201", "name": "Descuentos sobre ventas", "category": "Ingresos", "account_type": "ingreso", "nature": "acreedora", "sort_order": 90, "concept_labels": ["Descuento", "Descuentos"]},
 
   {"code": "5101", "name": "Sueldo Base", "category": "Remuneraciones", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
