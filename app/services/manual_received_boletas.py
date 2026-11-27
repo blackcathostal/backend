@@ -166,12 +166,17 @@ def ensure_manual_received_boletas(db: Session) -> int:
         if company_name:
             _ensure_supplier(db, rut, company_name)
 
+        force_paid = bool(item.get("force_paid", False))
         for month in _months_for_item(item):
             folio = f"{prefix}{month:02d}"[:40]
             keep_keys.add((rut, folio))
             issued_at = date(year, month, 1)
             period = f"{month:02d}-{year}"
-            status_id = int(waiting_id) if month == OPEN_REVIEW_MONTH else int(paid_id)
+            status_id = (
+                int(paid_id)
+                if force_paid or month != OPEN_REVIEW_MONTH
+                else int(waiting_id)
+            )
 
             row = (
                 db.query(TaxDocuments)

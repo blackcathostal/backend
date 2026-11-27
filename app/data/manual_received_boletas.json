@@ -30,5 +30,17 @@
     "year": 2026,
     "exclude_months": [11],
     "active": true
+  },
+  {
+    "identification_number": "76.550.100-4",
+    "company_name": "Arriendo Terreno Catedral",
+    "accounting_account_code": "5501",
+    "folio_prefix": "5501",
+    "total_amount": 1000000,
+    "dte_type_code": "39",
+    "year": 2026,
+    "exclude_months": [12],
+    "force_paid": true,
+    "active": true
   }
 ]
