@@ -1115,6 +1115,30 @@ def _is_official_eerr_snapshot(report: EerrReportOut | None) -> bool:
     return source == "tax_documents_issued"
 
 
+def _remap_report_categories(db: Session, report: EerrReportOut) -> EerrReportOut:
+    """Refresh row categories from live CoA (e.g. Comisiones vs Servicios)."""
+    category_by_code: dict[str, str] = {}
+    for account in list(load_expense_accounts(db)) + list(load_income_accounts(db)):
+        code = str(account.code or "").strip()
+        category = str(account.category or "").strip()
+        if code and category:
+            category_by_code[code] = category
+
+    def _apply(rows: list[EerrAccountRow]) -> None:
+        for row in rows:
+            code = str(row.code or "").strip()
+            if code and code in category_by_code:
+                row.category = category_by_code[code]
+                continue
+            name = str(row.name or "").casefold()
+            if row.row_kind == "expense" and "comision" in name.replace("ó", "o"):
+                row.category = "Comisiones"
+
+    _apply(list(report.rows or []))
+    _apply(list(report.expense_rows or []))
+    return report
+
+
 @router.get("/eerr/consolidated", response_model=EerrConsolidatedOut)
 def get_eerr_consolidated(
     from_period: str | None = None,
