@@ -28,7 +28,9 @@ from app.schemas.reports import (
     EerrReportOut,
     OccupancyDayRow,
     OccupancyReportOut,
+    OccupancyRoomTypeMonthRow,
     OccupancyRoomTypeRow,
+    OccupancyRoomTypesByMonthOut,
 )
 from app.services.eerr_snapshots import (
     empty_eerr_month_report,
@@ -46,7 +48,11 @@ from app.services.accounting_concept_map import (
 from app.api.tax_documents import _has_pdf, _mark_received_through_cutoff_paid
 from app.services.extranet_web_client import ExtranetWebError
 from app.services.manual_received_boletas import ensure_manual_received_boletas
-from app.services.occupancy_store import load_occupancy_report, refresh_occupancy_period
+from app.services.occupancy_store import (
+    load_occupancy_report,
+    load_occupancy_room_types_by_month,
+    refresh_occupancy_period,
+)
 from app.services.received_document_account_map import (
     ensure_received_document_account_mappings_from_catalog,
 )
@@ -1211,6 +1217,41 @@ def get_occupancy_report(
     except ExtranetWebError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _occupancy_out(payload)
+
+
+@router.get("/occupancy/room-types", response_model=OccupancyRoomTypesByMonthOut)
+def get_occupancy_room_types_by_month(
+    from_period: str | None = None,
+    to_period: str | None = None,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> OccupancyRoomTypesByMonthOut:
+    """Room-type occupancy % by month from local DB (most used first)."""
+    today = date.today()
+    default_to = f"{today.year:04d}-{today.month:02d}"
+    default_from = f"{today.year:04d}-01"
+    start = str(from_period or default_from).strip() or default_from
+    end = str(to_period or default_to).strip() or default_to
+    try:
+        payload = load_occupancy_room_types_by_month(
+            db,
+            from_period=start,
+            to_period=end,
+        )
+    except ExtranetWebError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return OccupancyRoomTypesByMonthOut(
+        from_period=str(payload.get("from_period") or start),
+        to_period=str(payload.get("to_period") or end),
+        periods=list(payload.get("periods") or []),
+        period_labels=list(payload.get("period_labels") or []),
+        rows=[
+            OccupancyRoomTypeMonthRow.model_validate(row)
+            for row in payload.get("rows") or []
+        ],
+        has_data=bool(payload.get("has_data")),
+        source=str(payload.get("source") or "occupancy_stats_db"),
+    )
 
 
 @router.post("/occupancy/refresh", response_model=OccupancyReportOut)

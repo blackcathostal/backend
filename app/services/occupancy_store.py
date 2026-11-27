@@ -224,3 +224,138 @@ def load_occupancy_report(
         "source": "occupancy_stats_db",
         "has_data": bool(day_rows or room_rows),
     }
+
+
+def _iter_period_keys(start: date, end: date) -> list[str]:
+    keys: list[str] = []
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        keys.append(_period_key(year, month))
+        if month == 12:
+            year += 1
+            month = 1
+        else:
+            month += 1
+    return keys
+
+
+def _period_label(period: str) -> str:
+    match = str(period or "").strip().split("-")
+    if len(match) != 2:
+        return str(period or "")
+    months = (
+        "",
+        "Ene",
+        "Feb",
+        "Mar",
+        "Abr",
+        "May",
+        "Jun",
+        "Jul",
+        "Ago",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dic",
+    )
+    try:
+        month_num = int(match[1])
+    except ValueError:
+        return str(period)
+    label = months[month_num] if 1 <= month_num <= 12 else match[1]
+    return f"{label} {match[0]}"
+
+
+def load_occupancy_room_types_by_month(
+    db: Session,
+    *,
+    from_period: str,
+    to_period: str,
+) -> dict[str, Any]:
+    """
+    Average occupancy % per room type per month (local DB only).
+    Sorted by overall average descending (most used first).
+    """
+    start_text = str(from_period or "").strip()
+    end_text = str(to_period or "").strip()
+    try:
+        start = date.fromisoformat(f"{start_text}-01")
+        end = date.fromisoformat(f"{end_text}-01")
+    except ValueError as exc:
+        raise ExtranetWebError("Periodo inválido") from exc
+    if end < start:
+        start, end = end, start
+
+    period_keys = _iter_period_keys(start, end)
+    rows = (
+        db.query(OccupancyRoomTypeStats)
+        .filter(OccupancyRoomTypeStats.period.in_(period_keys))
+        .order_by(
+            OccupancyRoomTypeStats.room_type.asc(),
+            OccupancyRoomTypeStats.period.asc(),
+            OccupancyRoomTypeStats.day_date.asc(),
+        )
+        .all()
+    )
+
+    by_type: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        name = str(row.room_type or "").strip()
+        if not name:
+            continue
+        period = str(row.period or "").strip()
+        if period not in period_keys:
+            continue
+        bucket = by_type.setdefault(
+            name,
+            {
+                "room_type": name,
+                "capacity": None,
+                "monthly_values": {key: [] for key in period_keys},
+            },
+        )
+        if row.capacity is not None:
+            bucket["capacity"] = int(row.capacity)
+        if row.occupancy_pct is not None and period in bucket["monthly_values"]:
+            bucket["monthly_values"][period].append(float(row.occupancy_pct))
+
+    result_rows: list[dict[str, Any]] = []
+    for bucket in by_type.values():
+        monthly_pct: dict[str, float | None] = {}
+        all_values: list[float] = []
+        for key in period_keys:
+            values = bucket["monthly_values"].get(key) or []
+            if values:
+                avg = round(sum(values) / len(values), 2)
+                monthly_pct[key] = avg
+                all_values.extend(values)
+            else:
+                monthly_pct[key] = None
+        average_pct = (
+            round(sum(all_values) / len(all_values), 2) if all_values else None
+        )
+        result_rows.append(
+            {
+                "room_type": bucket["room_type"],
+                "capacity": bucket["capacity"],
+                "monthly_pct": monthly_pct,
+                "average_pct": average_pct,
+            }
+        )
+
+    result_rows.sort(
+        key=lambda item: (
+            -(float(item["average_pct"]) if item["average_pct"] is not None else -1.0),
+            str(item["room_type"] or "").lower(),
+        )
+    )
+
+    return {
+        "from_period": _period_key(start.year, start.month),
+        "to_period": _period_key(end.year, end.month),
+        "periods": period_keys,
+        "period_labels": [_period_label(key) for key in period_keys],
+        "rows": result_rows,
+        "has_data": bool(result_rows),
+        "source": "occupancy_stats_db",
+    }

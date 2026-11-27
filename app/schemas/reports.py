@@ -127,3 +127,20 @@ class OccupancyReportOut(BaseModel):
     refreshed_at: str | None = None
     has_data: bool = False
     source: str = "occupancy_stats_db"
+
+
+class OccupancyRoomTypeMonthRow(BaseModel):
+    room_type: str
+    capacity: int | None = None
+    monthly_pct: dict[str, float | None] = Field(default_factory=dict)
+    average_pct: float | None = None
+
+
+class OccupancyRoomTypesByMonthOut(BaseModel):
+    from_period: str
+    to_period: str
+    periods: list[str] = Field(default_factory=list)
+    period_labels: list[str] = Field(default_factory=list)
+    rows: list[OccupancyRoomTypeMonthRow] = Field(default_factory=list)
+    has_data: bool = False
+    source: str = "occupancy_stats_db"
