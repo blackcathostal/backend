@@ -28,12 +28,14 @@
   {"code": "5203", "name": "Insumos de Limpieza", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
   {"code": "5204", "name": "Lenceria", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 40},
   {"code": "5205", "name": "Utiles de Oficina", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 50},
+  {"code": "5206", "name": "Insumos Piscina", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 60, "concept_labels": ["Insumos Piscina", "Insumo Piscina", "Piscina", "Mantenimiento Piscina"]},
+  {"code": "5207", "name": "Insumos Termos", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 70, "concept_labels": ["Insumos Termos", "Insumo Termos", "Termos", "Thermos", "Mantenimiento Termos"]},
 
   {"code": "5301", "name": "Mantención Ascensores", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 10, "concept_labels": ["Ascensor", "Ascensores", "Insumo Ascensor", "Insumos Ascensor", "insumo de ascensor", "Duplex"]},
   {"code": "5302", "name": "Mantención Fumigación", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
   {"code": "5303", "name": "Mantencion General", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
-  {"code": "5304", "name": "Mantención Piscina", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 40},
-  {"code": "5305", "name": "Mantención Termos", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 50},
+  {"code": "5304", "name": "Mantención Piscina", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 40, "concept_labels": ["Piscina", "Mantencion Piscina", "Mantenimiento Piscina"]},
+  {"code": "5305", "name": "Mantención Termos", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 50, "concept_labels": ["Termos", "Thermos", "Mantencion Termos", "Mantenimiento Termos"]},
 
   {"code": "5401", "name": "Comisiones Booking", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 10, "concept_labels": ["Booking", "Booking.com", "booking"]},
   {"code": "5402", "name": "Comisión Expedia", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 20, "concept_labels": ["Expedia", "Expidia", "expedia", "expidia"]},

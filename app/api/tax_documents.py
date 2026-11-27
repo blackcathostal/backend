@@ -41,6 +41,7 @@ from app.services.billing_portal_web import BillingPortalError, BillingPortalWeb
 from app.services.accounting_classify import classify_document
 from app.services.tax_documents_fetch import TaxDocumentsFetchClient, _split_cl_iva
 from app.services.extranet_web_client import ExtranetWebError
+from app.services.manual_received_boletas import ensure_manual_received_boletas
 from app.services.received_document_account_map import (
     ensure_received_document_account_mappings_from_catalog,
     load_active_received_account_map,
@@ -1613,6 +1614,13 @@ async def refresh_tax_documents(
                 note = (
                     f"Se marcó Imputada Pagada en {paid_marked} recibida(s) "
                     f"hasta {cutoff.strftime('%d-%m-%Y')} (octubre inclusive)."
+                )
+                warning = f"{warning} · {note}" if warning else note
+            seeded = ensure_manual_received_boletas(db)
+            if seeded:
+                note = (
+                    f"Se cargaron/actualizaron {seeded} boleta(s) manuales "
+                    "(Insumos Piscina / Insumos Termos)."
                 )
                 warning = f"{warning} · {note}" if warning else note
     except IntegrityError as exc:

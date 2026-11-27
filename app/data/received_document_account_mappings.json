@@ -5,5 +5,19 @@
     "accounting_account_code": "5301",
     "notes": "Insumos / mantencion ascensor",
     "active": true
+  },
+  {
+    "identification_number": "76.250.148-1",
+    "company_name": "Mantenimiento Piscina",
+    "accounting_account_code": "5206",
+    "notes": "Insumos piscina",
+    "active": true
+  },
+  {
+    "identification_number": "76.881.234-9",
+    "company_name": "Mantenimiento Termos",
+    "accounting_account_code": "5207",
+    "notes": "Insumos termos",
+    "active": true
   }
 ]

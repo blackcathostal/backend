@@ -681,12 +681,14 @@ def seed_database(db: Session) -> None:
     ensure_default_terms(db)
     try:
         from app.services.accounting_concept_map import ensure_concept_labels_from_coa
+        from app.services.manual_received_boletas import ensure_manual_received_boletas
         from app.services.received_document_account_map import (
             ensure_received_document_account_mappings_from_catalog,
         )
 
         ensure_concept_labels_from_coa(db)
         ensure_received_document_account_mappings_from_catalog(db)
+        ensure_manual_received_boletas(db)
     except Exception:  # noqa: BLE001
         # Seed should not fail the whole API if catalog sync has a transient issue.
         pass
