@@ -44,7 +44,10 @@ from app.services.received_document_account_map import (
     load_active_received_account_map,
     resolve_received_accounting_account_id,
 )
-from app.services.utility_bills import fetch_utility_received_documents
+from app.services.utility_bills import (
+    fetch_utility_received_documents,
+    load_utility_bill_accounts,
+)
 
 # Issued DTE type codes treated as invoices (import from facturacion.cl when missing in FNS).
 _INVOICE_TYPE_CODES = frozenset({"33", "34", "61"})
@@ -346,6 +349,50 @@ def _mark_received_through_cutoff_paid(db: Session) -> int:
         .update({TaxDocuments.status_id: int(paid_id)}, synchronize_session=False)
     )
     return int(updated or 0)
+
+
+def _normalize_rut_digits(value: object) -> str:
+    return re.sub(r"[^0-9]", "", str(value or ""))
+
+
+def _remove_utility_docs_from_issued(db: Session) -> int:
+    """
+    Enel / Aguas Andinas belong in Recibidas only.
+    Move any issued leftovers (by source or catalog supplier RUT) to received.
+    """
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+    if issued_id is None or received_id is None:
+        return 0
+
+    utility_ruts = {
+        _normalize_rut_digits(row.get("supplier_rut"))
+        for row in load_utility_bill_accounts()
+        if _normalize_rut_digits(row.get("supplier_rut"))
+    }
+    rows = (
+        db.query(TaxDocuments)
+        .filter(TaxDocuments.dte_version_id == int(issued_id))
+        .all()
+    )
+    moved = 0
+    for row in rows:
+        source = str(row.source or "").strip().lower()
+        rut_digits = _normalize_rut_digits(row.identification_number)
+        is_utility = source == "servipag" or (rut_digits and rut_digits in utility_ruts)
+        if not is_utility:
+            # Also catch manual/misfiled rows by company name hints in raw_json.
+            raw = str(row.raw_json or "").lower()
+            company_hint = "enel" in raw or "aguas andinas" in raw
+            if not company_hint:
+                continue
+        row.dte_version_id = int(received_id)
+        if source != "servipag":
+            row.source = "servipag"
+        moved += 1
+    if moved:
+        db.commit()
+    return moved
 
 
 def _mark_received_october_invoices_paid(db: Session) -> int:
@@ -944,6 +991,15 @@ def _list_version(
         TaxDocuments.issued_at >= date_from,
         TaxDocuments.issued_at <= date_to,
     )
+    # Never show Servipag utilities under Emitidas.
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    if issued_id is not None and int(dte_version_id) == int(issued_id):
+        query = query.filter(
+            or_(
+                TaxDocuments.source.is_(None),
+                func.lower(TaxDocuments.source) != "servipag",
+            )
+        )
     rows = query.order_by(
         TaxDocuments.issued_at.desc(),
         TaxDocuments.id.desc(),
@@ -1481,6 +1537,13 @@ async def refresh_tax_documents(
                 .delete(synchronize_session=False)
             )
             db.commit()
+            moved_utilities = _remove_utility_docs_from_issued(db)
+            if moved_utilities:
+                note = (
+                    f"Se movieron {moved_utilities} doc(s) de Enel/Aguas "
+                    "desde Emitidas a Recibidas."
+                )
+                warning = f"{warning} · {note}" if warning else note
 
         upserted, classified, suppliers_upserted, customers_upserted = _upsert_docs(
             db,
@@ -1502,6 +1565,13 @@ async def refresh_tax_documents(
                 )
                 warning = f"{warning} · {note}" if warning else note
         if received_id is not None and int(version_id) == int(received_id):
+            moved_utilities = _remove_utility_docs_from_issued(db)
+            if moved_utilities:
+                note = (
+                    f"Se movieron {moved_utilities} doc(s) de Enel/Aguas "
+                    "desde Emitidas a Recibidas."
+                )
+                warning = f"{warning} · {note}" if warning else note
             paid_marked = _mark_received_through_cutoff_paid(db)
             october_invoices = _mark_received_october_invoices_paid(db)
             if paid_marked or october_invoices:
