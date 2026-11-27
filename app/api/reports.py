@@ -904,11 +904,21 @@ def _pivot_eerr_rows(
             existing.total = float(existing.total or 0) + amount
             if not existing.category and row.category:
                 existing.category = str(row.category or "")
-    return [
-        buckets[identity]
-        for identity in order
-        if abs(float(buckets[identity].total or 0)) > 0.5
-    ]
+    rows: list[EerrConsolidatedRow] = []
+    for identity in order:
+        row = buckets[identity]
+        total = abs(float(row.total or 0))
+        if total > 0.5:
+            rows.append(row)
+            continue
+        # Keep income chart rows and Comisiones at $0 so the EERR always lists them.
+        kind = str(row.row_kind or ("expense" if expense else "account"))
+        category = str(row.category or "").strip().lower()
+        if not expense and kind == "account":
+            rows.append(row)
+        elif expense and category == "comisiones":
+            rows.append(row)
+    return rows
 
 
 @router.get("/eerr", response_model=EerrReportOut)
@@ -929,7 +939,7 @@ def get_eerr_report(
     ensure_received_document_account_mappings_from_catalog(db)
     ensure_manual_received_boletas(db)
     _mark_received_through_cutoff_paid(db)
-    report = _build_eerr_report_for_month(db, month_start)
+    report = _remap_report_categories(db, _build_eerr_report_for_month(db, month_start))
     # Cache for consolidated (DB-only; consolidated never calls FNS).
     try:
         save_eerr_month_snapshot(db, report)
@@ -1178,12 +1188,12 @@ def get_eerr_consolidated(
         key = _period_key(month)
         snapshot = cached.get(key)
         if _is_official_eerr_snapshot(snapshot):
-            monthly_reports[key] = snapshot
+            monthly_reports[key] = _remap_report_categories(db, snapshot)
             cached_periods.append(key)
             continue
         # Provisional local numbers only — do not persist (avoids diverging from EERR).
         report = _build_eerr_report_for_month(db, month, use_remote=False)
-        monthly_reports[key] = report
+        monthly_reports[key] = _remap_report_categories(db, report)
         missing_periods.append(key)
 
     rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=False)
