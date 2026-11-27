@@ -52,6 +52,7 @@
   {"code": "5410", "name": "Servicio de Fotocopiadora", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 100},
   {"code": "5411", "name": "Servicio Lavandería", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 110, "concept_labels": ["Servicio Lavandería", "Lavandería servicio"]},
   {"code": "5412", "name": "Tecnologias de Información", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 120, "concept_labels": ["Tecnologias", "Tecnologías", "TI"]},
+  {"code": "5490", "name": "Otros gastos", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 200, "concept_labels": ["Otros gastos", "Otros", "*"]},
 
   {"code": "1201", "name": "Compra Lenceria", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 10},
   {"code": "1202", "name": "Compra Aire Acondicionado", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 20},
