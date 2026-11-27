@@ -125,10 +125,16 @@ def ensure_manual_received_boletas(db: Session) -> int:
         if str(row.code or "").strip()
     }
 
-    # Always wipe retired seeds first so a stale process cannot leave $200k Termos.
+    # Wipe retired seeds first (Termos / old Enel-Agua). Do not wipe active catalog
+    # rows here — empty keep_keys used to delete everything and race to $0 in EERR.
     changed = _purge_retired_manual_boletas(
-        db, received_id=int(received_id), keep_keys=set()
+        db,
+        received_id=int(received_id),
+        keep_keys=set(),
+        retired_only=True,
     )
+    if changed:
+        db.flush()
 
     keep_keys: set[tuple[str, str]] = set()
     for item in catalog:
@@ -250,8 +256,9 @@ def _purge_retired_manual_boletas(
     *,
     received_id: int,
     keep_keys: set[tuple[str, str]],
+    retired_only: bool = False,
 ) -> int:
-    """Delete seeded manual boletas that are no longer listed in the catalog."""
+    """Delete seeded manual boletas that are retired and/or no longer in the catalog."""
     rows = (
         db.query(TaxDocuments)
         .filter(
@@ -272,7 +279,10 @@ def _purge_retired_manual_boletas(
         retired = rut in _RETIRED_SEED_RUTS or any(
             folio.startswith(prefix) for prefix in _RETIRED_FOLIO_PREFIXES
         )
-        if key in keep_keys and not retired:
+        if retired_only:
+            if not retired:
+                continue
+        elif key in keep_keys and not retired:
             continue
         db.delete(row)
         deleted += 1
