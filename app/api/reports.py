@@ -30,6 +30,11 @@ from app.schemas.reports import (
     OccupancyReportOut,
     OccupancyRoomTypeRow,
 )
+from app.services.eerr_snapshots import (
+    empty_eerr_month_report,
+    load_eerr_month_snapshots,
+    save_eerr_month_snapshot,
+)
 from app.services import dte_catalog
 from app.services.accounting_concept_map import (
     account_code_for_concept,
@@ -907,7 +912,13 @@ def get_eerr_report(
     ensure_received_document_account_mappings_from_catalog(db)
     ensure_manual_received_boletas(db)
     _mark_received_through_cutoff_paid(db)
-    return _build_eerr_report_for_month(db, month_start)
+    report = _build_eerr_report_for_month(db, month_start)
+    # Cache for consolidated (DB-only; consolidated never calls FNS).
+    try:
+        save_eerr_month_snapshot(db, report)
+    except Exception as exc:
+        logger.warning("EERR snapshot save failed for %s: %s", report.period, exc)
+    return report
 
 
 @router.get("/eerr/detail", response_model=EerrDetailOut)
@@ -1086,7 +1097,10 @@ def get_eerr_consolidated(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrConsolidatedOut:
-    """Consolidated EERR: same monthly builder, one column per month."""
+    """
+    Consolidated EERR from cached monthly snapshots only (no FNS).
+    Open each monthly EERR once so its snapshot is stored.
+    """
     today = date.today()
     default_to = date(today.year, today.month, 1)
     default_from = date(today.year, 1, 1)
@@ -1100,44 +1114,33 @@ def get_eerr_consolidated(
     period_keys = [_period_key(month) for month in months]
     period_labels = [_period_label(month) for month in months]
 
-    ensure_concept_labels_from_coa(db)
-    ensure_received_document_account_mappings_from_catalog(db)
-    ensure_manual_received_boletas(db)
-    _mark_received_through_cutoff_paid(db)
+    cached = load_eerr_month_snapshots(db, period_keys)
+    cached_periods = [key for key in period_keys if key in cached]
+    missing_periods = [key for key in period_keys if key not in cached]
 
-    monthly_reports: dict[str, EerrReportOut] = {}
-    for month in months:
-        report = _build_eerr_report_for_month(db, month)
-        monthly_reports[report.period] = report
+    monthly_reports: dict[str, EerrReportOut] = {
+        key: cached.get(key) or empty_eerr_month_report(key) for key in period_keys
+    }
 
     rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=False)
     expense_rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=True)
 
     column_totals = {
-        key: float(monthly_reports[key].grand_total) if key in monthly_reports else 0.0
-        for key in period_keys
+        key: float(monthly_reports[key].grand_total) for key in period_keys
     }
     column_net_totals = {
-        key: float(monthly_reports[key].grand_net) if key in monthly_reports else 0.0
-        for key in period_keys
+        key: float(monthly_reports[key].grand_net) for key in period_keys
     }
     column_tax_totals = {
-        key: float(monthly_reports[key].grand_tax) if key in monthly_reports else 0.0
-        for key in period_keys
+        key: float(monthly_reports[key].grand_tax) for key in period_keys
     }
     column_expense_totals = {
-        key: float(monthly_reports[key].expenses_total) if key in monthly_reports else 0.0
-        for key in period_keys
+        key: float(monthly_reports[key].expenses_total) for key in period_keys
     }
     column_result_totals = {
-        key: float(monthly_reports[key].result_total) if key in monthly_reports else 0.0
-        for key in period_keys
+        key: float(monthly_reports[key].result_total) for key in period_keys
     }
 
-    source = next(
-        (monthly_reports[key].source for key in period_keys if key in monthly_reports),
-        "tax_documents_issued",
-    )
     return EerrConsolidatedOut(
         from_period=_period_key(start),
         to_period=_period_key(end),
@@ -1157,7 +1160,9 @@ def get_eerr_consolidated(
         expenses_total=float(sum(column_expense_totals.values())),
         column_result_totals=column_result_totals,
         result_total=float(sum(column_result_totals.values())),
-        source=source,
+        cached_periods=cached_periods,
+        missing_periods=missing_periods,
+        source="eerr_month_snapshots",
     )
 
 

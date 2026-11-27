@@ -12,6 +12,7 @@ from app.models.contacts import Contacts
 from app.models.hostel_info import CommonAnswers, HostelInfo
 from app.models.hr_period_amounts import HrPeriodAmounts
 from app.models.logs import Logs
+from app.models.eerr_month_snapshots import EerrMonthSnapshots
 from app.models.occupancy_stats import OccupancyDayStats, OccupancyRoomTypeStats
 from app.models.mail_accounts import MailAccounts
 from app.models.medias import Medias
@@ -60,6 +61,7 @@ __all__ = [
     "Rooms",
     "HostelInfo",
     "HrPeriodAmounts",
+    "EerrMonthSnapshots",
     "OccupancyDayStats",
     "OccupancyRoomTypeStats",
     "ReceivedDocumentAccountMappings",

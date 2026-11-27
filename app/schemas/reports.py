@@ -67,7 +67,10 @@ class EerrConsolidatedOut(BaseModel):
     # Resultado = neto − egresos (same as monthly EERR).
     column_result_totals: dict[str, float] = Field(default_factory=dict)
     result_total: float = 0
-    source: str = "tax_documents_issued"
+    # Periods present in eerr_month_snapshots (opened monthly EERR at least once).
+    cached_periods: list[str] = Field(default_factory=list)
+    missing_periods: list[str] = Field(default_factory=list)
+    source: str = "eerr_month_snapshots"
 
 
 class EerrDetailLine(BaseModel):

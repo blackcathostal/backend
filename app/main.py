@@ -25,6 +25,7 @@ from app.models import (  # noqa: F401
     DteStatuses,
     DteTypes,
     DteVersions,
+    EerrMonthSnapshots,
     HrPeriodAmounts,
     Logs,
     OccupancyDayStats,
