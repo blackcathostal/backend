@@ -19,5 +19,19 @@
     "accounting_account_code": "5305",
     "notes": "Mantencion termos",
     "active": true
+  },
+  {
+    "identification_number": "96.800.570-7",
+    "company_name": "Enel",
+    "accounting_account_code": "5310",
+    "notes": "Electricidad / Luz",
+    "active": true
+  },
+  {
+    "identification_number": "61.808.000-5",
+    "company_name": "Aguas Andinas",
+    "accounting_account_code": "5311",
+    "notes": "Agua",
+    "active": true
   }
 ]

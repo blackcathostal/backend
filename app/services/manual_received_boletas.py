@@ -40,6 +40,32 @@ def _load_catalog() -> list[dict]:
     return [row for row in rows if isinstance(row, dict) and row.get("active", True)]
 
 
+def _months_for_item(item: dict) -> list[int]:
+    """Months to seed (1–12). Optional catalog keys: months / exclude_months."""
+    raw_months = item.get("months")
+    if isinstance(raw_months, list) and raw_months:
+        months: list[int] = []
+        for value in raw_months:
+            try:
+                month = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= month <= 12:
+                months.append(month)
+        if months:
+            return sorted(set(months))
+
+    excluded: set[int] = set()
+    for value in item.get("exclude_months") or []:
+        try:
+            month = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= month <= 12:
+            excluded.add(month)
+    return [month for month in range(1, 13) if month not in excluded]
+
+
 def ensure_manual_received_boletas(db: Session) -> int:
     """
     Upsert one boleta per month for each catalog supplier.
@@ -88,7 +114,7 @@ def ensure_manual_received_boletas(db: Session) -> int:
         if company_name:
             _ensure_supplier(db, rut, company_name)
 
-        for month in range(1, 13):
+        for month in _months_for_item(item):
             folio = f"{prefix}{month:02d}"[:40]
             issued_at = date(year, month, 1)
             period = f"{month:02d}-{year}"

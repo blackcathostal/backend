@@ -1670,7 +1670,7 @@ async def refresh_tax_documents(
             if seeded:
                 note = (
                     f"Se cargaron/actualizaron {seeded} boleta(s) manuales "
-                    "(Mantención Piscina / Mantención Termos)."
+                    "(Mantención / Electricidad / Agua)."
                 )
                 warning = f"{warning} · {note}" if warning else note
     except IntegrityError as exc:
