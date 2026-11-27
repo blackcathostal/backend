@@ -26,6 +26,35 @@ CATALOG_PATH = BASE_DIR / "app" / "data" / "manual_received_boletas.json"
 # November stays En revisión; every other month is Imputada Pagada.
 OPEN_REVIEW_MONTH = 11
 
+# Invented Mantención Termos RUT + retired folio prefixes (Termos/Enel/Aguas seeds).
+# Real Enel/Aguas FNS docs keep their RUTs; only these manual seed folios are purged.
+_RETIRED_SEED_RUTS = frozenset(
+    {normalize_identification_number("76.881.234-9")}
+)
+_RETIRED_FOLIO_PREFIXES = ("888", "7777", "6666")
+
+
+def is_retired_manual_seed(
+    *,
+    identification_number: object = None,
+    folio: object = None,
+    source: object = None,
+    raw_json: object = None,
+    pms_class: object = None,
+) -> bool:
+    """True for invented Termos / retired Enel-Agua manual seed boletas."""
+    src = str(source or "").strip().lower()
+    raw = str(raw_json or "")
+    pms = str(pms_class or "")
+    is_seed = src == "manual" or "manual_received_boletas" in raw or pms == "Manual"
+    if not is_seed:
+        return False
+    rut = normalize_identification_number(identification_number)
+    folio_text = str(folio or "").strip()
+    if rut in _RETIRED_SEED_RUTS:
+        return True
+    return any(folio_text.startswith(prefix) for prefix in _RETIRED_FOLIO_PREFIXES)
+
 
 def _load_catalog() -> list[dict]:
     if not CATALOG_PATH.exists():
@@ -96,7 +125,11 @@ def ensure_manual_received_boletas(db: Session) -> int:
         if str(row.code or "").strip()
     }
 
-    changed = 0
+    # Always wipe retired seeds first so a stale process cannot leave $200k Termos.
+    changed = _purge_retired_manual_boletas(
+        db, received_id=int(received_id), keep_keys=set()
+    )
+
     keep_keys: set[tuple[str, str]] = set()
     for item in catalog:
         rut = normalize_identification_number(item.get("identification_number"))
@@ -109,6 +142,10 @@ def ensure_manual_received_boletas(db: Session) -> int:
         except (TypeError, ValueError):
             continue
         if not rut or not prefix or total_amount <= 0:
+            continue
+        if rut in _RETIRED_SEED_RUTS or any(
+            prefix.startswith(retired) for retired in _RETIRED_FOLIO_PREFIXES
+        ):
             continue
 
         type_code = str(item.get("dte_type_code") or "39").strip() or "39"
@@ -229,11 +266,13 @@ def _purge_retired_manual_boletas(
         is_seed = "manual_received_boletas" in raw or str(row.pms_class or "") == "Manual"
         if not is_seed:
             continue
-        key = (
-            normalize_identification_number(row.identification_number),
-            str(row.folio or "").strip(),
+        rut = normalize_identification_number(row.identification_number)
+        folio = str(row.folio or "").strip()
+        key = (rut, folio)
+        retired = rut in _RETIRED_SEED_RUTS or any(
+            folio.startswith(prefix) for prefix in _RETIRED_FOLIO_PREFIXES
         )
-        if key in keep_keys:
+        if key in keep_keys and not retired:
             continue
         db.delete(row)
         deleted += 1

@@ -46,7 +46,10 @@ from app.services.accounting_concept_map import (
 )
 from app.api.tax_documents import _has_pdf, _mark_received_through_cutoff_paid
 from app.services.extranet_web_client import ExtranetWebError
-from app.services.manual_received_boletas import ensure_manual_received_boletas
+from app.services.manual_received_boletas import (
+    ensure_manual_received_boletas,
+    is_retired_manual_seed,
+)
 from app.services.occupancy_store import (
     load_occupancy_report,
     load_occupancy_room_types_by_month,
@@ -180,10 +183,7 @@ def _received_totals_by_account_id(
     if received_id is None or paid_id is None:
         return {}
     rows = (
-        db.query(
-            TaxDocuments.accounting_account_id,
-            func.coalesce(func.sum(TaxDocuments.total_amount), 0.0),
-        )
+        db.query(TaxDocuments)
         .filter(
             TaxDocuments.dte_version_id == int(received_id),
             TaxDocuments.status_id == int(paid_id),
@@ -192,14 +192,21 @@ def _received_totals_by_account_id(
             TaxDocuments.issued_at >= date_from,
             TaxDocuments.issued_at <= date_to,
         )
-        .group_by(TaxDocuments.accounting_account_id)
         .all()
     )
-    return {
-        int(account_id): float(total or 0)
-        for account_id, total in rows
-        if account_id is not None
-    }
+    totals: dict[int, float] = {}
+    for row in rows:
+        if is_retired_manual_seed(
+            identification_number=row.identification_number,
+            folio=row.folio,
+            source=row.source,
+            raw_json=row.raw_json,
+            pms_class=row.pms_class,
+        ):
+            continue
+        account_id = int(row.accounting_account_id)
+        totals[account_id] = float(totals.get(account_id, 0.0) + float(row.total_amount or 0))
+    return totals
 
 
 def _commission_fees_by_account_id(
@@ -551,6 +558,14 @@ def _received_tax_document_lines(
     names = _supplier_names_for(db, [row.identification_number for row in rows])
     lines: list[dict] = []
     for row in rows:
+        if is_retired_manual_seed(
+            identification_number=row.identification_number,
+            folio=row.folio,
+            source=row.source,
+            raw_json=row.raw_json,
+            pms_class=row.pms_class,
+        ):
+            continue
         amount = float(row.total_amount or 0)
         if abs(amount) <= 0.5:
             continue
