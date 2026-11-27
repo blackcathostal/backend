@@ -9,15 +9,15 @@
   {
     "identification_number": "76.250.148-1",
     "company_name": "Mantenimiento Piscina",
-    "accounting_account_code": "5206",
-    "notes": "Insumos piscina",
+    "accounting_account_code": "5304",
+    "notes": "Mantencion piscina",
     "active": true
   },
   {
     "identification_number": "76.881.234-9",
     "company_name": "Mantenimiento Termos",
-    "accounting_account_code": "5207",
-    "notes": "Insumos termos",
+    "accounting_account_code": "5305",
+    "notes": "Mantencion termos",
     "active": true
   }
 ]
