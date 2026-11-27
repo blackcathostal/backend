@@ -334,6 +334,26 @@ def _received_auto_paid_through(today: date | None = None) -> date:
     return date(year, 10, 31)
 
 
+def _period_on_or_before_cutoff(period: str | None, cutoff: date) -> bool:
+    """True when period text (MM-YYYY / YYYY-MM) is on or before cutoff month."""
+    text = str(period or "").strip()
+    if not text:
+        return False
+    month_first = re.match(r"^(\d{1,2})[-/](\d{4})$", text)
+    if month_first:
+        month = int(month_first.group(1))
+        year = int(month_first.group(2))
+    else:
+        year_first = re.match(r"^(\d{4})[-/](\d{1,2})$", text)
+        if not year_first:
+            return False
+        year = int(year_first.group(1))
+        month = int(year_first.group(2))
+    if month < 1 or month > 12:
+        return False
+    return date(year, month, 1) <= date(cutoff.year, cutoff.month, 1)
+
+
 def _mark_received_through_cutoff_paid(db: Session) -> int:
     """Set Imputada Pagada on received docs dated through the October cutoff."""
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
@@ -351,7 +371,25 @@ def _mark_received_through_cutoff_paid(db: Session) -> int:
         )
         .update({TaxDocuments.status_id: int(paid_id)}, synchronize_session=False)
     )
-    return int(updated or 0)
+    # Rows without issued_at: close by period (MM-YYYY) through cutoff month.
+    orphan_updated = 0
+    orphans = (
+        db.query(TaxDocuments)
+        .filter(
+            TaxDocuments.dte_version_id == int(received_id),
+            TaxDocuments.issued_at.is_(None),
+            TaxDocuments.status_id != int(paid_id),
+        )
+        .all()
+    )
+    for row in orphans:
+        if _period_on_or_before_cutoff(row.period, cutoff):
+            row.status_id = int(paid_id)
+            orphan_updated += 1
+    total = int(updated or 0) + orphan_updated
+    if total:
+        db.commit()
+    return total
 
 
 def _normalize_rut_digits(value: object) -> str:
@@ -1022,6 +1060,8 @@ def list_received(
 ) -> TaxDocumentListResult:
     start, end = _default_range()
     version_id = dte_catalog.version_id_from_raw(db, dte_catalog.VERSION_CODE_RECEIVED)
+    # Keep closed months (through October) as Imputada Pagada without requiring Actualizar.
+    _mark_received_through_cutoff_paid(db)
     return _list_version(
         db,
         dte_version_id=version_id,
@@ -1609,7 +1649,6 @@ async def refresh_tax_documents(
                 warning = f"{warning} · {note}" if warning else note
             paid_marked = _mark_received_through_cutoff_paid(db)
             if paid_marked:
-                db.commit()
                 cutoff = _received_auto_paid_through()
                 note = (
                     f"Se marcó Imputada Pagada en {paid_marked} recibida(s) "
@@ -1617,6 +1656,15 @@ async def refresh_tax_documents(
                 )
                 warning = f"{warning} · {note}" if warning else note
             seeded = ensure_manual_received_boletas(db)
+            # Re-apply cutoff after seed so Oct manuals stay Imputada Pagada.
+            paid_after_seed = _mark_received_through_cutoff_paid(db)
+            if paid_after_seed and not paid_marked:
+                cutoff = _received_auto_paid_through()
+                note = (
+                    f"Se marcó Imputada Pagada en {paid_after_seed} recibida(s) "
+                    f"hasta {cutoff.strftime('%d-%m-%Y')} (octubre inclusive)."
+                )
+                warning = f"{warning} · {note}" if warning else note
             if seeded:
                 note = (
                     f"Se cargaron/actualizaron {seeded} boleta(s) manuales "

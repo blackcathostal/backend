@@ -689,6 +689,9 @@ def seed_database(db: Session) -> None:
         ensure_concept_labels_from_coa(db)
         ensure_received_document_account_mappings_from_catalog(db)
         ensure_manual_received_boletas(db)
+        from app.api.tax_documents import _mark_received_through_cutoff_paid
+
+        _mark_received_through_cutoff_paid(db)
     except Exception:  # noqa: BLE001
         # Seed should not fail the whole API if catalog sync has a transient issue.
         pass
