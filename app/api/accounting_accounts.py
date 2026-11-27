@@ -66,6 +66,11 @@ def _load_coa_catalog() -> list[dict]:
             continue
         if account_type not in VALID_TYPES or nature not in VALID_NATURES:
             continue
+        raw_active = item.get("is_active", True)
+        if isinstance(raw_active, str):
+            is_active = raw_active.strip().lower() not in {"0", "false", "no", "off"}
+        else:
+            is_active = bool(raw_active)
         accounts.append(
             {
                 "code": code,
@@ -75,6 +80,7 @@ def _load_coa_catalog() -> list[dict]:
                 "nature": nature,
                 "sort_order": sort_order,
                 "concept_labels": parse_concept_labels(item.get("concept_labels")),
+                "is_active": is_active,
             }
         )
     if not accounts:
@@ -131,7 +137,10 @@ def import_accounting_accounts_from_billing_portal(
         code = item["code"]
         row = existing.get(code)
         labels_json = serialize_concept_labels(item.get("concept_labels") or [])
+        is_active = bool(item.get("is_active", True))
         if row is None:
+            if not is_active:
+                continue
             account = AccountingAccounts(
                 code=code,
                 name=item["name"],
@@ -167,8 +176,8 @@ def import_accounting_accounts_from_billing_portal(
         if (row.concept_labels or "[]") != labels_json:
             row.concept_labels = labels_json
             changed = True
-        if not row.is_active:
-            row.is_active = True
+        if bool(row.is_active) != is_active:
+            row.is_active = is_active
             changed = True
         if changed:
             updated += 1

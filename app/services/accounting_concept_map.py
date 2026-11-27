@@ -130,8 +130,15 @@ def ensure_concept_labels_from_coa(db: Session) -> int:
         except (TypeError, ValueError):
             sort_order = 0
         labels_json = serialize_concept_labels(parse_concept_labels(item.get("concept_labels")))
+        is_active = item.get("is_active", True)
+        if isinstance(is_active, str):
+            is_active = is_active.strip().lower() not in {"0", "false", "no", "off"}
+        else:
+            is_active = bool(is_active)
         row = existing.get(code)
         if row is None:
+            if not is_active:
+                continue
             account = AccountingAccounts(
                 code=code,
                 name=name,
@@ -167,8 +174,8 @@ def ensure_concept_labels_from_coa(db: Session) -> int:
         if (row.concept_labels or "[]") != labels_json:
             row.concept_labels = labels_json
             row_changed = True
-        if not row.is_active:
-            row.is_active = True
+        if bool(row.is_active) != is_active:
+            row.is_active = is_active
             row_changed = True
         if row_changed:
             changed += 1
