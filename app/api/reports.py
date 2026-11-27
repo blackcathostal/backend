@@ -927,7 +927,7 @@ def _pivot_eerr_rows(
         if not expense and kind == "account":
             rows.append(row)
         elif expense and (
-            category in {"comisiones", "mantenimiento", "mantencion"}
+            category in {"comisiones", "mantenimiento", "mantencion", "servicios"}
             or category.startswith("materiales")
             or name in {"luz", "agua"}
         ):
