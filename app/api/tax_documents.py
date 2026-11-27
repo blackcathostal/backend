@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -16,11 +17,12 @@ from app.core.security import get_current_user
 from app.models.accounting_accounts import AccountingAccounts
 from app.models.customers import Customers
 from app.models.suppliers import Suppliers
-from app.models.tax_documents import DteStatuses, TaxDocuments
+from app.models.tax_documents import DteStatuses, DteTypes, TaxDocuments
 from app.models.users import Users
 from app.schemas.tax_documents import (
     DteStatusOut,
     TaxDocumentClearResult,
+    TaxDocumentCreate,
     TaxDocumentListResult,
     TaxDocumentOut,
     TaxDocumentPatch,
@@ -741,6 +743,9 @@ def _upsert_docs(
                 period=period or "",
             )
             db.add(row)
+        elif str(row.source or "").strip().lower() == "manual":
+            # Keep operator-entered Track rows; do not overwrite from scrapes.
+            continue
 
         row.dte_version_id = version_id
         row.dte_type_id = type_id
@@ -964,6 +969,191 @@ def list_dte_statuses(
     _: Users = Depends(get_current_user),
 ) -> list[DteStatusOut]:
     return _list_statuses(db)
+
+
+def _next_manual_folio(db: Session, *, version_id: int, type_id: int | None) -> str:
+    """Generate a unique manual folio that will not collide with SII/FNS folios."""
+    prefix = f"MAN-{date.today().strftime('%Y%m%d')}-"
+    existing = (
+        db.query(TaxDocuments.folio)
+        .filter(
+            TaxDocuments.dte_version_id == int(version_id),
+            TaxDocuments.folio.like(f"{prefix}%"),
+        )
+        .all()
+    )
+    used = set()
+    for (folio,) in existing:
+        suffix = str(folio or "")[len(prefix) :]
+        if suffix.isdigit():
+            used.add(int(suffix))
+    seq = 1
+    while seq in used:
+        seq += 1
+    # Bound type_id only for uniqueness clarity in logs; folio itself is enough.
+    _ = type_id
+    return f"{prefix}{seq:03d}"[:40]
+
+
+@router.post("/documents", response_model=TaxDocumentOut)
+def create_manual_document(
+    payload: TaxDocumentCreate,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> TaxDocumentOut:
+    """Create a manual Track document (issued or received)."""
+    try:
+        version_id = dte_catalog.version_id_from_raw(db, payload.direction)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="direction must be issued or received",
+        ) from exc
+
+    type_id = dte_catalog.type_id_from_raw(db, payload.dte_type_code)
+    if type_id is None:
+        raise HTTPException(status_code=400, detail="dte_type_code inválido")
+
+    type_code = ""
+    type_obj = db.query(DteTypes).filter(DteTypes.id == int(type_id)).first()
+    if type_obj is not None:
+        type_code = str(type_obj.code or "")
+
+    issued_at = payload.issued_at or date.today()
+    period = str(payload.period or "").strip()[:40] or _period_from_issued_at(issued_at)
+    folio = str(payload.folio or "").strip()[:40]
+    if not folio:
+        folio = _next_manual_folio(db, version_id=version_id, type_id=type_id)
+
+    identification_number = str(payload.identification_number or "").strip()[:80]
+    company_name = str(payload.company_name or "").strip()
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+
+    if int(version_id) == int(issued_id or 0):
+        _, identification_number = _upsert_customer(
+            db, identification_number, company_name
+        )
+        if identification_number == GENERIC_CUSTOMER_RUT:
+            company_name = GENERIC_CUSTOMER_NAME
+    else:
+        if not identification_number and not company_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Indicá RUT o nombre del proveedor",
+            )
+        if identification_number:
+            _upsert_supplier(db, identification_number, company_name)
+        else:
+            # Keep a stable key when only name is provided.
+            identification_number = _customer_key("", company_name)
+
+    total_amount = float(payload.total_amount or 0)
+    if total_amount < 0:
+        raise HTTPException(status_code=400, detail="total_amount inválido")
+    net_amount, exempt_amount, tax_amount = _split_cl_iva(
+        total_amount,
+        doc_type=type_code or payload.dte_type_code,
+    )
+
+    status_id = payload.status_id
+    if status_id is not None:
+        status = db.query(DteStatuses).filter(DteStatuses.id == int(status_id)).first()
+        if status is None:
+            raise HTTPException(status_code=400, detail="status_id inválido")
+    else:
+        status_id = dte_catalog.default_new_document_status_id(db)
+
+    accounting_account_id = payload.accounting_account_id
+    if accounting_account_id is not None and int(accounting_account_id) != 0:
+        account = (
+            db.query(AccountingAccounts)
+            .filter(AccountingAccounts.id == int(accounting_account_id))
+            .first()
+        )
+        if account is None:
+            raise HTTPException(status_code=400, detail="accounting_account_id inválido")
+    else:
+        accounting_account_id = None
+        if int(version_id) == int(received_id or 0) and identification_number:
+            accounting_account_id = resolve_received_accounting_account_id(
+                db,
+                identification_number=identification_number,
+            )
+
+    duplicate = (
+        db.query(TaxDocuments)
+        .filter(
+            TaxDocuments.dte_version_id == int(version_id),
+            TaxDocuments.dte_type_id == int(type_id),
+            TaxDocuments.folio == folio,
+            TaxDocuments.identification_number == identification_number,
+        )
+        .first()
+    )
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Ya existe un documento con ese folio, tipo y RUT",
+        )
+
+    row = TaxDocuments(
+        dte_version_id=int(version_id),
+        dte_type_id=int(type_id),
+        folio=folio,
+        identification_number=identification_number,
+        status_id=int(status_id) if status_id is not None else None,
+        accounting_account_id=int(accounting_account_id)
+        if accounting_account_id is not None
+        else None,
+        period=period,
+        issued_at=issued_at,
+        net_amount=net_amount,
+        exempt_amount=exempt_amount,
+        tax_amount=tax_amount,
+        total_amount=total_amount,
+        branch="",
+        pms_class="Manual",
+        pms_ref="",
+        source="manual",
+        raw_json=json.dumps(
+            {
+                "manual": True,
+                "company_name": company_name,
+                "dte_type_code": type_code or payload.dte_type_code,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo guardar (conflicto de folio/RUT).",
+        ) from exc
+
+    row = (
+        db.query(TaxDocuments)
+        .options(
+            joinedload(TaxDocuments.status),
+            joinedload(TaxDocuments.dte_type),
+            joinedload(TaxDocuments.dte_version),
+            joinedload(TaxDocuments.accounting_account),
+        )
+        .filter(TaxDocuments.id == row.id)
+        .first()
+    )
+    if int(version_id) == int(issued_id or 0):
+        names = _customer_name_map(db, [row.identification_number])
+    else:
+        names = _supplier_name_map(db, [row.identification_number])
+    return _serialize_doc(
+        row,
+        company_name=names.get(row.identification_number or "", "") or company_name,
+    )
 
 
 @router.patch("/documents/{doc_id}", response_model=TaxDocumentOut)
@@ -1216,6 +1406,10 @@ async def refresh_tax_documents(
                     TaxDocuments.issued_at.isnot(None),
                     TaxDocuments.issued_at >= date_from,
                     TaxDocuments.issued_at <= date_to,
+                    or_(
+                        TaxDocuments.source.is_(None),
+                        func.lower(TaxDocuments.source) != "manual",
+                    ),
                 )
                 .delete(synchronize_session=False)
             )

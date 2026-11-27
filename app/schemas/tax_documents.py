@@ -69,6 +69,21 @@ class TaxDocumentPatch(BaseModel):
     accounting_account_id: int | None = None
 
 
+class TaxDocumentCreate(BaseModel):
+    """Manual Track entry (issued or received)."""
+
+    direction: str = Field(description="issued or received")
+    dte_type_code: str = Field(description="Catalog code: 33, 39, voucher, …")
+    total_amount: float = Field(ge=0)
+    identification_number: str = Field(default="", max_length=80)
+    company_name: str = Field(default="", max_length=200)
+    issued_at: date | None = None
+    folio: str = Field(default="", max_length=40)
+    period: str | None = Field(default=None, max_length=40)
+    accounting_account_id: int | None = None
+    status_id: int | None = None
+
+
 class TaxDocumentRefreshResult(BaseModel):
     dte_version_id: int
     fetched: int
