@@ -782,7 +782,8 @@ def get_eerr_report(
         date_to=month_finish,
     )
     expenses_total = float(sum(float(row.total or 0) for row in expense_rows))
-    result_total = float(grand_total - expenses_total)
+    # Result = income net (ex-IVA) minus expenses.
+    result_total = float(grand_net - expenses_total)
     return EerrReportOut(
         period=period_key,
         section_title="Ingresos",
