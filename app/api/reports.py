@@ -246,11 +246,12 @@ def _expense_rows_for_period(
     period_key: str,
     date_from: date,
     date_to: date,
+    use_remote: bool = True,
 ) -> list[EerrAccountRow]:
     """
     Egresos: all active gasto accounts.
     Remuneraciones ← hr_period_amounts;
-    OTA commissions ← FNS Informes/Comisiones (Booking/Expedia/…);
+    OTA commissions ← FNS Informes/Comisiones (Booking/Expedia/…) when use_remote;
     other categories ← recibidas Imputada Pagada assigned totals.
     """
     accounts = load_expense_accounts(db)
@@ -260,9 +261,11 @@ def _expense_rows_for_period(
     received_amounts = _received_totals_by_account_id(
         db, date_from=date_from, date_to=date_to
     )
-    commission_amounts = _commission_fees_by_account_id(
-        db, date_from=date_from, date_to=date_to, accounts=accounts
-    )
+    commission_amounts: dict[int, float] = {}
+    if use_remote:
+        commission_amounts = _commission_fees_by_account_id(
+            db, date_from=date_from, date_to=date_to, accounts=accounts
+        )
     rows: list[EerrAccountRow] = []
     for account in accounts:
         category = str(account.category or "").strip()
@@ -709,9 +712,15 @@ def _fetch_extranet_month(date_from: date, date_to: date, *, accounts: list) -> 
     return client.fetch_income_by_account(date_from, date_to, accounts=accounts)
 
 
-def _build_eerr_report_for_month(db: Session, month_start: date) -> EerrReportOut:
+def _build_eerr_report_for_month(
+    db: Session,
+    month_start: date,
+    *,
+    use_remote: bool = True,
+) -> EerrReportOut:
     """
     Same rules as monthly EERR for one month (income + expenses + result).
+    use_remote=False skips FNS (Cobros/comisiones) and uses local DB only.
     Caller should run CoA / mapping / manual boleta ensures once per request.
     """
     today = date.today()
@@ -722,7 +731,7 @@ def _build_eerr_report_for_month(db: Session, month_start: date) -> EerrReportOu
     )
     accounts = load_income_accounts(db)
 
-    source = "tax_documents_issued"
+    source = "tax_documents_issued" if use_remote else "tax_documents_issued_local"
     issued_by_account = _issued_totals_by_account_id(
         db,
         date_from=month_start,
@@ -748,19 +757,20 @@ def _build_eerr_report_for_month(db: Session, month_start: date) -> EerrReportOu
     collected = 0.0
     pending = 0.0
 
-    try:
-        sales = TaxDocumentsFetchClient()._income_collections_sales_totals(
-            month_start, month_finish
-        )
-        sold = float(sales.get("sold") or 0) or sold
-        collected = float(sales.get("collected") or 0)
-        pending = float(sales.get("pending") or 0)
-    except ExtranetWebError as exc:
-        logger.warning("EERR collected/pending unavailable: %s", exc)
+    if use_remote:
+        try:
+            sales = TaxDocumentsFetchClient()._income_collections_sales_totals(
+                month_start, month_finish
+            )
+            sold = float(sales.get("sold") or 0) or sold
+            collected = float(sales.get("collected") or 0)
+            pending = float(sales.get("pending") or 0)
+        except ExtranetWebError as exc:
+            logger.warning("EERR collected/pending unavailable: %s", exc)
 
-    # Bruto must match Emitido (Cobros FNS). Unknown gap → catch-all "Otros".
+    # Bruto must match Emitido (Cobros FNS) when remote. Unknown gap → "Otros".
     grand_total = float(classified_total)
-    if sold > classified_total + 0.5:
+    if use_remote and sold > classified_total + 0.5:
         gap = float(round(sold - classified_total))
         other = catch_all_account(accounts)
         if other is not None:
@@ -798,7 +808,7 @@ def _build_eerr_report_for_month(db: Session, month_start: date) -> EerrReportOu
             )
             unclassified_collections = float(unclassified_collections) + gap
         grand_total = float(sold)
-    elif sold > 0.5:
+    elif use_remote and sold > 0.5:
         grand_total = float(sold)
 
     invoice_by_account = _invoice_totals_by_account_id(
@@ -823,6 +833,7 @@ def _build_eerr_report_for_month(db: Session, month_start: date) -> EerrReportOu
         period_key=period_key,
         date_from=month_start,
         date_to=month_finish,
+        use_remote=use_remote,
     )
     expenses_total = float(sum(float(row.total or 0) for row in expense_rows))
     result_total = float(grand_net - expenses_total)
@@ -1104,8 +1115,8 @@ def get_eerr_consolidated(
     _: Users = Depends(get_current_user),
 ) -> EerrConsolidatedOut:
     """
-    Consolidated EERR from cached monthly snapshots only (no FNS).
-    Open each monthly EERR once so its snapshot is stored.
+    Consolidated EERR without FNS.
+    Prefer monthly snapshots (from opening EERR); fill gaps from local DB.
     """
     today = date.today()
     default_to = date(today.year, today.month, 1)
@@ -1120,13 +1131,31 @@ def get_eerr_consolidated(
     period_keys = [_period_key(month) for month in months]
     period_labels = [_period_label(month) for month in months]
 
-    cached = load_eerr_month_snapshots(db, period_keys)
-    cached_periods = [key for key in period_keys if key in cached]
-    missing_periods = [key for key in period_keys if key not in cached]
+    ensure_concept_labels_from_coa(db)
+    ensure_received_document_account_mappings_from_catalog(db)
+    ensure_manual_received_boletas(db)
+    _mark_received_through_cutoff_paid(db)
 
-    monthly_reports: dict[str, EerrReportOut] = {
-        key: cached.get(key) or empty_eerr_month_report(key) for key in period_keys
-    }
+    cached = load_eerr_month_snapshots(db, period_keys)
+    monthly_reports: dict[str, EerrReportOut] = {}
+    cached_periods: list[str] = []
+    missing_periods: list[str] = []
+
+    for month in months:
+        key = _period_key(month)
+        snapshot = cached.get(key)
+        if snapshot is not None:
+            monthly_reports[key] = snapshot
+            cached_periods.append(key)
+            continue
+        # Local DB fill (issued/recibidas/HR) — never call FNS here.
+        report = _build_eerr_report_for_month(db, month, use_remote=False)
+        monthly_reports[key] = report
+        missing_periods.append(key)
+        try:
+            save_eerr_month_snapshot(db, report)
+        except Exception as exc:
+            logger.warning("EERR local snapshot save failed for %s: %s", key, exc)
 
     rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=False)
     expense_rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=True)
