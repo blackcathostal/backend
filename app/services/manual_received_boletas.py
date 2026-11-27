@@ -97,6 +97,7 @@ def ensure_manual_received_boletas(db: Session) -> int:
     }
 
     changed = 0
+    keep_keys: set[tuple[str, str]] = set()
     for item in catalog:
         rut = normalize_identification_number(item.get("identification_number"))
         company_name = str(item.get("company_name") or "").strip()[:180]
@@ -124,6 +125,7 @@ def ensure_manual_received_boletas(db: Session) -> int:
 
         for month in _months_for_item(item):
             folio = f"{prefix}{month:02d}"[:40]
+            keep_keys.add((rut, folio))
             issued_at = date(year, month, 1)
             period = f"{month:02d}-{year}"
             status_id = int(waiting_id) if month == OPEN_REVIEW_MONTH else int(paid_id)
@@ -196,9 +198,46 @@ def ensure_manual_received_boletas(db: Session) -> int:
             if row_changed:
                 changed += 1
 
+    # Drop retired manual seeds (Termos / Enel / Agua, etc.) no longer in catalog.
+    changed += _purge_retired_manual_boletas(
+        db, received_id=int(received_id), keep_keys=keep_keys
+    )
+
     if changed:
         db.commit()
     return changed
+
+
+def _purge_retired_manual_boletas(
+    db: Session,
+    *,
+    received_id: int,
+    keep_keys: set[tuple[str, str]],
+) -> int:
+    """Delete seeded manual boletas that are no longer listed in the catalog."""
+    rows = (
+        db.query(TaxDocuments)
+        .filter(
+            TaxDocuments.dte_version_id == int(received_id),
+            TaxDocuments.source == "manual",
+        )
+        .all()
+    )
+    deleted = 0
+    for row in rows:
+        raw = str(row.raw_json or "")
+        is_seed = "manual_received_boletas" in raw or str(row.pms_class or "") == "Manual"
+        if not is_seed:
+            continue
+        key = (
+            normalize_identification_number(row.identification_number),
+            str(row.folio or "").strip(),
+        )
+        if key in keep_keys:
+            continue
+        db.delete(row)
+        deleted += 1
+    return deleted
 
 
 def _ensure_supplier(db: Session, identification_number: str, company_name: str) -> None:
