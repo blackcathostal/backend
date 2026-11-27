@@ -679,6 +679,17 @@ def seed_database(db: Session) -> None:
 
     db.commit()
     ensure_default_terms(db)
+    try:
+        from app.services.accounting_concept_map import ensure_concept_labels_from_coa
+        from app.services.received_document_account_map import (
+            ensure_received_document_account_mappings_from_catalog,
+        )
+
+        ensure_concept_labels_from_coa(db)
+        ensure_received_document_account_mappings_from_catalog(db)
+    except Exception:  # noqa: BLE001
+        # Seed should not fail the whole API if catalog sync has a transient issue.
+        pass
     # Refresh packaged Instagram rates cache when defaults are newer.
     from app.services.room_rates import load_room_rates
 

@@ -42,6 +42,7 @@ from app.services.accounting_classify import classify_document
 from app.services.tax_documents_fetch import TaxDocumentsFetchClient, _split_cl_iva
 from app.services.extranet_web_client import ExtranetWebError
 from app.services.received_document_account_map import (
+    ensure_received_document_account_mappings_from_catalog,
     load_active_received_account_map,
     resolve_received_accounting_account_id,
 )
@@ -690,12 +691,15 @@ def _upsert_docs(
     issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
     under_review_status_id = dte_catalog.under_review_status_id(db) or default_status_id
-    received_account_map = (
-        load_active_received_account_map(db) if received_id else {}
-    )
     if issued_id and int(dte_version_id or 0) == int(issued_id):
         # Keep lodging/Hospedaje labels available for invoice defaults.
         ensure_concept_labels_from_coa(db)
+    if received_id and int(dte_version_id or 0) == int(received_id):
+        ensure_concept_labels_from_coa(db)
+        ensure_received_document_account_mappings_from_catalog(db)
+    received_account_map = (
+        load_active_received_account_map(db) if received_id else {}
+    )
 
     for item in docs:
         version_id = int(item.get("dte_version_id") or dte_version_id or 0)

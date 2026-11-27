@@ -29,7 +29,7 @@
   {"code": "5204", "name": "Lenceria", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 40},
   {"code": "5205", "name": "Utiles de Oficina", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 50},
 
-  {"code": "5301", "name": "Mantención Ascensores", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
+  {"code": "5301", "name": "Mantención Ascensores", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 10, "concept_labels": ["Ascensor", "Ascensores", "Insumo Ascensor", "Insumos Ascensor", "insumo de ascensor", "Duplex"]},
   {"code": "5302", "name": "Mantención Fumigación", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
   {"code": "5303", "name": "Mantencion General", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
   {"code": "5304", "name": "Mantención Piscina", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 40},
