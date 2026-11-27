@@ -78,3 +78,32 @@ class EerrDetailOut(BaseModel):
     title: str = ""
     total: float = 0
     lines: list[EerrDetailLine] = Field(default_factory=list)
+
+
+class OccupancyDayRow(BaseModel):
+    date: str
+    weekday: str = ""
+    rooms_occupied: int = 0
+    guests: int = 0
+    hosts: int = 0
+    check_in: int = 0
+    check_out: int = 0
+    occupancy_pct: float | None = None
+
+
+class OccupancyRoomTypeRow(BaseModel):
+    room_type: str
+    capacity: int | None = None
+    daily_pct: dict[str, float] = Field(default_factory=dict)
+    average_pct: float | None = None
+    is_total: bool = False
+
+
+class OccupancyReportOut(BaseModel):
+    period: str
+    day: str | None = None
+    total_rooms: int | None = None
+    month_avg_occupancy_pct: float | None = None
+    days: list[OccupancyDayRow] = Field(default_factory=list)
+    room_types: list[OccupancyRoomTypeRow] = Field(default_factory=list)
+    source: str = "fns_informes_occupancy"
