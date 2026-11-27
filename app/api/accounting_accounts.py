@@ -27,6 +27,7 @@ CATEGORY_ORDER = {
     "Mantenimiento": 40,
     "Servicios": 50,
     "Comisiones": 55,
+    "Arriendos": 58,
     "Activo Fijo": 60,
     "Balance": 70,
 }

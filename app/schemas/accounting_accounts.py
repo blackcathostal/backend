@@ -14,6 +14,7 @@ AccountCategory = Literal[
     "Remuneraciones",
     "Servicios",
     "Comisiones",
+    "Arriendos",
     "Activo Fijo",
     "Balance",
 ]
