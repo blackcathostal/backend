@@ -25,6 +25,17 @@ router = APIRouter(prefix="/human-resources", tags=["human-resources"])
 _REMUNERACIONES = "remuneraciones"
 
 
+def _normalize_category(value: object) -> str:
+    text = str(value or "").strip().lower()
+    return (
+        text.replace("ó", "o")
+        .replace("á", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ú", "u")
+    )
+
+
 def _normalize_period(value: str | None) -> str:
     text = str(value or "").strip()
     if not text:
@@ -60,7 +71,7 @@ def _load_remuneracion_accounts(db: Session) -> list[AccountingAccounts]:
     return [
         row
         for row in rows
-        if str(row.category or "").strip().lower() == _REMUNERACIONES
+        if _normalize_category(row.category) == _REMUNERACIONES
     ]
 
 
