@@ -698,34 +698,20 @@ def _fetch_extranet_month(date_from: date, date_to: date, *, accounts: list) -> 
     return client.fetch_income_by_account(date_from, date_to, accounts=accounts)
 
 
-@router.get("/eerr", response_model=EerrReportOut)
-def get_eerr_report(
-    period: str | None = None,
-    db: Session = Depends(get_db),
-    _: Users = Depends(get_current_user),
-) -> EerrReportOut:
+def _build_eerr_report_for_month(db: Session, month_start: date) -> EerrReportOut:
     """
-    Income statement for one month.
-
-    Income ← issued tax documents by account (same idea as received docs for expenses).
-    Expenses ← received docs + HR + OTA commissions (FNS commissions report).
-    Collected/pending KPIs still come from FNS income-collections when available.
+    Same rules as monthly EERR for one month (income + expenses + result).
+    Caller should run CoA / mapping / manual boleta ensures once per request.
     """
-    month_start = _parse_period(period)
-    # Cap "this month" to today so mid-month matches FNS open range.
     today = date.today()
-    month_finish = min(_month_end(month_start), today) if (
-        month_start.year == today.year and month_start.month == today.month
-    ) else _month_end(month_start)
-    ensure_concept_labels_from_coa(db)
-    ensure_received_document_account_mappings_from_catalog(db)
-    # Ensure monthly Insumos Piscina/Termos boletas exist for EERR expenses.
-    ensure_manual_received_boletas(db)
-    _mark_received_through_cutoff_paid(db)
+    month_finish = (
+        min(_month_end(month_start), today)
+        if (month_start.year == today.year and month_start.month == today.month)
+        else _month_end(month_start)
+    )
     accounts = load_income_accounts(db)
 
     source = "tax_documents_issued"
-    # Income rows: income-collections / boletas — not facturacion.cl invoices (Facturado KPI).
     issued_by_account = _issued_totals_by_account_id(
         db,
         date_from=month_start,
@@ -751,7 +737,6 @@ def get_eerr_report(
     collected = 0.0
     pending = 0.0
 
-    # Cash KPIs from FNS income-collections (sold/collected/pending).
     try:
         sales = TaxDocumentsFetchClient()._income_collections_sales_totals(
             month_start, month_finish
@@ -805,7 +790,6 @@ def get_eerr_report(
     elif sold > 0.5:
         grand_total = float(sold)
 
-    # Invoiced KPI: invoices/credit notes 33/34/61 (assigned + unassigned).
     invoice_by_account = _invoice_totals_by_account_id(
         db, date_from=month_start, date_to=month_finish
     )
@@ -830,7 +814,6 @@ def get_eerr_report(
         date_to=month_finish,
     )
     expenses_total = float(sum(float(row.total or 0) for row in expense_rows))
-    # Result = income net (ex-IVA) minus expenses.
     result_total = float(grand_net - expenses_total)
     return EerrReportOut(
         period=period_key,
@@ -852,6 +835,79 @@ def get_eerr_report(
         unclassified_collections=unclassified_collections,
         source=source,
     )
+
+
+def _consolidated_row_key(row: EerrAccountRow) -> tuple:
+    kind = str(row.row_kind or "account")
+    account_id = int(row.account_id) if row.account_id is not None else None
+    code = str(row.code or "").strip()
+    name = str(row.name or "").strip().lower()
+    return (kind, account_id, code, name)
+
+
+def _pivot_eerr_rows(
+    period_keys: list[str],
+    monthly_reports: dict[str, EerrReportOut],
+    *,
+    expense: bool = False,
+) -> list[EerrConsolidatedRow]:
+    """Pivot monthly EERR account rows into consolidated amount columns."""
+    buckets: dict[tuple, EerrConsolidatedRow] = {}
+    order: list[tuple] = []
+    for key in period_keys:
+        report = monthly_reports.get(key)
+        if report is None:
+            continue
+        source_rows = report.expense_rows if expense else report.rows
+        for row in source_rows:
+            identity = _consolidated_row_key(row)
+            amount = float(row.total or 0)
+            existing = buckets.get(identity)
+            if existing is None:
+                amounts = {period: 0.0 for period in period_keys}
+                amounts[key] = amount
+                existing = EerrConsolidatedRow(
+                    account_id=row.account_id,
+                    code=str(row.code or ""),
+                    name=str(row.name or ""),
+                    amounts=amounts,
+                    total=amount,
+                    row_kind=str(row.row_kind or ("expense" if expense else "account")),
+                    category=str(row.category or ""),
+                )
+                buckets[identity] = existing
+                order.append(identity)
+                continue
+            existing.amounts[key] = float(existing.amounts.get(key, 0.0) + amount)
+            existing.total = float(existing.total or 0) + amount
+            if not existing.category and row.category:
+                existing.category = str(row.category or "")
+    return [
+        buckets[identity]
+        for identity in order
+        if abs(float(buckets[identity].total or 0)) > 0.5
+    ]
+
+
+@router.get("/eerr", response_model=EerrReportOut)
+def get_eerr_report(
+    period: str | None = None,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> EerrReportOut:
+    """
+    Income statement for one month.
+
+    Income ← issued tax documents by account (same idea as received docs for expenses).
+    Expenses ← received docs + HR + OTA commissions (FNS commissions report).
+    Collected/pending KPIs still come from FNS income-collections when available.
+    """
+    month_start = _parse_period(period)
+    ensure_concept_labels_from_coa(db)
+    ensure_received_document_account_mappings_from_catalog(db)
+    ensure_manual_received_boletas(db)
+    _mark_received_through_cutoff_paid(db)
+    return _build_eerr_report_for_month(db, month_start)
 
 
 @router.get("/eerr/detail", response_model=EerrDetailOut)
@@ -1030,7 +1086,7 @@ def get_eerr_consolidated(
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrConsolidatedOut:
-    """Income statement by account with one total column per month (issued docs)."""
+    """Consolidated EERR: same monthly builder, one column per month."""
     today = date.today()
     default_to = date(today.year, today.month, 1)
     default_from = date(today.year, 1, 1)
@@ -1043,81 +1099,45 @@ def get_eerr_consolidated(
     months = _iter_months(start, end)
     period_keys = [_period_key(month) for month in months]
     period_labels = [_period_label(month) for month in months]
+
     ensure_concept_labels_from_coa(db)
-    accounts = load_income_accounts(db)
+    ensure_received_document_account_mappings_from_catalog(db)
+    ensure_manual_received_boletas(db)
+    _mark_received_through_cutoff_paid(db)
 
-    monthly_by_code: dict[str, dict[str, float]] = {key: {} for key in period_keys}
-    monthly_unclassified: dict[str, float] = {key: 0.0 for key in period_keys}
-    source = "tax_documents_issued"
-
+    monthly_reports: dict[str, EerrReportOut] = {}
     for month in months:
-        key = _period_key(month)
-        finish = min(_month_end(month), today) if (
-            month.year == today.year and month.month == today.month
-        ) else _month_end(month)
-        issued_by_account = _issued_totals_by_account_id(
-            db,
-            date_from=month,
-            date_to=finish,
-            exclude_invoice_types=True,
-        )
-        code_by_id = {int(account.id): str(account.code or "") for account in accounts}
-        by_code: dict[str, float] = {}
-        for account_id, amount in issued_by_account.items():
-            code = code_by_id.get(int(account_id), "")
-            if not code:
-                continue
-            by_code[code] = float(by_code.get(code, 0.0) + float(amount or 0))
-        monthly_by_code[key] = by_code
-        monthly_unclassified[key] = float(
-            _unassigned_issued_total(
-                db,
-                date_from=month,
-                date_to=finish,
-                exclude_invoice_types=True,
-            )
-        )
+        report = _build_eerr_report_for_month(db, month)
+        monthly_reports[report.period] = report
 
-    rows: list[EerrConsolidatedRow] = []
-    column_totals = {key: 0.0 for key in period_keys}
-    for account in accounts:
-        code = str(account.code or "")
-        amounts = {
-            key: float((monthly_by_code.get(key) or {}).get(code, 0.0))
-            for key in period_keys
-        }
-        row_total = float(sum(amounts.values()))
-        for key, value in amounts.items():
-            column_totals[key] = float(column_totals.get(key, 0.0) + value)
-        rows.append(
-            EerrConsolidatedRow(
-                account_id=int(account.id),
-                code=code,
-                name=account.name or "",
-                amounts=amounts,
-                total=row_total,
-                row_kind="account",
-            )
-        )
+    rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=False)
+    expense_rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=True)
 
-    unclassified_amounts = {
-        key: float(monthly_unclassified.get(key) or 0) for key in period_keys
+    column_totals = {
+        key: float(monthly_reports[key].grand_total) if key in monthly_reports else 0.0
+        for key in period_keys
     }
-    if abs(sum(unclassified_amounts.values())) > 0.5:
-        for key, value in unclassified_amounts.items():
-            column_totals[key] = float(column_totals.get(key, 0.0) + value)
-        rows.append(
-            EerrConsolidatedRow(
-                account_id=None,
-                code="",
-                name="Emitidas sin clasificar",
-                amounts=unclassified_amounts,
-                total=float(sum(unclassified_amounts.values())),
-                row_kind="unclassified",
-            )
-        )
+    column_net_totals = {
+        key: float(monthly_reports[key].grand_net) if key in monthly_reports else 0.0
+        for key in period_keys
+    }
+    column_tax_totals = {
+        key: float(monthly_reports[key].grand_tax) if key in monthly_reports else 0.0
+        for key in period_keys
+    }
+    column_expense_totals = {
+        key: float(monthly_reports[key].expenses_total) if key in monthly_reports else 0.0
+        for key in period_keys
+    }
+    column_result_totals = {
+        key: float(monthly_reports[key].result_total) if key in monthly_reports else 0.0
+        for key in period_keys
+    }
 
-    grand = float(sum(column_totals.values()))
+    source = next(
+        (monthly_reports[key].source for key in period_keys if key in monthly_reports),
+        "tax_documents_issued",
+    )
     return EerrConsolidatedOut(
         from_period=_period_key(start),
         to_period=_period_key(end),
@@ -1126,7 +1146,17 @@ def get_eerr_consolidated(
         section_title="Ingresos",
         rows=rows,
         column_totals=column_totals,
-        grand_total=grand,
+        column_net_totals=column_net_totals,
+        column_tax_totals=column_tax_totals,
+        grand_total=float(sum(column_totals.values())),
+        grand_net=float(sum(column_net_totals.values())),
+        grand_tax=float(sum(column_tax_totals.values())),
+        expense_section_title="Egresos",
+        expense_rows=expense_rows,
+        column_expense_totals=column_expense_totals,
+        expenses_total=float(sum(column_expense_totals.values())),
+        column_result_totals=column_result_totals,
+        result_total=float(sum(column_result_totals.values())),
         source=source,
     )
 

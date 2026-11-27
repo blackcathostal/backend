@@ -43,6 +43,7 @@ class EerrConsolidatedRow(BaseModel):
     amounts: dict[str, float] = Field(default_factory=dict)
     total: float = 0
     row_kind: str = "account"
+    category: str = ""
 
 
 class EerrConsolidatedOut(BaseModel):
@@ -52,8 +53,20 @@ class EerrConsolidatedOut(BaseModel):
     period_labels: list[str] = Field(default_factory=list)
     section_title: str = "Ingresos"
     rows: list[EerrConsolidatedRow] = Field(default_factory=list)
+    # Income bruto per month (= monthly EERR grand_total / Emitido).
     column_totals: dict[str, float] = Field(default_factory=dict)
+    column_net_totals: dict[str, float] = Field(default_factory=dict)
+    column_tax_totals: dict[str, float] = Field(default_factory=dict)
     grand_total: float = 0
+    grand_net: float = 0
+    grand_tax: float = 0
+    expense_section_title: str = "Egresos"
+    expense_rows: list[EerrConsolidatedRow] = Field(default_factory=list)
+    column_expense_totals: dict[str, float] = Field(default_factory=dict)
+    expenses_total: float = 0
+    # Resultado = neto − egresos (same as monthly EERR).
+    column_result_totals: dict[str, float] = Field(default_factory=dict)
+    result_total: float = 0
     source: str = "tax_documents_issued"
 
 
