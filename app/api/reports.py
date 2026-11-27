@@ -976,7 +976,14 @@ def _pivot_eerr_rows(
             rows.append(row)
         elif expense and (
             category
-            in {"comisiones", "mantenimiento", "mantencion", "servicios", "arriendos"}
+            in {
+                "comisiones",
+                "mantenimiento",
+                "mantencion",
+                "servicios",
+                "arriendos",
+                "remuneraciones",
+            }
             or category.startswith("materiales")
             or name in {"luz", "agua"}
         ):
