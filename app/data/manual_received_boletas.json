@@ -10,16 +10,6 @@
     "active": true
   },
   {
-    "identification_number": "76.881.234-9",
-    "company_name": "Mantenimiento Termos",
-    "accounting_account_code": "5305",
-    "folio_prefix": "888",
-    "total_amount": 200000,
-    "dte_type_code": "39",
-    "year": 2026,
-    "active": true
-  },
-  {
     "identification_number": "96.800.570-7",
     "company_name": "Enel",
     "accounting_account_code": "5310",
