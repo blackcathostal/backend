@@ -51,7 +51,7 @@
   {"code": "5416", "name": "Comisión HotelNow", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 66, "concept_labels": ["HotelNow", "Hotel Now", "hotelnow", "Hotelnow", "MotelNow", "Motel Now"]},
   {"code": "5417", "name": "Comisión Roombest", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 67, "concept_labels": ["Roombest", "RoomBest", "roombest", "Room Best"]},
   {"code": "5351", "name": "Comisiones OTA / canales", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 5, "is_active": false, "concept_labels": []},
-  {"code": "5370", "name": "Comisión Santander", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 55, "concept_labels": ["Santander", "Comisión Santander", "Comisiones bancarias", "Comision Santander"]},
+  {"code": "5370", "name": "Comisión Santander", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 55, "is_active": false, "concept_labels": []},
   {"code": "5391", "name": "Comisión MotelNow", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 75, "is_active": false, "concept_labels": []},
   {"code": "5407", "name": "Comisión Fee Cafeteria", "category": "Comisiones", "account_type": "gasto", "nature": "deudora", "sort_order": 70, "is_active": false, "concept_labels": []},
   {"code": "5408", "name": "Plataforma Internet", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 80, "concept_labels": ["Plataforma Internet"]},
