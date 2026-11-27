@@ -9,7 +9,8 @@
     "servipag_category_id": 14,
     "servipag_url": "https://portal.servipag.com/paymentexpress/category/luz/company/enel",
     "accounting_account_code": "5310",
-    "dte_type_code": "39"
+    "dte_type_code": "39",
+    "notes": "Luz"
   },
   {
     "code": "aguas_andinas",

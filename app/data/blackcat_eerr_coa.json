@@ -36,7 +36,7 @@
   {"code": "5303", "name": "Mantencion General", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
   {"code": "5304", "name": "Mantención Piscina", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 40, "concept_labels": ["Piscina", "Mantencion Piscina", "Mantenimiento Piscina"]},
   {"code": "5305", "name": "Mantención Termos", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 50, "concept_labels": ["Termos", "Thermos", "Mantencion Termos", "Mantenimiento Termos"]},
-  {"code": "5310", "name": "Electricidad", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 5, "concept_labels": ["Electricidad", "Luz", "Enel", "energia", "energía"]},
+  {"code": "5310", "name": "Luz", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 5, "concept_labels": ["Luz", "Electricidad", "Enel", "energia", "energía"]},
   {"code": "5311", "name": "Agua", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 6, "concept_labels": ["Agua", "Aguas Andinas", "Aguas"]},
 
   {"code": "5401", "name": "Comisiones Booking", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 10, "concept_labels": ["Booking", "Booking.com", "booking"]},

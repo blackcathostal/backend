@@ -75,6 +75,14 @@ def ensure_manual_received_boletas(db: Session) -> int:
     if not catalog:
         return 0
 
+    # CoA must exist first (Luz/Agua 5310/5311, Mantención, …).
+    try:
+        from app.services.accounting_concept_map import ensure_concept_labels_from_coa
+
+        ensure_concept_labels_from_coa(db)
+    except Exception:  # noqa: BLE001
+        logger.warning("manual boletas: CoA sync skipped", exc_info=True)
+
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
     receipt_type_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_RECEIPT)
     waiting_id = dte_catalog.waiting_status_id(db)
