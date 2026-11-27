@@ -325,16 +325,16 @@ def _received_auto_paid_through(today: date | None = None) -> date:
     """
     Received docs on or before this day are auto Imputada Pagada.
 
-    Once October starts, September of that year (and earlier) is closed as paid.
-    Before October, the cutoff stays last year's September 30.
+    Once November starts, October of that year (and earlier) is closed as paid.
+    Before November, the cutoff stays last year's October 31.
     """
     day = today or date.today()
-    year = day.year if day.month >= 10 else day.year - 1
-    return date(year, 9, 30)
+    year = day.year if day.month >= 11 else day.year - 1
+    return date(year, 10, 31)
 
 
 def _mark_received_through_cutoff_paid(db: Session) -> int:
-    """Set Imputada Pagada on received docs dated through the September cutoff."""
+    """Set Imputada Pagada on received docs dated through the October cutoff."""
     received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
     paid_id = dte_catalog.paid_status_id(db)
     if received_id is None or paid_id is None:
@@ -395,38 +395,6 @@ def _remove_utility_docs_from_issued(db: Session) -> int:
     if moved:
         db.commit()
     return moved
-
-
-def _mark_received_october_invoices_paid(db: Session) -> int:
-    """
-    After the September cutoff year is closed, also mark October *facturas*
-    (catalog invoice types, not boletas/vouchers) as Imputada Pagada.
-    """
-    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
-    paid_id = dte_catalog.paid_status_id(db)
-    invoice_type_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_INVOICE)
-    if received_id is None or paid_id is None or invoice_type_id is None:
-        return 0
-    cutoff = _received_auto_paid_through()
-    october_start = date(cutoff.year, 10, 1)
-    october_end = date(cutoff.year, 10, 31)
-    # Only auto-apply once we are past October of that closed year.
-    today = date.today()
-    if today < october_start:
-        return 0
-    updated = (
-        db.query(TaxDocuments)
-        .filter(
-            TaxDocuments.dte_version_id == int(received_id),
-            TaxDocuments.dte_type_id == int(invoice_type_id),
-            TaxDocuments.issued_at.isnot(None),
-            TaxDocuments.issued_at >= october_start,
-            TaxDocuments.issued_at <= october_end,
-            TaxDocuments.status_id != int(paid_id),
-        )
-        .update({TaxDocuments.status_id: int(paid_id)}, synchronize_session=False)
-    )
-    return int(updated or 0)
 
 
 def _is_missing_customer_name(company_name: str) -> bool:
@@ -843,7 +811,7 @@ def _upsert_docs(
         elif is_new or row.period is None:
             row.period = row.period or ""
         # Issued: update paid/pending from FNS. Received: keep user classification;
-        # only default En revisión when status is empty. Exception: through September
+        # only default En revisión when status is empty. Exception: through October
         # cutoff → Imputada Pagada (closed months). Servipag utility rows may arrive
         # already marked pending_payment.
         if version_id == issued_id and payment_status_id:
@@ -1639,22 +1607,13 @@ async def refresh_tax_documents(
                 )
                 warning = f"{warning} · {note}" if warning else note
             paid_marked = _mark_received_through_cutoff_paid(db)
-            october_invoices = _mark_received_october_invoices_paid(db)
-            if paid_marked or october_invoices:
+            if paid_marked:
                 db.commit()
                 cutoff = _received_auto_paid_through()
-                notes: list[str] = []
-                if paid_marked:
-                    notes.append(
-                        f"Se marcó Imputada Pagada en {paid_marked} recibida(s) "
-                        f"hasta {cutoff.strftime('%d-%m-%Y')}."
-                    )
-                if october_invoices:
-                    notes.append(
-                        f"Se marcó Imputada Pagada en {october_invoices} factura(s) "
-                        f"de octubre {cutoff.year}."
-                    )
-                note = " · ".join(notes)
+                note = (
+                    f"Se marcó Imputada Pagada en {paid_marked} recibida(s) "
+                    f"hasta {cutoff.strftime('%d-%m-%Y')} (octubre inclusive)."
+                )
                 warning = f"{warning} · {note}" if warning else note
     except IntegrityError as exc:
         db.rollback()
