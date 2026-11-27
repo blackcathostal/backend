@@ -56,6 +56,7 @@ class TaxDocumentOut(BaseModel):
     pms_class: str = "Sin match"
     pms_ref: str = ""
     source: str = "api"
+    comment: str = ""
     has_pdf: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -67,6 +68,12 @@ class TaxDocumentPatch(BaseModel):
     status_id: int | None = None
     period: str | None = Field(default=None, max_length=40)
     accounting_account_id: int | None = None
+    comment: str | None = Field(default=None, max_length=255)
+
+
+class TaxDocumentBulkPaid(BaseModel):
+    document_ids: list[int] = Field(default_factory=list)
+    comment: str = Field(default="", max_length=255)
 
 
 class TaxDocumentCreate(BaseModel):

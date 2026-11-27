@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -21,6 +21,7 @@ from app.models.tax_documents import DteStatuses, DteTypes, TaxDocuments
 from app.models.users import Users
 from app.schemas.tax_documents import (
     DteStatusOut,
+    TaxDocumentBulkPaid,
     TaxDocumentClearResult,
     TaxDocumentCreate,
     TaxDocumentListResult,
@@ -1312,6 +1313,9 @@ def patch_document(
                 raise HTTPException(status_code=400, detail="accounting_account_id inválido")
             row.accounting_account_id = payload.accounting_account_id
 
+    if payload.comment is not None:
+        row.comment = str(payload.comment or "").strip()[:255]
+
     db.add(row)
     db.commit()
     row = (
@@ -1329,6 +1333,64 @@ def patch_document(
     return _serialize_doc(
         row,
         company_name=names.get(row.identification_number or "", ""),
+    )
+
+
+@router.post("/documents/mark-paid", response_model=TaxDocumentListResult)
+def mark_documents_paid(
+    payload: TaxDocumentBulkPaid,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> TaxDocumentListResult:
+    """Mark selected received documents as Imputada Pagada and optional payment comment."""
+    ids = sorted({int(doc_id) for doc_id in (payload.document_ids or []) if int(doc_id) > 0})
+    if not ids:
+        raise HTTPException(status_code=400, detail="Seleccioná al menos un documento")
+    paid_id = dte_catalog.paid_status_id(db)
+    if paid_id is None:
+        raise HTTPException(status_code=500, detail="Estado paid no configurado")
+    comment = str(payload.comment or "").strip()[:255]
+    rows = (
+        db.query(TaxDocuments)
+        .options(
+            joinedload(TaxDocuments.status),
+            joinedload(TaxDocuments.dte_type),
+            joinedload(TaxDocuments.dte_version),
+            joinedload(TaxDocuments.accounting_account),
+        )
+        .filter(TaxDocuments.id.in_(ids))
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Documentos no encontrados")
+    for row in rows:
+        row.status_id = int(paid_id)
+        if comment:
+            row.comment = comment
+        db.add(row)
+    db.commit()
+    refreshed = (
+        db.query(TaxDocuments)
+        .options(
+            joinedload(TaxDocuments.status),
+            joinedload(TaxDocuments.dte_type),
+            joinedload(TaxDocuments.dte_version),
+            joinedload(TaxDocuments.accounting_account),
+        )
+        .filter(TaxDocuments.id.in_(ids))
+        .all()
+    )
+    names = _supplier_name_map(db, [row.identification_number for row in refreshed])
+    return TaxDocumentListResult(
+        items=[
+            _serialize_doc(
+                row,
+                company_name=names.get(row.identification_number or "", ""),
+            )
+            for row in refreshed
+        ],
+        total=len(refreshed),
+        statuses=_list_statuses(db),
     )
 
 

@@ -98,6 +98,7 @@ class TaxDocuments(Base):
     pms_class: Mapped[str] = mapped_column(String(80), nullable=False, default="Sin match", index=True)
     pms_ref: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     source: Mapped[str] = mapped_column(String(40), nullable=False, default="api")
+    comment: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

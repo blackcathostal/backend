@@ -452,6 +452,14 @@ def _ensure_schema_patches() -> None:
                         "MODIFY COLUMN accounting_account_id INT NULL AFTER status_id"
                     )
                 )
+            if not column_exists("tax_documents", "comment"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE tax_documents "
+                        "ADD COLUMN comment VARCHAR(255) NOT NULL DEFAULT '' "
+                        "AFTER source"
+                    )
+                )
 
 
 @asynccontextmanager
