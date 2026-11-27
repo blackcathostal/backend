@@ -63,6 +63,6 @@
   {"code": "5490", "name": "Otros gastos", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 200, "concept_labels": ["Otros gastos", "Otros", "*"]},
 
   {"code": "1201", "name": "Compra Lenceria", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 10},
-  {"code": "1202", "name": "Compra Aire Acondicionado", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 20},
+  {"code": "1202", "name": "Compra Aire Acondicionado", "category": "Mantenimiento", "account_type": "gasto", "nature": "deudora", "sort_order": 65, "concept_labels": ["Compra Aire Acondicionado", "Aire Acondicionado compra"]},
   {"code": "1203", "name": "Compra Termos y Bomba", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 30}
 ]
