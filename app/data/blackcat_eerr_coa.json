@@ -25,7 +25,7 @@
 
   {"code": "5201", "name": "Insumos Bar", "category": "Materiales operativos", "account_type": "gasto", "nature": "deudora", "sort_order": 10},
   {"code": "5202", "name": "Insumos Cafeteria", "category": "Materiales operativos", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
-  {"code": "5203", "name": "Insumos de Limpieza", "category": "Materiales operativos", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
+  {"code": "5203", "name": "Insumos de Limpieza", "category": "Materiales operativos", "account_type": "gasto", "nature": "deudora", "sort_order": 30, "is_active": false, "concept_labels": []},
   {"code": "5204", "name": "Lenceria", "category": "Materiales operativos", "account_type": "gasto", "nature": "deudora", "sort_order": 40, "is_active": false, "concept_labels": []},
   {"code": "5205", "name": "Utiles de Oficina", "category": "Materiales operativos", "account_type": "gasto", "nature": "deudora", "sort_order": 50, "concept_labels": ["Utiles de Oficina", "Útiles de Oficina", "Utiles Oficina"]},
   {"code": "5206", "name": "Insumos Piscina", "category": "Materiales operativos", "account_type": "gasto", "nature": "deudora", "sort_order": 60, "concept_labels": ["Insumos Piscina", "Insumo Piscina"]},
