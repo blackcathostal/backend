@@ -914,11 +914,22 @@ def _pivot_eerr_rows(
             .replace("í", "i")
             .replace("ú", "u")
         )
+        name = (
+            str(row.name or "")
+            .strip()
+            .lower()
+            .replace("ó", "o")
+            .replace("á", "a")
+            .replace("é", "e")
+            .replace("í", "i")
+            .replace("ú", "u")
+        )
         if not expense and kind == "account":
             rows.append(row)
         elif expense and (
             category in {"comisiones", "mantenimiento", "mantencion"}
             or category.startswith("materiales")
+            or name in {"luz", "agua"}
         ):
             rows.append(row)
     return rows
