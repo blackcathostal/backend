@@ -51,9 +51,7 @@
   {"code": "5330", "name": "Mantención y reparaciones", "account_type": "gasto", "nature": "deudora"},
   {"code": "5340", "name": "Seguros", "account_type": "gasto", "nature": "deudora"},
   {"code": "5350", "name": "Publicidad y marketing", "account_type": "gasto", "nature": "deudora"},
-  {"code": "5351", "name": "Comisiones OTA / canales", "account_type": "gasto", "nature": "deudora"},
   {"code": "5360", "name": "Materiales de oficina", "account_type": "gasto", "nature": "deudora"},
-  {"code": "5370", "name": "Comisiones bancarias", "account_type": "gasto", "nature": "deudora"},
   {"code": "5380", "name": "Depreciación del ejercicio", "account_type": "gasto", "nature": "deudora"},
   {"code": "5390", "name": "Otros gastos operacionales", "account_type": "gasto", "nature": "deudora"}
 ]
