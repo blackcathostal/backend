@@ -902,7 +902,7 @@ def _pivot_eerr_rows(
         if total > 0.5:
             rows.append(row)
             continue
-        # Keep income chart rows, Comisiones and Mantencion at $0.
+        # Keep income chart rows, Comisiones and Mantenimiento at $0.
         kind = str(row.row_kind or ("expense" if expense else "account"))
         category = (
             str(row.category or "")
@@ -910,10 +910,13 @@ def _pivot_eerr_rows(
             .lower()
             .replace("ó", "o")
             .replace("á", "a")
+            .replace("é", "e")
+            .replace("í", "i")
+            .replace("ú", "u")
         )
         if not expense and kind == "account":
             rows.append(row)
-        elif expense and category in {"comisiones", "mantencion"}:
+        elif expense and category in {"comisiones", "mantenimiento", "mantencion"}:
             rows.append(row)
     return rows
 

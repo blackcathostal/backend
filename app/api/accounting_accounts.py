@@ -23,8 +23,8 @@ VALID_NATURES = {"deudora", "acreedora"}
 CATEGORY_ORDER = {
     "Ingresos": 10,
     "Remuneraciones": 20,
-    "Materiales": 30,
-    "Mantencion": 40,
+    "Materiales operativos": 30,
+    "Mantenimiento": 40,
     "Servicios": 50,
     "Comisiones": 55,
     "Activo Fijo": 60,

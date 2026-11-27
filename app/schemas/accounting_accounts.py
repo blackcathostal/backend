@@ -9,8 +9,8 @@ AccountType = Literal["activo", "pasivo", "patrimonio", "ingreso", "gasto"]
 AccountNature = Literal["deudora", "acreedora"]
 AccountCategory = Literal[
     "Ingresos",
-    "Mantencion",
-    "Materiales",
+    "Mantenimiento",
+    "Materiales operativos",
     "Remuneraciones",
     "Servicios",
     "Comisiones",
