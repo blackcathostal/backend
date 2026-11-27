@@ -34,14 +34,12 @@ from app.schemas.reports import (
 )
 from app.services.eerr_snapshots import (
     empty_eerr_month_report,
-    load_eerr_month_snapshot,
     load_eerr_month_snapshots,
     save_eerr_month_snapshot,
 )
 from app.services import dte_catalog
 from app.services.accounting_concept_map import (
     account_code_for_concept,
-    catch_all_account,
     ensure_concept_labels_from_coa,
     load_expense_accounts,
     load_income_accounts,
@@ -938,7 +936,6 @@ def get_eerr_detail(
     row_kind: str = "account",
     account_id: int | None = None,
     account_code: str | None = None,
-    expected_total: float | None = None,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrDetailOut:
@@ -957,11 +954,6 @@ def get_eerr_detail(
     account_name = ""
     resolved_id = account_id
     expense_category = ""
-    target_total = (
-        float(expected_total)
-        if expected_total is not None and abs(float(expected_total)) > 0.5
-        else None
-    )
 
     if kind == "account":
         account = None
