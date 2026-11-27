@@ -41,7 +41,7 @@ from app.services.accounting_concept_map import (
 from app.api.tax_documents import _has_pdf, _mark_received_through_cutoff_paid
 from app.services.extranet_web_client import ExtranetWebError
 from app.services.manual_received_boletas import ensure_manual_received_boletas
-from app.services.occupancy_fetch import fetch_occupancy_report
+from app.services.occupancy_store import load_occupancy_report, refresh_occupancy_period
 from app.services.received_document_account_map import (
     ensure_received_document_account_mappings_from_catalog,
 )
@@ -1131,36 +1131,12 @@ def get_eerr_consolidated(
     )
 
 
-@router.get("/occupancy", response_model=OccupancyReportOut)
-def get_occupancy_report(
-    period: str | None = None,
-    day: int | None = None,
-    _: Users = Depends(get_current_user),
-) -> OccupancyReportOut:
-    """
-    Occupancy from FNS Informes (ocupación mensual + habitaciones/pasajeros).
-
-    period=YYYY-MM (default current month). Optional day=1..31 filters that day.
-    """
-    month_start = _parse_period(period)
-    try:
-        payload = fetch_occupancy_report(
-            period_year=month_start.year,
-            period_month=month_start.month,
-            day=day,
-        )
-    except ExtranetWebError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Occupancy report failed")
-        raise HTTPException(
-            status_code=502,
-            detail="No se pudo obtener ocupación desde FNS Informes.",
-        ) from exc
-
+def _occupancy_out(payload: dict) -> OccupancyReportOut:
     return OccupancyReportOut(
-        period=str(payload.get("period") or _period_key(month_start)),
+        period=str(payload.get("period") or ""),
         day=payload.get("day"),
+        room_type=payload.get("room_type"),
+        available_room_types=list(payload.get("available_room_types") or []),
         total_rooms=payload.get("total_rooms"),
         month_avg_occupancy_pct=payload.get("month_avg_occupancy_pct"),
         days=[OccupancyDayRow.model_validate(row) for row in payload.get("days") or []],
@@ -1168,5 +1144,69 @@ def get_occupancy_report(
             OccupancyRoomTypeRow.model_validate(row)
             for row in payload.get("room_types") or []
         ],
-        source=str(payload.get("source") or "fns_informes_occupancy"),
+        refreshed_at=payload.get("refreshed_at"),
+        has_data=bool(payload.get("has_data")),
+        source=str(payload.get("source") or "occupancy_stats_db"),
     )
+
+
+@router.get("/occupancy", response_model=OccupancyReportOut)
+def get_occupancy_report(
+    period: str | None = None,
+    day: int | None = None,
+    room_type: str | None = None,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> OccupancyReportOut:
+    """
+    Occupancy from local DB cache.
+
+    period=YYYY-MM, optional day=1..31, optional room_type filter.
+    Use POST /reports/occupancy/refresh to pull FNS into the DB.
+    """
+    month_start = _parse_period(period)
+    try:
+        payload = load_occupancy_report(
+            db,
+            period_year=month_start.year,
+            period_month=month_start.month,
+            day=day,
+            room_type=room_type,
+        )
+    except ExtranetWebError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _occupancy_out(payload)
+
+
+@router.post("/occupancy/refresh", response_model=OccupancyReportOut)
+def refresh_occupancy_report(
+    period: str | None = None,
+    day: int | None = None,
+    room_type: str | None = None,
+    db: Session = Depends(get_db),
+    _: Users = Depends(get_current_user),
+) -> OccupancyReportOut:
+    """Pull FNS Informes occupancy for the month into local DB, then return the report."""
+    month_start = _parse_period(period)
+    try:
+        refresh_occupancy_period(
+            db,
+            period_year=month_start.year,
+            period_month=month_start.month,
+        )
+        payload = load_occupancy_report(
+            db,
+            period_year=month_start.year,
+            period_month=month_start.month,
+            day=day,
+            room_type=room_type,
+        )
+    except ExtranetWebError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Occupancy refresh failed")
+        raise HTTPException(
+            status_code=502,
+            detail="No se pudo actualizar ocupación desde FNS Informes.",
+        ) from exc
+    return _occupancy_out(payload)

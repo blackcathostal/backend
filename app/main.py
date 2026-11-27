@@ -27,6 +27,8 @@ from app.models import (  # noqa: F401
     DteVersions,
     HrPeriodAmounts,
     Logs,
+    OccupancyDayStats,
+    OccupancyRoomTypeStats,
     ReceivedDocumentAccountMappings,
     MailAccounts,
     Medias,

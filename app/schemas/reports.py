@@ -102,8 +102,12 @@ class OccupancyRoomTypeRow(BaseModel):
 class OccupancyReportOut(BaseModel):
     period: str
     day: str | None = None
+    room_type: str | None = None
+    available_room_types: list[str] = Field(default_factory=list)
     total_rooms: int | None = None
     month_avg_occupancy_pct: float | None = None
     days: list[OccupancyDayRow] = Field(default_factory=list)
     room_types: list[OccupancyRoomTypeRow] = Field(default_factory=list)
-    source: str = "fns_informes_occupancy"
+    refreshed_at: str | None = None
+    has_data: bool = False
+    source: str = "occupancy_stats_db"
