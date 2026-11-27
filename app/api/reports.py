@@ -34,8 +34,12 @@ from app.services.accounting_concept_map import (
     load_expense_accounts,
     load_income_accounts,
 )
-from app.api.tax_documents import _has_pdf
+from app.api.tax_documents import _has_pdf, _mark_received_through_cutoff_paid
 from app.services.extranet_web_client import ExtranetWebError
+from app.services.manual_received_boletas import ensure_manual_received_boletas
+from app.services.received_document_account_map import (
+    ensure_received_document_account_mappings_from_catalog,
+)
 from app.services.tax_documents_fetch import TaxDocumentsFetchClient, _split_cl_iva
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -709,6 +713,10 @@ def get_eerr_report(
         month_start.year == today.year and month_start.month == today.month
     ) else _month_end(month_start)
     ensure_concept_labels_from_coa(db)
+    ensure_received_document_account_mappings_from_catalog(db)
+    # Ensure monthly Insumos Piscina/Termos boletas exist for EERR expenses.
+    ensure_manual_received_boletas(db)
+    _mark_received_through_cutoff_paid(db)
     accounts = load_income_accounts(db)
 
     source = "tax_documents_issued"

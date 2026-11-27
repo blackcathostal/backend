@@ -1060,6 +1060,8 @@ def list_received(
 ) -> TaxDocumentListResult:
     start, end = _default_range()
     version_id = dte_catalog.version_id_from_raw(db, dte_catalog.VERSION_CODE_RECEIVED)
+    # Seed monthly Piscina/Termos boletas even if startup seed was skipped.
+    ensure_manual_received_boletas(db)
     # Keep closed months (through October) as Imputada Pagada without requiring Actualizar.
     _mark_received_through_cutoff_paid(db)
     return _list_version(
