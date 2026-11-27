@@ -44,6 +44,7 @@ from app.services.received_document_account_map import (
     load_active_received_account_map,
     resolve_received_accounting_account_id,
 )
+from app.services.utility_bills import fetch_utility_received_documents
 
 # Issued DTE type codes treated as invoices (import from facturacion.cl when missing in FNS).
 _INVOICE_TYPE_CODES = frozenset({"33", "34", "61"})
@@ -340,6 +341,38 @@ def _mark_received_through_cutoff_paid(db: Session) -> int:
             TaxDocuments.dte_version_id == int(received_id),
             TaxDocuments.issued_at.isnot(None),
             TaxDocuments.issued_at <= cutoff,
+            TaxDocuments.status_id != int(paid_id),
+        )
+        .update({TaxDocuments.status_id: int(paid_id)}, synchronize_session=False)
+    )
+    return int(updated or 0)
+
+
+def _mark_received_october_invoices_paid(db: Session) -> int:
+    """
+    After the September cutoff year is closed, also mark October *facturas*
+    (catalog invoice types, not boletas/vouchers) as Imputada Pagada.
+    """
+    received_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_RECEIVED)
+    paid_id = dte_catalog.paid_status_id(db)
+    invoice_type_id = dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_INVOICE)
+    if received_id is None or paid_id is None or invoice_type_id is None:
+        return 0
+    cutoff = _received_auto_paid_through()
+    october_start = date(cutoff.year, 10, 1)
+    october_end = date(cutoff.year, 10, 31)
+    # Only auto-apply once we are past October of that closed year.
+    today = date.today()
+    if today < october_start:
+        return 0
+    updated = (
+        db.query(TaxDocuments)
+        .filter(
+            TaxDocuments.dte_version_id == int(received_id),
+            TaxDocuments.dte_type_id == int(invoice_type_id),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= october_start,
+            TaxDocuments.issued_at <= october_end,
             TaxDocuments.status_id != int(paid_id),
         )
         .update({TaxDocuments.status_id: int(paid_id)}, synchronize_session=False)
@@ -729,9 +762,12 @@ def _upsert_docs(
         is_new = row is None
         if is_new:
             if version_id == received_id:
-                initial_status_id = (
-                    int(paid_id) if received_auto_paid else under_review_status_id
-                )
+                if received_auto_paid:
+                    initial_status_id = int(paid_id)
+                elif payment_status_id:
+                    initial_status_id = payment_status_id
+                else:
+                    initial_status_id = under_review_status_id
             else:
                 initial_status_id = payment_status_id or default_status_id
             row = TaxDocuments(
@@ -756,11 +792,18 @@ def _upsert_docs(
             row.period = row.period or ""
         # Issued: update paid/pending from FNS. Received: keep user classification;
         # only default En revisión when status is empty. Exception: through September
-        # cutoff → Imputada Pagada (closed months).
+        # cutoff → Imputada Pagada (closed months). Servipag utility rows may arrive
+        # already marked pending_payment.
         if version_id == issued_id and payment_status_id:
             row.status_id = payment_status_id
         elif received_auto_paid:
             row.status_id = int(paid_id)
+        elif (
+            version_id == received_id
+            and payment_status_id
+            and str(item.get("source") or source or "").lower() == "servipag"
+        ):
+            row.status_id = payment_status_id
         elif not row.status_id:
             row.status_id = (
                 under_review_status_id
@@ -808,14 +851,28 @@ def _upsert_docs(
                 if account_id:
                     row.accounting_account_id = account_id
         elif version_id == received_id:
-            # Auto-assign from Contabilidad → mapeo recibidas (RUT → cuenta).
-            mapped_id = resolve_received_accounting_account_id(
-                db,
-                identification_number,
-                mapping=received_account_map,
-            )
-            if mapped_id:
-                row.accounting_account_id = mapped_id
+            # Prefer explicit account from utility catalog, else RUT→cuenta mapping.
+            explicit_account_id = item.get("accounting_account_id")
+            if explicit_account_id:
+                row.accounting_account_id = int(explicit_account_id)
+            else:
+                account_code = str(item.get("accounting_account_code") or "").strip()
+                if account_code:
+                    account = (
+                        db.query(AccountingAccounts)
+                        .filter(AccountingAccounts.code == account_code)
+                        .first()
+                    )
+                    if account is not None:
+                        row.accounting_account_id = int(account.id)
+                if not row.accounting_account_id:
+                    mapped_id = resolve_received_accounting_account_id(
+                        db,
+                        identification_number,
+                        mapping=received_account_map,
+                    )
+                    if mapped_id:
+                        row.accounting_account_id = mapped_id
         row.source = str(item.get("source") or source or "")[:40]
         try:
             row.raw_json = json.dumps(item.get("raw") or item, ensure_ascii=False, default=str)
@@ -1316,6 +1373,16 @@ def _scrape_tax_documents_sync(
         source = "web"
         with BillingPortalWebClient() as web:
             docs = web.fetch_received(date_from, date_to)
+        # Also pull Enel / Aguas Andinas debts from Servipag into Recibidas.
+        utility_docs, utility_warning = fetch_utility_received_documents()
+        if utility_docs:
+            docs.extend(utility_docs)
+        if utility_warning:
+            warning = (
+                f"{warning} · Servipag: {utility_warning}"
+                if warning
+                else f"Servipag: {utility_warning}"
+            )
     else:
         # Issued = FNS income-collections (sold/collected) + facturas from facturacion.cl.
         source = "extranet_income_collections"
@@ -1436,13 +1503,22 @@ async def refresh_tax_documents(
                 warning = f"{warning} · {note}" if warning else note
         if received_id is not None and int(version_id) == int(received_id):
             paid_marked = _mark_received_through_cutoff_paid(db)
-            if paid_marked:
+            october_invoices = _mark_received_october_invoices_paid(db)
+            if paid_marked or october_invoices:
                 db.commit()
                 cutoff = _received_auto_paid_through()
-                note = (
-                    f"Se marcó Imputada Pagada en {paid_marked} recibida(s) "
-                    f"hasta {cutoff.strftime('%d-%m-%Y')}."
-                )
+                notes: list[str] = []
+                if paid_marked:
+                    notes.append(
+                        f"Se marcó Imputada Pagada en {paid_marked} recibida(s) "
+                        f"hasta {cutoff.strftime('%d-%m-%Y')}."
+                    )
+                if october_invoices:
+                    notes.append(
+                        f"Se marcó Imputada Pagada en {october_invoices} factura(s) "
+                        f"de octubre {cutoff.year}."
+                    )
+                note = " · ".join(notes)
                 warning = f"{warning} · {note}" if warning else note
     except IntegrityError as exc:
         db.rollback()

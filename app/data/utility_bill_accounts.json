@@ -1,0 +1,27 @@
+[
+  {
+    "code": "enel",
+    "active": true,
+    "company_name": "Enel",
+    "supplier_rut": "96.800.570-7",
+    "client_identifier": "812522-8",
+    "servipag_company_id": 107,
+    "servipag_category_id": 14,
+    "servipag_url": "https://portal.servipag.com/paymentexpress/category/luz/company/enel",
+    "accounting_account_code": "5310",
+    "dte_type_code": "39"
+  },
+  {
+    "code": "aguas_andinas",
+    "active": true,
+    "company_name": "Aguas Andinas",
+    "supplier_rut": "61.808.000-5",
+    "client_identifier": "2808159",
+    "client_identifier_alts": ["2808159-6", "28081596"],
+    "servipag_company_id": 401,
+    "servipag_category_id": 1,
+    "servipag_url": "https://portal.servipag.com/paymentexpress/category/agua/company/aguasandinas",
+    "accounting_account_code": "5311",
+    "dte_type_code": "39"
+  }
+]
