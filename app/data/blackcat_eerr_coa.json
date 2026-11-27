@@ -38,6 +38,7 @@
   {"code": "5305", "name": "Mantención Termos", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 50, "concept_labels": ["Termos", "Thermos", "Mantencion Termos", "Mantenimiento Termos"]},
   {"code": "5310", "name": "Luz", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 5, "concept_labels": ["Luz", "Electricidad", "Enel", "energia", "energía"]},
   {"code": "5311", "name": "Agua", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 6, "concept_labels": ["Agua", "Aguas Andinas", "Aguas"]},
+  {"code": "5313", "name": "Internet y comunicaciones", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 7, "concept_labels": ["Internet", "Internet y comunicaciones", "Comunicaciones", "Telefonía", "Telefonia"]},
 
   {"code": "5401", "name": "Comisiones Booking", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 10, "concept_labels": ["Booking", "Booking.com", "booking"]},
   {"code": "5402", "name": "Comisión Expedia", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 20, "concept_labels": ["Expedia", "Expidia", "expedia", "expidia"]},
@@ -46,7 +47,7 @@
   {"code": "5405", "name": "Comisiones Transbank", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 50, "concept_labels": ["Transbank"]},
   {"code": "5406", "name": "Comision Banco", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 60, "concept_labels": ["Banco", "Comision Banco"]},
   {"code": "5407", "name": "Comisión Fee Cafeteria", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 70, "concept_labels": ["Fee Cafeteria", "Comisión Fee Cafeteria"]},
-  {"code": "5408", "name": "Internet", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 80},
+  {"code": "5408", "name": "Plataforma Internet", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 80},
   {"code": "5409", "name": "Seguro", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 90},
   {"code": "5410", "name": "Servicio de Fotocopiadora", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 100},
   {"code": "5411", "name": "Servicio Lavandería", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 110},

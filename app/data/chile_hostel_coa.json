@@ -49,7 +49,7 @@
   {"code": "5310", "name": "Electricidad", "account_type": "gasto", "nature": "deudora"},
   {"code": "5311", "name": "Agua", "account_type": "gasto", "nature": "deudora"},
   {"code": "5312", "name": "Gas", "account_type": "gasto", "nature": "deudora"},
-  {"code": "5313", "name": "Internet y comunicaciones", "account_type": "gasto", "nature": "deudora"},
+  {"code": "5313", "name": "Internet y comunicaciones", "category": "Servicios", "account_type": "gasto", "nature": "deudora"},
   {"code": "5320", "name": "Aseo y limpieza", "account_type": "gasto", "nature": "deudora"},
   {"code": "5321", "name": "Lavandería y ropa de cama", "account_type": "gasto", "nature": "deudora"},
   {"code": "5330", "name": "Mantención y reparaciones", "account_type": "gasto", "nature": "deudora"},
