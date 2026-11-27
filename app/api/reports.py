@@ -1107,6 +1107,14 @@ def get_eerr_detail(
     )
 
 
+def _is_official_eerr_snapshot(report: EerrReportOut | None) -> bool:
+    """Snapshots saved by monthly EERR (with FNS) — not local-only fills."""
+    if report is None:
+        return False
+    source = str(report.source or "").strip().lower()
+    return source == "tax_documents_issued"
+
+
 @router.get("/eerr/consolidated", response_model=EerrConsolidatedOut)
 def get_eerr_consolidated(
     from_period: str | None = None,
@@ -1115,8 +1123,9 @@ def get_eerr_consolidated(
     _: Users = Depends(get_current_user),
 ) -> EerrConsolidatedOut:
     """
-    Consolidated EERR without FNS.
-    Prefer monthly snapshots (from opening EERR); fill gaps from local DB.
+    Consolidated EERR without calling FNS.
+    Official months = snapshot saved when opening monthly EERR.
+    Other months = ephemeral local DB build (not persisted, so EERR can replace them).
     """
     today = date.today()
     default_to = date(today.year, today.month, 1)
@@ -1144,18 +1153,14 @@ def get_eerr_consolidated(
     for month in months:
         key = _period_key(month)
         snapshot = cached.get(key)
-        if snapshot is not None:
+        if _is_official_eerr_snapshot(snapshot):
             monthly_reports[key] = snapshot
             cached_periods.append(key)
             continue
-        # Local DB fill (issued/recibidas/HR) — never call FNS here.
+        # Provisional local numbers only — do not persist (avoids diverging from EERR).
         report = _build_eerr_report_for_month(db, month, use_remote=False)
         monthly_reports[key] = report
         missing_periods.append(key)
-        try:
-            save_eerr_month_snapshot(db, report)
-        except Exception as exc:
-            logger.warning("EERR local snapshot save failed for %s: %s", key, exc)
 
     rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=False)
     expense_rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=True)
