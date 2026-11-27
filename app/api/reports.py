@@ -34,6 +34,7 @@ from app.schemas.reports import (
 )
 from app.services.eerr_snapshots import (
     empty_eerr_month_report,
+    load_eerr_month_snapshot,
     load_eerr_month_snapshots,
     save_eerr_month_snapshot,
 )
@@ -964,6 +965,7 @@ def get_eerr_detail(
     row_kind: str = "account",
     account_id: int | None = None,
     account_code: str | None = None,
+    expected_total: float | None = None,
     db: Session = Depends(get_db),
     _: Users = Depends(get_current_user),
 ) -> EerrDetailOut:
@@ -982,6 +984,11 @@ def get_eerr_detail(
     account_name = ""
     resolved_id = account_id
     expense_category = ""
+    target_total = (
+        float(expected_total)
+        if expected_total is not None and abs(float(expected_total)) > 0.5
+        else None
+    )
 
     if kind == "account":
         account = None
@@ -1093,49 +1100,46 @@ def get_eerr_detail(
             invoice_only=False,
             exclude_invoice_types=True,
         )
-        # "Otros" often holds the Emitido FNS − emitidas clasificadas plug; surface it.
+        # "Otros" holds the Emitido − emitidas clasificadas plug already computed
+        # on the EERR row / snapshot. Never call FNS again here — only local docs + gap.
         other = catch_all_account(income_accounts)
         if (
             other is not None
             and resolved_id is not None
             and int(resolved_id) == int(other.id)
         ):
-            issued_by = _issued_totals_by_account_id(
-                db,
-                date_from=month_start,
-                date_to=month_finish,
-                exclude_invoice_types=True,
+            docs_total = float(
+                sum(float(item.get("amount") or 0) for item in raw_lines)
             )
-            unassigned_total = _unassigned_issued_total(
-                db,
-                date_from=month_start,
-                date_to=month_finish,
-                exclude_invoice_types=True,
-            )
-            classified_total = float(
-                sum(float(v or 0) for v in issued_by.values()) + float(unassigned_total)
-            )
-            sold = float(classified_total)
-            try:
-                sales = TaxDocumentsFetchClient()._income_collections_sales_totals(
-                    month_start, month_finish
-                )
-                sold = float(sales.get("sold") or 0) or sold
-            except ExtranetWebError as exc:
-                logger.warning("EERR Otros detail sold unavailable: %s", exc)
-            if sold > classified_total + 0.5:
-                gap = float(round(sold - classified_total))
-                raw_lines.append(
-                    {
-                        "issued_at": None,
-                        "folio": "",
-                        "doc_type": "Ajuste",
-                        "company_name": "",
-                        "locator": "",
-                        "concept": "Diferencia Emitido (FNS) vs emitidas clasificadas",
-                        "amount": gap,
-                    }
-                )
+            row_total = target_total
+            if row_total is None:
+                snapshot = load_eerr_month_snapshot(db, _period_key(month_start))
+                if snapshot is not None:
+                    matched = next(
+                        (
+                            row
+                            for row in (snapshot.rows or [])
+                            if row.account_id is not None
+                            and int(row.account_id) == int(other.id)
+                        ),
+                        None,
+                    )
+                    if matched is not None and abs(float(matched.total or 0)) > 0.5:
+                        row_total = float(matched.total or 0)
+            if row_total is not None:
+                gap = float(round(row_total - docs_total))
+                if abs(gap) > 0.5:
+                    raw_lines.append(
+                        {
+                            "issued_at": None,
+                            "folio": "",
+                            "doc_type": "Ajuste",
+                            "company_name": "",
+                            "locator": "",
+                            "concept": "Diferencia Emitido vs emitidas clasificadas",
+                            "amount": gap,
+                        }
+                    )
     elif kind == "unclassified":
         raw_lines = _issued_tax_document_lines(
             db,
