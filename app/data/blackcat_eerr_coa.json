@@ -32,7 +32,7 @@
   {"code": "5207", "name": "Insumos Termos", "category": "Materiales", "account_type": "gasto", "nature": "deudora", "sort_order": 70, "concept_labels": ["Insumos Termos", "Insumo Termos"]},
 
   {"code": "5301", "name": "Mantención Ascensores", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 10, "concept_labels": ["Ascensor", "Ascensores", "Insumo Ascensor", "Insumos Ascensor", "insumo de ascensor", "Duplex"]},
-  {"code": "5302", "name": "Mantención Fumigación", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 20},
+  {"code": "5302", "name": "Mantención Fumigación", "category": "Servicios", "account_type": "gasto", "nature": "deudora", "sort_order": 25, "concept_labels": ["Fumigación", "Fumigacion", "Mantención Fumigación"]},
   {"code": "5303", "name": "Mantencion General", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 30},
   {"code": "5304", "name": "Mantención Piscina", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 40, "concept_labels": ["Piscina", "Mantencion Piscina", "Mantenimiento Piscina"]},
   {"code": "5305", "name": "Mantención Termos", "category": "Mantencion", "account_type": "gasto", "nature": "deudora", "sort_order": 50, "concept_labels": ["Termos", "Thermos", "Mantencion Termos", "Mantenimiento Termos"]},
