@@ -42,6 +42,7 @@ from app.services.accounting_concept_map import (
     account_code_for_concept,
     ensure_concept_labels_from_coa,
     load_expense_accounts,
+    load_fixed_asset_accounts,
     load_income_accounts,
 )
 from app.api.tax_documents import _has_pdf, _mark_received_through_cutoff_paid
@@ -296,6 +297,35 @@ def _expense_rows_for_period(
                 total=amount,
                 row_kind="expense",
                 category=category,
+            )
+        )
+    return rows
+
+
+def _fixed_asset_rows_for_period(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> list[EerrAccountRow]:
+    """Activo Fijo purchase accounts; always listed (amounts from recibidas when paid)."""
+    accounts = load_fixed_asset_accounts(db)
+    if not accounts:
+        return []
+    received_amounts = _received_totals_by_account_id(
+        db, date_from=date_from, date_to=date_to
+    )
+    rows: list[EerrAccountRow] = []
+    for account in accounts:
+        account_id = int(account.id)
+        rows.append(
+            EerrAccountRow(
+                account_id=account_id,
+                code=str(account.code or ""),
+                name=str(account.name or ""),
+                total=float(received_amounts.get(account_id, 0.0)),
+                row_kind="fixed_asset",
+                category=str(account.category or "Activo Fijo").strip() or "Activo Fijo",
             )
         )
     return rows
@@ -828,6 +858,11 @@ def _build_eerr_report_for_month(
     )
     expenses_total = float(sum(float(row.total or 0) for row in expense_rows))
     result_total = float(grand_net - expenses_total)
+    fixed_asset_rows = _fixed_asset_rows_for_period(
+        db,
+        date_from=month_start,
+        date_to=month_finish,
+    )
     return EerrReportOut(
         period=period_key,
         section_title="Ingresos",
@@ -839,6 +874,8 @@ def _build_eerr_report_for_month(
         expense_rows=expense_rows,
         expenses_total=expenses_total,
         result_total=result_total,
+        fixed_asset_section_title="Activos fijos",
+        fixed_asset_rows=fixed_asset_rows,
         sold=sold,
         collected=collected,
         pending=pending,
@@ -863,15 +900,24 @@ def _pivot_eerr_rows(
     monthly_reports: dict[str, EerrReportOut],
     *,
     expense: bool = False,
+    fixed_asset: bool = False,
 ) -> list[EerrConsolidatedRow]:
     """Pivot monthly EERR account rows into consolidated amount columns."""
     buckets: dict[tuple, EerrConsolidatedRow] = {}
     order: list[tuple] = []
+    default_kind = (
+        "fixed_asset" if fixed_asset else ("expense" if expense else "account")
+    )
     for key in period_keys:
         report = monthly_reports.get(key)
         if report is None:
             continue
-        source_rows = report.expense_rows if expense else report.rows
+        if fixed_asset:
+            source_rows = report.fixed_asset_rows
+        elif expense:
+            source_rows = report.expense_rows
+        else:
+            source_rows = report.rows
         for row in source_rows:
             identity = _consolidated_row_key(row)
             amount = float(row.total or 0)
@@ -885,7 +931,7 @@ def _pivot_eerr_rows(
                     name=str(row.name or ""),
                     amounts=amounts,
                     total=amount,
-                    row_kind=str(row.row_kind or ("expense" if expense else "account")),
+                    row_kind=str(row.row_kind or default_kind),
                     category=str(row.category or ""),
                 )
                 buckets[identity] = existing
@@ -903,7 +949,7 @@ def _pivot_eerr_rows(
             rows.append(row)
             continue
         # Keep income chart rows, Comisiones and Mantenimiento at $0.
-        kind = str(row.row_kind or ("expense" if expense else "account"))
+        kind = str(row.row_kind or default_kind)
         category = (
             str(row.category or "")
             .strip()
@@ -924,7 +970,9 @@ def _pivot_eerr_rows(
             .replace("í", "i")
             .replace("ú", "u")
         )
-        if not expense and kind == "account":
+        if fixed_asset or kind == "fixed_asset":
+            rows.append(row)
+        elif not expense and kind == "account":
             rows.append(row)
         elif expense and (
             category
@@ -982,6 +1030,7 @@ def get_eerr_detail(
     ensure_concept_labels_from_coa(db)
     income_accounts = load_income_accounts(db)
     expense_accounts = load_expense_accounts(db)
+    fixed_asset_accounts = load_fixed_asset_accounts(db)
     kind = str(row_kind or "account").strip().lower()
     code = str(account_code or "").strip()
     account_name = ""
@@ -1024,6 +1073,35 @@ def get_eerr_detail(
         account_name = str(account.name or "")
         resolved_id = int(account.id)
         expense_category = str(account.category or "").strip()
+        title = f"{code} · {account_name}".strip(" ·")
+    elif kind in {"fixed_asset", "activo_fijo", "fixed-asset"}:
+        kind = "fixed_asset"
+        account = None
+        if account_id is not None:
+            account = next(
+                (
+                    row
+                    for row in fixed_asset_accounts
+                    if int(row.id) == int(account_id)
+                ),
+                None,
+            )
+        if account is None and code:
+            account = next(
+                (
+                    row
+                    for row in fixed_asset_accounts
+                    if str(row.code or "") == code
+                ),
+                None,
+            )
+        if account is None:
+            raise HTTPException(
+                status_code=404, detail="Cuenta de activo fijo no encontrada"
+            )
+        code = str(account.code or "")
+        account_name = str(account.name or "")
+        resolved_id = int(account.id)
         title = f"{code} · {account_name}".strip(" ·")
     elif kind == "pending":
         title = "Pendiente por cobrar"
@@ -1081,6 +1159,13 @@ def get_eerr_detail(
                     )
                     if fees_total > docs_total + 0.5:
                         raw_lines = commission_lines
+    elif kind == "fixed_asset":
+        raw_lines = _received_tax_document_lines(
+            db,
+            date_from=month_start,
+            date_to=month_finish,
+            account_id=int(resolved_id) if resolved_id is not None else None,
+        )
     elif kind == "invoiced":
         raw_lines = _issued_tax_document_lines(
             db,
@@ -1147,7 +1232,11 @@ def _is_official_eerr_snapshot(report: EerrReportOut | None) -> bool:
 def _remap_report_categories(db: Session, report: EerrReportOut) -> EerrReportOut:
     """Refresh row categories from live CoA (e.g. Comisiones vs Servicios)."""
     category_by_code: dict[str, str] = {}
-    for account in list(load_expense_accounts(db)) + list(load_income_accounts(db)):
+    for account in (
+        list(load_expense_accounts(db))
+        + list(load_income_accounts(db))
+        + list(load_fixed_asset_accounts(db))
+    ):
         code = str(account.code or "").strip()
         category = str(account.category or "").strip()
         if code and category:
@@ -1165,6 +1254,7 @@ def _remap_report_categories(db: Session, report: EerrReportOut) -> EerrReportOu
 
     _apply(list(report.rows or []))
     _apply(list(report.expense_rows or []))
+    _apply(list(report.fixed_asset_rows or []))
     return report
 
 
@@ -1209,14 +1299,25 @@ def get_eerr_consolidated(
         if _is_official_eerr_snapshot(snapshot):
             monthly_reports[key] = _remap_report_categories(db, snapshot)
             cached_periods.append(key)
-            continue
-        # Provisional local numbers only — do not persist (avoids diverging from EERR).
-        report = _build_eerr_report_for_month(db, month, use_remote=False)
-        monthly_reports[key] = _remap_report_categories(db, report)
-        missing_periods.append(key)
+        else:
+            # Provisional local numbers only — do not persist (avoids diverging from EERR).
+            report = _build_eerr_report_for_month(db, month, use_remote=False)
+            monthly_reports[key] = _remap_report_categories(db, report)
+            missing_periods.append(key)
+        # Older snapshots may lack fixed-asset rows; always refresh from live CoA.
+        live_fixed = _fixed_asset_rows_for_period(
+            db,
+            date_from=month,
+            date_to=_month_end(month),
+        )
+        monthly_reports[key].fixed_asset_rows = live_fixed
+        monthly_reports[key].fixed_asset_section_title = "Activos fijos"
 
     rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=False)
     expense_rows = _pivot_eerr_rows(period_keys, monthly_reports, expense=True)
+    fixed_asset_rows = _pivot_eerr_rows(
+        period_keys, monthly_reports, fixed_asset=True
+    )
 
     column_totals = {
         key: float(monthly_reports[key].grand_total) for key in period_keys
@@ -1253,6 +1354,8 @@ def get_eerr_consolidated(
         expenses_total=float(sum(column_expense_totals.values())),
         column_result_totals=column_result_totals,
         result_total=float(sum(column_result_totals.values())),
+        fixed_asset_section_title="Activos fijos",
+        fixed_asset_rows=fixed_asset_rows,
         cached_periods=cached_periods,
         missing_periods=missing_periods,
         source="eerr_month_snapshots",

@@ -70,7 +70,9 @@
 
   {"code": "5501", "name": "Arriendos terreno catedral", "category": "Arriendos", "account_type": "gasto", "nature": "deudora", "sort_order": 10, "concept_labels": ["Arriendos terreno catedral", "Arriendo terreno catedral", "Terreno catedral", "Catedral"]},
 
-  {"code": "1201", "name": "Compra Lenceria", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 10},
-  {"code": "1202", "name": "Compra Aire Acondicionado", "category": "Mantenimiento", "account_type": "gasto", "nature": "deudora", "sort_order": 65, "is_active": false, "concept_labels": []},
-  {"code": "1203", "name": "Compra Termos y Bomba", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 30}
+  {"code": "1201", "name": "Compra Lenceria", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 10, "concept_labels": ["Compra Lenceria", "Lenceria compra"]},
+  {"code": "1202", "name": "Compra Aire Acondicionado", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 20, "concept_labels": ["Compra Aire Acondicionado", "Aire Acondicionado compra"]},
+  {"code": "1203", "name": "Compra de Termos", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 30, "concept_labels": ["Compra de Termos", "Compra Termos", "Termos compra", "Compra Termos y Bomba"]},
+  {"code": "1204", "name": "Compra bomba de agua", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 40, "concept_labels": ["Compra bomba de agua", "Compra Bomba de Agua", "Bomba de agua compra"]},
+  {"code": "1205", "name": "Compra frigobar", "category": "Activo Fijo", "account_type": "activo", "nature": "deudora", "sort_order": 50, "concept_labels": ["Compra frigobar", "Frigobar", "Compra Frigobar"]}
 ]

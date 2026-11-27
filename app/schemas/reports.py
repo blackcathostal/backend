@@ -26,6 +26,8 @@ class EerrReportOut(BaseModel):
     expense_rows: list[EerrAccountRow] = Field(default_factory=list)
     expenses_total: float = 0
     result_total: float = 0
+    fixed_asset_section_title: str = "Activos fijos"
+    fixed_asset_rows: list[EerrAccountRow] = Field(default_factory=list)
     sold: float = 0
     collected: float = 0
     pending: float = 0
@@ -67,6 +69,8 @@ class EerrConsolidatedOut(BaseModel):
     # Resultado = neto − egresos (same as monthly EERR).
     column_result_totals: dict[str, float] = Field(default_factory=dict)
     result_total: float = 0
+    fixed_asset_section_title: str = "Activos fijos"
+    fixed_asset_rows: list[EerrConsolidatedRow] = Field(default_factory=list)
     # Periods present in eerr_month_snapshots (opened monthly EERR at least once).
     cached_periods: list[str] = Field(default_factory=list)
     missing_periods: list[str] = Field(default_factory=list)

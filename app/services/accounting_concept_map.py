@@ -84,6 +84,27 @@ def load_expense_accounts(db: Session) -> list[AccountingAccounts]:
     )
 
 
+def load_fixed_asset_accounts(db: Session) -> list[AccountingAccounts]:
+    """Active fixed-asset (Activo Fijo) accounts for the EERR purchases section."""
+    rows = (
+        db.query(AccountingAccounts)
+        .filter(
+            AccountingAccounts.is_active.is_(True),
+            AccountingAccounts.account_type == "activo",
+        )
+        .order_by(
+            AccountingAccounts.sort_order.asc(),
+            AccountingAccounts.code.asc(),
+        )
+        .all()
+    )
+    return [
+        row
+        for row in rows
+        if str(row.category or "").strip().lower().replace("ó", "o") == "activo fijo"
+    ]
+
+
 def _load_coa_rows() -> list[dict]:
     try:
         raw = json.loads(COA_FILE.read_text(encoding="utf-8"))
