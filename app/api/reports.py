@@ -738,11 +738,11 @@ def get_eerr_report(
         issued_by_account,
         unassigned_total=unassigned_total,
     )
-    grand_total = float(sum(float(row.total or 0) for row in rows))
+    classified_total = float(sum(float(row.total or 0) for row in rows))
     concepts_total = float(sum(float(v or 0) for v in issued_by_account.values()))
     unclassified_collections = float(unassigned_total)
     pending_sales = 0.0
-    sold = float(grand_total)
+    sold = float(classified_total)
     collected = 0.0
     pending = 0.0
 
@@ -756,6 +756,24 @@ def get_eerr_report(
         pending = float(sales.get("pending") or 0)
     except ExtranetWebError as exc:
         logger.warning("EERR collected/pending unavailable: %s", exc)
+
+    # Bruto must match Emitido (Cobros FNS). Bridge any gap as remanente.
+    grand_total = float(classified_total)
+    if sold > classified_total + 0.5:
+        gap = round(sold - classified_total)
+        rows.append(
+            EerrAccountRow(
+                account_id=None,
+                code="",
+                name="Cobros no clasificados",
+                total=float(gap),
+                row_kind="unclassified",
+            )
+        )
+        unclassified_collections = float(unclassified_collections) + float(gap)
+        grand_total = float(sold)
+    elif sold > 0.5:
+        grand_total = float(sold)
 
     # Invoiced KPI: invoices/credit notes 33/34/61 (assigned + unassigned).
     invoice_by_account = _invoice_totals_by_account_id(
@@ -873,7 +891,7 @@ def get_eerr_detail(
     elif kind == "collected":
         title = "Cobrado"
     elif kind == "unclassified":
-        title = "Emitidas sin clasificar"
+        title = "Cobros no clasificados"
     elif kind in {"invoiced", "facturado"}:
         kind = "invoiced"
         title = "Facturado"
