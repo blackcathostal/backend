@@ -1070,6 +1070,73 @@ class TaxDocumentsFetchClient:
         _, pending_by_locator = self._income_collections_index(date_from, date_to)
         merged: dict[str, dict[str, Any]] = {}
 
+        def _cobros_issued_doc(
+            *,
+            row: dict[str, str],
+            folio: str,
+            line_amount: float,
+            concepts: dict[str, float],
+            concept_header: str = "",
+            payment_id: str = "",
+            locator: str = "",
+            pending: float = 0.0,
+        ) -> dict[str, Any] | None:
+            if abs(float(line_amount or 0)) <= 0.5 or not folio:
+                return None
+            raw_type = str(
+                _find_col(row, "Tipo documento", "Tipo") or ""
+            ).strip() or dte_catalog.TYPE_CODE_VOUCHER
+            company_name = _find_col(row, "Nombre", "Cliente", "Titular")
+            channel = _find_col(row, "Canal")
+            issued_at = _parse_date(_find_col(row, "Fecha", "Creado el"))
+            status_code = (
+                "pending_payment" if pending > 0.5 else "paid"
+            )
+            net_amount, exempt_amount, tax_amount = _split_cl_iva(
+                float(line_amount),
+                doc_type=raw_type,
+            )
+            concept_map = {
+                str(k): float(v or 0)
+                for k, v in (concepts or {}).items()
+                if abs(float(v or 0)) > 0.5
+            }
+            return {
+                "dte_type_code": raw_type,
+                "doc_type": raw_type,
+                "dte_version_code": "issued",
+                "folio": folio[:40],
+                "identification_number": "",
+                "company_name": company_name[:220],
+                "counterpart_rut": "",
+                "counterpart_name": company_name[:220],
+                "issued_at": issued_at.isoformat() if issued_at else None,
+                "net_amount": net_amount,
+                "exempt_amount": exempt_amount,
+                "tax_amount": tax_amount,
+                "total_amount": float(line_amount),
+                "branch": "",
+                "payment_status_code": status_code,
+                "has_concepts": bool(concept_map),
+                "concepts": concept_map,
+                "pms_ref": locator[:120],
+                "pms_class": "FNS Collections",
+                "sales_channel": channel[:80],
+                "raw": {
+                    **row,
+                    "concepts": concept_map,
+                    "concept_header": concept_header,
+                    "payment_status_code": status_code,
+                    "line_amount": float(line_amount),
+                    "cobros_payment_id": payment_id,
+                    "reservation_pending_amount": pending,
+                    "source_report": "collections",
+                    "fns_action": "Cobros",
+                    "doc_type": raw_type,
+                    "sales_channel": channel,
+                },
+            }
+
         for row in self._iter_collection_rows(date_from, date_to):
             amount = float(_money(_find_col(row, "Importe", "Total", "Monto")) or 0)
             if abs(amount) <= 0.5:
@@ -1079,74 +1146,48 @@ class TaxDocumentsFetchClient:
             if issued_at is not None and (issued_at < date_from or issued_at > date_to):
                 continue
 
+            payment_id = re.sub(r"\s+", "", str(row.get("ID") or ""))
+            locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
+            folio_base = payment_id or locator
+            if not folio_base:
+                continue
+            pending = float(pending_by_locator.get(locator) or 0)
             concepts = _concept_breakdown(row, accounts=accounts)
             concept_total = float(sum(float(v or 0) for v in concepts.values()))
-            lines: list[dict[str, Any]] = []
-            # Cobros payment ID is unique per row; document numbers often repeat.
-            payment_id = re.sub(r"\s+", "", str(_find_col(row, "ID") or ""))
-            doc_folio = re.sub(
-                r"\s+",
-                "",
-                str(
-                    _find_col(
-                        row, "Nº documento", "N° documento", "No documento", "Folio"
-                    )
-                    or ""
-                ),
-            )
-            folio_base = payment_id or doc_folio or re.sub(
-                r"\s+", "", str(_find_col(row, "Localizador") or "")
-            )
 
+            built: list[dict[str, Any]] = []
             if concepts and concept_total > 0.5:
                 scaled = _scale_amounts_to_target(concepts, amount)
                 for header, line_amount in scaled.items():
                     if abs(float(line_amount or 0)) <= 0.5:
                         continue
                     slug = re.sub(r"[^a-z0-9]+", "", _norm(header))[:12] or "x"
-                    doc = self._normalize_collection_row(row, direction="issued")
-                    if not doc:
-                        continue
-                    doc["folio"] = f"{folio_base}-{slug}"[:40]
-                    doc["total_amount"] = float(line_amount)
-                    net_amount, exempt_amount, tax_amount = _split_cl_iva(
-                        float(line_amount),
-                        doc_type=doc.get("dte_type_code") or doc.get("doc_type") or "",
+                    doc = _cobros_issued_doc(
+                        row=row,
+                        folio=f"{folio_base}-{slug}",
+                        line_amount=float(line_amount),
+                        concepts={str(header): float(line_amount)},
+                        concept_header=str(header),
+                        payment_id=payment_id,
+                        locator=locator,
+                        pending=pending,
                     )
-                    doc["net_amount"] = net_amount
-                    doc["exempt_amount"] = exempt_amount
-                    doc["tax_amount"] = tax_amount
-                    doc["concepts"] = {str(header): float(line_amount)}
-                    doc["has_concepts"] = True
-                    raw = dict(doc.get("raw") or {})
-                    raw["concepts"] = doc["concepts"]
-                    raw["concept_header"] = str(header)
-                    raw["line_amount"] = float(line_amount)
-                    raw["cobros_payment_id"] = payment_id
-                    raw["source_report"] = "collections"
-                    raw["fns_action"] = "Cobros"
-                    doc["raw"] = raw
-                    lines.append(doc)
+                    if doc:
+                        built.append(doc)
             else:
-                doc = self._normalize_collection_row(row, direction="issued")
+                doc = _cobros_issued_doc(
+                    row=row,
+                    folio=folio_base,
+                    line_amount=amount,
+                    concepts={},
+                    payment_id=payment_id,
+                    locator=locator,
+                    pending=pending,
+                )
                 if doc:
-                    doc["folio"] = (folio_base or str(doc.get("folio") or ""))[:40]
-                    raw = dict(doc.get("raw") or {})
-                    raw["cobros_payment_id"] = payment_id
-                    raw["source_report"] = "collections"
-                    raw["fns_action"] = "Cobros"
-                    doc["raw"] = raw
-                    lines.append(doc)
+                    built.append(doc)
 
-            locator = re.sub(r"\s+", "", str(_find_col(row, "Localizador") or ""))
-            pending = float(pending_by_locator.get(locator) or 0)
-            for doc in lines:
-                if pending > 0.5:
-                    doc["payment_status_code"] = "pending_payment"
-                    raw = dict(doc.get("raw") or {})
-                    raw["payment_status_code"] = "pending_payment"
-                    raw["reservation_pending_amount"] = pending
-                    doc["raw"] = raw
+            for doc in built:
                 folio = str(doc.get("folio") or "")
                 if not folio:
                     continue
@@ -1154,11 +1195,17 @@ class TaxDocumentsFetchClient:
                 if current is None:
                     merged[folio] = doc
                     continue
-                # Same folio: keep the higher amount (avoid losing Cobros Importe).
-                if float(doc.get("total_amount") or 0) > float(
-                    current.get("total_amount") or 0
-                ):
-                    merged[folio] = doc
+                # Same folio: add amounts (duplicate payment id + concept).
+                current["total_amount"] = float(current.get("total_amount") or 0) + float(
+                    doc.get("total_amount") or 0
+                )
+                net_amount, exempt_amount, tax_amount = _split_cl_iva(
+                    float(current["total_amount"]),
+                    doc_type=current.get("dte_type_code") or "",
+                )
+                current["net_amount"] = net_amount
+                current["exempt_amount"] = exempt_amount
+                current["tax_amount"] = tax_amount
         return list(merged.values())
 
     def fetch_received(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
