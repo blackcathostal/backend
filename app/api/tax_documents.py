@@ -625,6 +625,11 @@ def _resolve_accounting_account_id(db: Session, item: dict) -> int | None:
     accounts = load_income_accounts(db)
     if not accounts:
         return None
+    # Everything from facturacion.cl → lodging (Hospedaje) from catalog.
+    source = str(item.get("source") or "").strip().lower()
+    if source == "billing_portal":
+        account = lodging_income_account(accounts)
+        return int(account.id) if account is not None else None
     # Cobros concept mix → best matching income account.
     if _concepts_have_amounts(concepts):
         account = pick_account_from_concepts(concepts, accounts)
