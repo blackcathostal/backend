@@ -392,15 +392,14 @@ def _issued_payment_kpis_from_db(
     date_to: date,
 ) -> tuple[float, float, float]:
     """
-    Emitido / Cobrado / Pendiente from issued Track in DB (Cobros/FNS).
+    Emitido / Cobrado / Pendiente from issued Track in DB.
 
-    Facturas 33/34/61 stay out of these KPIs (they feed Facturado separately)
-    so Emitido matches FNS Cobros, not Cobros + facturacion.cl.
+    Includes FNS Cobros and facturacion.cl invoices (same universe as income rows).
+    Facturado remains an informational invoice-only KPI.
     """
     issued_id = _issued_version_id(db)
     if issued_id is None:
         return 0.0, 0.0, 0.0
-    invoice_type_ids = set(_invoice_type_ids(db))
     paid_id = dte_catalog.paid_status_id(db)
     rows = (
         db.query(
@@ -420,8 +419,6 @@ def _issued_payment_kpis_from_db(
     collected = 0.0
     pending = 0.0
     for type_id, status_id, amount in rows:
-        if invoice_type_ids and type_id is not None and int(type_id) in invoice_type_ids:
-            continue
         value = _issued_doc_signed_amount(
             db, type_id=type_id, amount=float(amount or 0)
         )
@@ -836,18 +833,18 @@ def _build_eerr_report_for_month(
     accounts = load_income_accounts(db)
 
     source = "tax_documents_issued" if use_remote else "tax_documents_issued_local"
-    # Income / Emitido = FNS Cobros only. Portal invoices stay in Facturado KPI.
+    # Income / Emitido = FNS Cobros + facturacion.cl invoices (portal → Hospedaje).
     issued_by_account = _issued_totals_by_account_id(
         db,
         date_from=month_start,
         date_to=month_finish,
-        exclude_invoice_types=True,
+        exclude_invoice_types=False,
     )
     unassigned_total = _unassigned_issued_total(
         db,
         date_from=month_start,
         date_to=month_finish,
-        exclude_invoice_types=True,
+        exclude_invoice_types=False,
     )
     rows = _income_rows_from_issued(
         accounts,
@@ -864,7 +861,7 @@ def _build_eerr_report_for_month(
     )
     if abs(sold) <= 0.5:
         sold = float(classified_total)
-    # Bruto / Emitido = Cobros income rows (matches FNS, not + facturacion.cl).
+    # Bruto / Emitido = Cobros + portal invoices on income accounts.
     grand_total = float(classified_total)
     if abs(sold - classified_total) > 0.5:
         sold = float(classified_total)
@@ -1203,14 +1200,14 @@ def get_eerr_detail(
             invoice_only=True,
         )
     elif kind == "account":
-        # Same scope as EERR income rows: Cobros only (Facturado KPI is separate).
+        # Same scope as EERR income rows (Cobros + facturacion.cl invoices).
         raw_lines = _issued_tax_document_lines(
             db,
             date_from=month_start,
             date_to=month_finish,
             account_id=int(resolved_id) if resolved_id is not None else None,
             invoice_only=False,
-            exclude_invoice_types=True,
+            exclude_invoice_types=False,
         )
     elif kind == "unclassified":
         raw_lines = _issued_tax_document_lines(
@@ -1219,17 +1216,17 @@ def get_eerr_detail(
             date_to=month_finish,
             invoice_only=False,
             unassigned_only=True,
-            exclude_invoice_types=True,
+            exclude_invoice_types=False,
         )
     elif kind in {"pending", "collected"}:
-        # DB only — Cobros/Track lines (no portal invoices).
+        # DB only — Cobros + portal invoices.
         raw_lines = _issued_tax_document_lines(
             db,
             date_from=month_start,
             date_to=month_finish,
             account_id=int(resolved_id) if resolved_id is not None else None,
             invoice_only=False,
-            exclude_invoice_types=True,
+            exclude_invoice_types=False,
         )
     else:
         raw_lines = []

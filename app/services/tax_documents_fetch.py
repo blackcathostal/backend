@@ -286,6 +286,49 @@ def _is_clp_currency(value: object) -> bool:
     return (not currency) or currency in {"CLP", "CL$", "PESO", "PESOS", "$"}
 
 
+def _amount_is_usd(value: object) -> bool:
+    text = str(value or "").strip().upper()
+    return "US$" in text or "USD" in text
+
+
+def _money_to_clp(value: object, *, fx_usd_clp: float) -> float:
+    """Parse money; convert US$ with FNS page rate (CL$ per 1 USD)."""
+    amount = float(_money(value) or 0)
+    if abs(amount) <= 1e-9:
+        return 0.0
+    if not _amount_is_usd(value):
+        return amount
+    rate = float(fx_usd_clp or 0)
+    if rate <= 0.5:
+        return 0.0
+    return float(round(amount * rate))
+
+
+def _normalize_cobros_row_to_clp(
+    row: dict[str, str],
+    *,
+    fx_usd_clp: float,
+) -> dict[str, str]:
+    """
+    Rewrite Cobros cells so downstream logic always sees CLP.
+
+    FNS shows USD rows as 'US$ 110.16' while the page header has 'CL$ - US$: 900'.
+    """
+    out = dict(row)
+    converted = False
+    rate = float(fx_usd_clp or 0)
+    for key, value in list(out.items()):
+        if not _amount_is_usd(value):
+            continue
+        clp = _money_to_clp(value, fx_usd_clp=rate)
+        out[key] = f"CL$ {int(round(clp))}"
+        converted = True
+    if converted:
+        out["_fx_usd_clp"] = str(rate if rate > 0.5 else "")
+        out["_converted_from_usd"] = "1"
+    return out
+
+
 def _parse_html_table(html: str, title_hint: str) -> list[dict[str, str]]:
     idx = html.lower().find(title_hint.lower())
     chunk = html[idx:] if idx >= 0 else html
@@ -639,8 +682,9 @@ class TaxDocumentsFetchClient:
                 date_from=window_from,
                 date_to=window_to,
             )
+            fx = self._parse_usd_clp_rate(html)
             for row in _parse_html_table(html, "Informe de cobros"):
-                yield row
+                yield _normalize_cobros_row_to_clp(row, fx_usd_clp=fx)
 
     def _collection_concept_account_sums(
         self,
@@ -660,9 +704,11 @@ class TaxDocumentsFetchClient:
                 date_from=window_from,
                 date_to=window_to,
             )
+            fx = self._parse_usd_clp_rate(html)
             rows = _parse_html_table(html, "Informe de cobros")
             for row in rows:
-                concepts = _concept_breakdown(row, accounts=accounts)
+                normalized = _normalize_cobros_row_to_clp(row, fx_usd_clp=fx)
+                concepts = _concept_breakdown(normalized, accounts=accounts)
                 for header, amount in concepts.items():
                     code = account_code_for_concept(header, accounts)
                     if not code:

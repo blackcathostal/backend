@@ -934,6 +934,15 @@ def _upsert_docs(
         if is_fns_cobros and paid_id is not None:
             payment_status_id = int(paid_id)
         elif (
+            version_id == issued_id
+            and paid_id is not None
+            and item_source == "billing_portal"
+            and issued_at is not None
+            and issued_at <= _received_auto_paid_through()
+        ):
+            # Portal invoices through October cutoff → Imputada Pagada.
+            payment_status_id = int(paid_id)
+        elif (
             str(item.get("payment_status_code") or "").strip().lower() == "paid"
             and item.get("has_concepts")
         ):
@@ -1131,6 +1140,60 @@ def _mark_issued_cobros_paid(
                 func.lower(TaxDocuments.source) == "extranet_collections",
                 TaxDocuments.pms_class == "FNS Collections",
             ),
+            or_(
+                TaxDocuments.status_id.is_(None),
+                TaxDocuments.status_id != int(paid_id),
+            ),
+        )
+        .all()
+    )
+    if not rows:
+        return 0
+    for row in rows:
+        row.status_id = int(paid_id)
+    db.commit()
+    return len(rows)
+
+
+def _mark_issued_portal_invoices_paid_through_cutoff(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> int:
+    """
+    Facturacion.cl invoices dated through October cutoff → Imputada Pagada.
+
+    Uses the same closed-month cutoff as received docs (October 31).
+    """
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    paid_id = dte_catalog.paid_status_id(db)
+    if issued_id is None or paid_id is None:
+        return 0
+    cutoff = _received_auto_paid_through()
+    window_end = min(date_to, cutoff)
+    if window_end < date_from:
+        return 0
+    invoice_type_ids = [
+        tid
+        for tid in (
+            dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_INVOICE),
+            dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_EXEMPT_INVOICE),
+            dte_catalog.type_id_by_code(db, dte_catalog.TYPE_CODE_CREDIT_NOTE),
+        )
+        if tid is not None
+    ]
+    if not invoice_type_ids:
+        return 0
+    rows = (
+        db.query(TaxDocuments)
+        .filter(
+            TaxDocuments.dte_version_id == int(issued_id),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= window_end,
+            func.lower(TaxDocuments.source) == "billing_portal",
+            TaxDocuments.dte_type_id.in_(invoice_type_ids),
             or_(
                 TaxDocuments.status_id.is_(None),
                 TaxDocuments.status_id != int(paid_id),
@@ -1812,6 +1875,15 @@ async def refresh_tax_documents(
             if cobros_paid:
                 note = (
                     f"Se marcó Imputada Pagada en {cobros_paid} cobro(s) FNS."
+                )
+                warning = f"{warning} · {note}" if warning else note
+            portal_paid = _mark_issued_portal_invoices_paid_through_cutoff(
+                db, date_from=date_from, date_to=date_to
+            )
+            if portal_paid:
+                note = (
+                    f"Se marcó Imputada Pagada en {portal_paid} factura(s) "
+                    "de facturacion.cl hasta octubre."
                 )
                 warning = f"{warning} · {note}" if warning else note
         if received_id is not None and int(version_id) == int(received_id):
