@@ -352,7 +352,7 @@ def _issued_totals_by_account_id(
     Σ issued docs by assigned accounting account for the month.
 
     When exclude_invoice_types=True, skip 33/34/61 so EERR income rows use
-    income-collections lines and Facturado stays a separate KPI (no double count).
+    Cobros/Track lines and Facturado stays a separate KPI (no double count).
     """
     issued_id = _issued_version_id(db)
     invoice_type_ids = set(_invoice_type_ids(db)) if exclude_invoice_types else set()
@@ -383,6 +383,55 @@ def _issued_totals_by_account_id(
         key = int(account_id)
         totals[key] = float(totals.get(key, 0.0) + value)
     return totals
+
+
+def _issued_payment_kpis_from_db(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> tuple[float, float, float]:
+    """
+    Emitido / Cobrado / Pendiente from issued Track in DB (no FNS).
+
+    Facturas 33/34/61 stay out of these KPIs (they feed Facturado separately).
+    """
+    issued_id = _issued_version_id(db)
+    if issued_id is None:
+        return 0.0, 0.0, 0.0
+    invoice_type_ids = set(_invoice_type_ids(db))
+    paid_id = dte_catalog.paid_status_id(db)
+    rows = (
+        db.query(
+            TaxDocuments.dte_type_id,
+            TaxDocuments.status_id,
+            TaxDocuments.total_amount,
+        )
+        .filter(
+            TaxDocuments.dte_version_id == int(issued_id),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+        )
+        .all()
+    )
+    sold = 0.0
+    collected = 0.0
+    pending = 0.0
+    for type_id, status_id, amount in rows:
+        if invoice_type_ids and type_id is not None and int(type_id) in invoice_type_ids:
+            continue
+        value = _issued_doc_signed_amount(
+            db, type_id=type_id, amount=float(amount or 0)
+        )
+        if abs(value) <= 0.5:
+            continue
+        sold += value
+        if paid_id is not None and status_id is not None and int(status_id) == int(paid_id):
+            collected += value
+        else:
+            pending += value
+    return float(sold), float(collected), float(pending)
 
 
 def _invoice_totals_by_account_id(
@@ -807,30 +856,16 @@ def _build_eerr_report_for_month(
     concepts_total = float(sum(float(v or 0) for v in issued_by_account.values()))
     unclassified_collections = float(unassigned_total)
     pending_sales = 0.0
-    sold = float(classified_total)
-    collected = 0.0
-    pending = 0.0
-
-    if use_remote:
-        try:
-            sales = TaxDocumentsFetchClient()._income_collections_sales_totals(
-                month_start, month_finish
-            )
-            sold = float(sales.get("sold") or 0) or sold
-            collected = float(sales.get("collected") or 0)
-            pending = float(sales.get("pending") or 0)
-        except ExtranetWebError as exc:
-            logger.warning("EERR collected/pending unavailable: %s", exc)
-
-    # Bruto (grand_total) matches Emitido FNS when remote. Do not dump the
-    # sold−classified plug into "Otros" — that account only shows real docs.
+    # KPIs from issued Track in DB — same universe as income account rows.
+    sold, collected, pending = _issued_payment_kpis_from_db(
+        db, date_from=month_start, date_to=month_finish
+    )
+    if abs(sold) <= 0.5:
+        sold = float(classified_total)
+    # Bruto / Emitido = classified income rows (DB Cobros/Track), never FNS.
     grand_total = float(classified_total)
-    if use_remote and sold > 0.5:
-        grand_total = float(sold)
-        if sold > classified_total + 0.5:
-            unclassified_collections = float(
-                unclassified_collections + round(sold - classified_total)
-            )
+    if abs(sold - classified_total) > 0.5:
+        sold = float(classified_total)
 
     invoice_by_account = _invoice_totals_by_account_id(
         db, date_from=month_start, date_to=month_finish
