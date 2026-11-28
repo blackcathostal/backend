@@ -1067,7 +1067,23 @@ class TaxDocumentsFetchClient:
         except Exception as exc:  # noqa: BLE001 — scrape must continue without CoA
             logger.warning("Issued refresh CoA unavailable for concepts: %s", exc)
 
-        _, pending_by_locator = self._income_collections_index(date_from, date_to)
+        pending_by_locator: dict[str, float] = {}
+        try:
+            # Optional enrichment only — Cobros Importe must still import if this times out.
+            for window_from, window_to in _month_windows(date_from, date_to):
+                _, window_pending = self._income_collections_index(
+                    window_from, window_to
+                )
+                for locator, amount in window_pending.items():
+                    pending_by_locator[locator] = max(
+                        float(pending_by_locator.get(locator) or 0),
+                        float(amount or 0),
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Issued refresh: income-collections pending enrich skipped: %s",
+                exc,
+            )
         merged: dict[str, dict[str, Any]] = {}
 
         def _cobros_issued_doc(
