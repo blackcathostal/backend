@@ -1024,17 +1024,17 @@ class TaxDocumentsFetchClient:
 
     def fetch_issued(self, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """
-        Issued Track refresh: FNS income-collections amounts, split by Cobros concepts.
+        Issued Track refresh: amounts from FNS Informes → Cobros (Importe).
 
-        Sold/collected come from income-collections; Bar/Cafeteria/… accounts come from
-        Collections concept columns for the same locator (scaled to Imp. Total).
+        Each Cobros payment row becomes issued Track line(s). Concept columns
+        (Alojamiento, Bar, …) are scaled to Importe so the month total matches
+        the Cobros report. Income-collections only enriches pending by locator.
         """
         if date_to < date_from:
             raise ExtranetWebError("Rango de fechas inválido")
 
         from app.services.accounting_concept_map import load_income_accounts
 
-        # Concept labels live on CoA; load once for the scrape (no DB session here).
         accounts: list = []
         try:
             from app.core.database import SessionLocal
@@ -1052,60 +1052,77 @@ class TaxDocumentsFetchClient:
         except Exception as exc:  # noqa: BLE001 — scrape must continue without CoA
             logger.warning("Issued refresh CoA unavailable for concepts: %s", exc)
 
-        concepts_by_locator = self._collection_concepts_by_locator(
-            date_from, date_to, accounts=accounts or None
-        )
+        _, pending_by_locator = self._income_collections_index(date_from, date_to)
         merged: dict[str, dict[str, Any]] = {}
-        for window_from, window_to in _month_windows(date_from, date_to):
-            for row in self._income_collections_rows(window_from, window_to):
-                locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
-                sold = float(_money(row.get("Imp. Total")) or 0)
-                if abs(sold) <= 0.5:
-                    sold = float(_money(row.get("Cobrado")) or 0)
-                locator_concepts = dict(concepts_by_locator.get(locator) or {})
-                concept_total = float(sum(float(v or 0) for v in locator_concepts.values()))
 
-                lines: list[dict[str, Any]] = []
-                if locator_concepts and concept_total > 0.5 and abs(sold) > 0.5:
-                    # Keep sold total from income-collections; mix from Cobros concepts.
-                    scaled = _scale_amounts_to_target(locator_concepts, sold)
-                    for header, amount in scaled.items():
-                        if abs(float(amount or 0)) <= 0.5:
-                            continue
-                        slug = re.sub(r"[^a-z0-9]+", "", _norm(header))[:12] or "x"
-                        doc = self._normalize_income_collections_row(
-                            row,
-                            concepts={header: float(amount)},
-                            concept_header=header,
-                            amount_override=float(amount),
-                            folio_suffix=f"-{slug}",
-                        )
-                        if doc:
-                            lines.append(doc)
-                else:
-                    doc = self._normalize_income_collections_row(row)
-                    if doc:
-                        lines.append(doc)
+        for row in self._iter_collection_rows(date_from, date_to):
+            amount = float(_money(_find_col(row, "Importe", "Total", "Monto")) or 0)
+            if abs(amount) <= 0.5:
+                continue
 
-                for doc in lines:
-                    issued = _parse_date(doc.get("issued_at"))
-                    if issued is not None and (issued < date_from or issued > date_to):
-                        if issued < date_from:
-                            doc["issued_at"] = date_from.isoformat()
-                        elif issued > date_to:
-                            doc["issued_at"] = date_to.isoformat()
-                    folio = str(doc.get("folio") or "")
-                    if not folio:
+            issued_at = _parse_date(_find_col(row, "Fecha", "Creado el"))
+            if issued_at is not None and (issued_at < date_from or issued_at > date_to):
+                continue
+
+            concepts = _concept_breakdown(row, accounts=accounts or None)
+            concept_total = float(sum(float(v or 0) for v in concepts.values()))
+            lines: list[dict[str, Any]] = []
+
+            if concepts and concept_total > 0.5:
+                scaled = _scale_amounts_to_target(concepts, amount)
+                for header, line_amount in scaled.items():
+                    if abs(float(line_amount or 0)) <= 0.5:
                         continue
-                    current = merged.get(folio)
-                    if current is None:
-                        merged[folio] = doc
+                    slug = re.sub(r"[^a-z0-9]+", "", _norm(header))[:12] or "x"
+                    doc = self._normalize_collection_row(row, direction="issued")
+                    if not doc:
                         continue
-                    if (
-                        str(doc.get("payment_status_code") or "") == "paid"
-                        and str(current.get("payment_status_code") or "") != "paid"
-                    ):
-                        merged[folio] = doc
+                    base_folio = str(doc.get("folio") or "")
+                    doc["folio"] = f"{base_folio}-{slug}"[:40]
+                    doc["total_amount"] = float(line_amount)
+                    net_amount, exempt_amount, tax_amount = _split_cl_iva(
+                        float(line_amount),
+                        doc_type=doc.get("dte_type_code") or doc.get("doc_type") or "",
+                    )
+                    doc["net_amount"] = net_amount
+                    doc["exempt_amount"] = exempt_amount
+                    doc["tax_amount"] = tax_amount
+                    doc["concepts"] = {str(header): float(line_amount)}
+                    doc["has_concepts"] = True
+                    raw = dict(doc.get("raw") or {})
+                    raw["concepts"] = doc["concepts"]
+                    raw["concept_header"] = str(header)
+                    raw["line_amount"] = float(line_amount)
+                    raw["source_report"] = "collections"
+                    raw["fns_action"] = "Cobros"
+                    doc["raw"] = raw
+                    lines.append(doc)
+            else:
+                doc = self._normalize_collection_row(row, direction="issued")
+                if doc:
+                    lines.append(doc)
+
+            locator = re.sub(r"\s+", "", str(_find_col(row, "Localizador") or ""))
+            pending = float(pending_by_locator.get(locator) or 0)
+            for doc in lines:
+                if pending > 0.5:
+                    doc["payment_status_code"] = "pending_payment"
+                    raw = dict(doc.get("raw") or {})
+                    raw["payment_status_code"] = "pending_payment"
+                    raw["reservation_pending_amount"] = pending
+                    doc["raw"] = raw
+                folio = str(doc.get("folio") or "")
+                if not folio:
+                    continue
+                current = merged.get(folio)
+                if current is None:
+                    merged[folio] = doc
+                    continue
+                # Same folio: keep the higher amount (avoid losing Cobros Importe).
+                if float(doc.get("total_amount") or 0) > float(
+                    current.get("total_amount") or 0
+                ):
+                    merged[folio] = doc
         return list(merged.values())
 
     def fetch_received(self, date_from: date, date_to: date) -> list[dict[str, Any]]:

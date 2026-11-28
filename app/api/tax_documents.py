@@ -1517,8 +1517,8 @@ def _scrape_tax_documents_sync(
                 else f"Servipag: {utility_warning}"
             )
     else:
-        # Issued = FNS income-collections (sold/collected) + facturas from facturacion.cl.
-        source = "extranet_income_collections"
+        # Issued = FNS Informes → Cobros (Importe) + facturas from facturacion.cl.
+        source = "extranet_collections"
         with TaxDocumentsFetchClient() as fetch_client:
             fns_docs = fetch_client.fetch_issued(date_from, date_to)
 
