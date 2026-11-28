@@ -218,6 +218,9 @@ _NON_CONCEPT_HEADERS = frozenset(
         "id",
         "fecha",
         "creado el",
+        "creado por",
+        "entrada",
+        "salida",
         "tipo",
         "tipo documento",
         "folio",
@@ -244,6 +247,16 @@ _NON_CONCEPT_HEADERS = frozenset(
 )
 
 
+def _looks_like_date_value(value: object) -> bool:
+    """True for FNS date/time cells (must not be parsed as money)."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?", text):
+        return True
+    return False
+
+
 def _concept_breakdown(
     row: dict[str, str],
     *,
@@ -257,8 +270,10 @@ def _concept_breakdown(
         nk = _norm(key)
         if nk in _NON_CONCEPT_HEADERS:
             continue
+        if _looks_like_date_value(value):
+            continue
         if accounts is not None:
-            if not is_concept_column(key, accounts):
+            if not accounts or not is_concept_column(key, accounts):
                 continue
         amount = _money(value)
         if amount:
@@ -1064,9 +1079,24 @@ class TaxDocumentsFetchClient:
             if issued_at is not None and (issued_at < date_from or issued_at > date_to):
                 continue
 
-            concepts = _concept_breakdown(row, accounts=accounts or None)
+            concepts = _concept_breakdown(row, accounts=accounts)
             concept_total = float(sum(float(v or 0) for v in concepts.values()))
             lines: list[dict[str, Any]] = []
+            # Cobros payment ID is unique per row; document numbers often repeat.
+            payment_id = re.sub(r"\s+", "", str(_find_col(row, "ID") or ""))
+            doc_folio = re.sub(
+                r"\s+",
+                "",
+                str(
+                    _find_col(
+                        row, "Nº documento", "N° documento", "No documento", "Folio"
+                    )
+                    or ""
+                ),
+            )
+            folio_base = payment_id or doc_folio or re.sub(
+                r"\s+", "", str(_find_col(row, "Localizador") or "")
+            )
 
             if concepts and concept_total > 0.5:
                 scaled = _scale_amounts_to_target(concepts, amount)
@@ -1077,8 +1107,7 @@ class TaxDocumentsFetchClient:
                     doc = self._normalize_collection_row(row, direction="issued")
                     if not doc:
                         continue
-                    base_folio = str(doc.get("folio") or "")
-                    doc["folio"] = f"{base_folio}-{slug}"[:40]
+                    doc["folio"] = f"{folio_base}-{slug}"[:40]
                     doc["total_amount"] = float(line_amount)
                     net_amount, exempt_amount, tax_amount = _split_cl_iva(
                         float(line_amount),
@@ -1093,6 +1122,7 @@ class TaxDocumentsFetchClient:
                     raw["concepts"] = doc["concepts"]
                     raw["concept_header"] = str(header)
                     raw["line_amount"] = float(line_amount)
+                    raw["cobros_payment_id"] = payment_id
                     raw["source_report"] = "collections"
                     raw["fns_action"] = "Cobros"
                     doc["raw"] = raw
@@ -1100,6 +1130,12 @@ class TaxDocumentsFetchClient:
             else:
                 doc = self._normalize_collection_row(row, direction="issued")
                 if doc:
+                    doc["folio"] = (folio_base or str(doc.get("folio") or ""))[:40]
+                    raw = dict(doc.get("raw") or {})
+                    raw["cobros_payment_id"] = payment_id
+                    raw["source_report"] = "collections"
+                    raw["fns_action"] = "Cobros"
+                    doc["raw"] = raw
                     lines.append(doc)
 
             locator = re.sub(r"\s+", "", str(_find_col(row, "Localizador") or ""))
