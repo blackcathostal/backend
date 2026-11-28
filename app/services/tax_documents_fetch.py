@@ -1164,9 +1164,29 @@ class TaxDocumentsFetchClient:
 
             payment_id = re.sub(r"\s+", "", str(row.get("ID") or ""))
             locator = re.sub(r"\s+", "", str(row.get("Localizador") or ""))
-            folio_base = payment_id or locator
-            if not folio_base:
+            # FNS often repeats the same Cobros ID across many distinct payments
+            # (same locator, different Creado el / Importe). Folio must be unique
+            # per row or later months overwrite earlier ones and Emitido drifts.
+            created_raw = str(_find_col(row, "Creado el") or "").strip()
+            created_key = ""
+            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+                try:
+                    created_key = datetime.strptime(
+                        created_raw[:19], fmt
+                    ).strftime("%y%m%d%H%M%S")
+                    break
+                except ValueError:
+                    continue
+            if not created_key and issued_at is not None:
+                created_key = issued_at.strftime("%y%m%d") + str(
+                    abs(hash((locator, round(amount), created_raw))) % 1000000
+                ).zfill(6)
+            folio_stem = payment_id or locator
+            if not folio_stem:
                 continue
+            folio_base = (
+                f"{folio_stem}-{created_key}" if created_key else folio_stem
+            )[:40]
             pending = float(pending_by_locator.get(locator) or 0)
             concepts = _concept_breakdown(row, accounts=accounts)
             concept_total = float(sum(float(v or 0) for v in concepts.values()))
@@ -1178,9 +1198,11 @@ class TaxDocumentsFetchClient:
                     if abs(float(line_amount or 0)) <= 0.5:
                         continue
                     slug = re.sub(r"[^a-z0-9]+", "", _norm(header))[:12] or "x"
+                    # Keep ≤40 chars (DB folio column).
+                    folio = f"{folio_base}-{slug}"[:40]
                     doc = _cobros_issued_doc(
                         row=row,
-                        folio=f"{folio_base}-{slug}",
+                        folio=folio,
                         line_amount=float(line_amount),
                         concepts={str(header): float(line_amount)},
                         concept_header=str(header),
@@ -1211,7 +1233,7 @@ class TaxDocumentsFetchClient:
                 if current is None:
                     merged[folio] = doc
                     continue
-                # Same folio: add amounts (duplicate payment id + concept).
+                # Same folio: add amounts (true duplicate payment id + created + concept).
                 current["total_amount"] = float(current.get("total_amount") or 0) + float(
                     doc.get("total_amount") or 0
                 )
