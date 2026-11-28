@@ -65,6 +65,93 @@ def _issued_doc_key(doc: dict) -> tuple[str, str]:
     )
 
 
+def _folio_match_key(value: object) -> str:
+    """Normalize folio/Nº documento so '500', '0500' and 'N° 500' compare equal."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    if not digits:
+        return ""
+    return digits.lstrip("0") or digits
+
+
+def _normalize_header_key(value: object) -> str:
+    text = str(value or "").strip().lower()
+    for src, dst in (
+        ("á", "a"),
+        ("é", "e"),
+        ("í", "i"),
+        ("ó", "o"),
+        ("ú", "u"),
+        ("ñ", "n"),
+        ("º", ""),
+        ("°", ""),
+        ("ª", ""),
+    ):
+        text = text.replace(src, dst)
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def _raw_document_number(raw: dict) -> str:
+    for key, value in raw.items():
+        normalized = _normalize_header_key(key)
+        if normalized in {
+            "ndocumento",
+            "nrodocumento",
+            "nodocumento",
+            "numerodocumento",
+            "folio",
+        }:
+            text = str(value or "").strip()
+            if text:
+                return text
+        if "documento" in normalized and "tipo" not in normalized:
+            text = str(value or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _fns_referenced_invoice_folio(doc: dict) -> str:
+    """
+    Invoice number already carried by an FNS Cobros row.
+
+    Cobros keeps payment ID as folio and puts the real factura number in
+    "Nº documento" / comments ("Pagado por factura Nro. 500"). Those must
+    block a second copy from facturacion.cl.
+    """
+    raw = doc.get("raw") if isinstance(doc.get("raw"), dict) else {}
+    doc_type = str(
+        doc.get("doc_type")
+        or doc.get("dte_type_code")
+        or raw.get("doc_type")
+        or raw.get("Tipo documento")
+        or ""
+    )
+    comment = str(raw.get("Comentarios") or raw.get("comentarios") or "")
+    code = str(doc.get("dte_type_code") or doc.get("dte_type_id") or "").strip()
+    lowered_type = doc_type.lower()
+    lowered_comment = comment.lower()
+    is_invoice_like = (
+        code in _INVOICE_TYPE_CODES
+        or "factura" in lowered_type
+        or "factura" in lowered_comment
+        or "nota de credito" in lowered_type
+        or "nota de crédito" in lowered_type
+    )
+    if not is_invoice_like:
+        return ""
+    digits = _folio_match_key(_raw_document_number(raw))
+    if digits:
+        return digits
+    match = re.search(
+        r"factura\s*(?:nro\.?|n[oº°\.]*|numero)?\s*(\d+)",
+        comment,
+        flags=re.I,
+    )
+    if match:
+        return _folio_match_key(match.group(1))
+    return ""
+
+
 def _is_placeholder_identification(value: object) -> bool:
     text = str(value or "").strip()
     if not text:
@@ -91,6 +178,8 @@ def _merge_issued_with_billing_portal(
 ) -> tuple[list[dict], str]:
     """
     Keep all FNS emitidas. Import portal invoices missing in FNS.
+    If FNS Cobros already references a factura Nº, skip that folio from
+    facturacion.cl (avoids paying-with-invoice duplicates).
     Enrich FNS rows that lack RUT with facturacion.cl invoice RUT/name.
     Use portal boletas only to corroborate FNS boletas (do not import portal-only boletas).
     """
@@ -130,9 +219,16 @@ def _merge_issued_with_billing_portal(
         ):
             portal_invoices_by_folio[folio] = doc
 
+    portal_by_folio_key = {
+        _folio_match_key(folio): doc
+        for folio, doc in portal_invoices_by_folio.items()
+        if _folio_match_key(folio)
+    }
+
     merged: list[dict] = []
     fns_keys: set[tuple[str, str]] = set()
     fns_boleta_folios: set[str] = set()
+    fns_referenced_invoice_folios: set[str] = set()
     enriched_ruts = 0
 
     for doc in fns_docs:
@@ -149,9 +245,19 @@ def _merge_issued_with_billing_portal(
             if folio:
                 fns_boleta_folios.add(folio)
 
+        referenced_folio = _fns_referenced_invoice_folio(item)
+        if referenced_folio:
+            fns_referenced_invoice_folios.add(referenced_folio)
+
         portal = portal_invoices_by_folio.get(folio) if folio else None
+        if portal is None and referenced_folio:
+            portal = portal_by_folio_key.get(referenced_folio)
         fns_tipo = str(item.get("doc_type") or "").lower()
-        fns_is_invoice = code in _INVOICE_TYPE_CODES or "factura" in fns_tipo
+        fns_is_invoice = (
+            code in _INVOICE_TYPE_CODES
+            or "factura" in fns_tipo
+            or bool(referenced_folio)
+        )
         if (
             portal
             and _is_placeholder_identification(item.get("identification_number"))
@@ -189,9 +295,14 @@ def _merge_issued_with_billing_portal(
         merged.append(item)
 
     added_invoices = 0
+    skipped_existing_invoices = 0
     for folio, doc in portal_invoices_by_folio.items():
         key = _issued_doc_key(doc)
-        if key in fns_keys:
+        folio_key = _folio_match_key(folio)
+        if key in fns_keys or (
+            folio_key and folio_key in fns_referenced_invoice_folios
+        ):
+            skipped_existing_invoices += 1
             continue
         item = dict(doc)
         item["source"] = "billing_portal"
@@ -231,6 +342,7 @@ def _merge_issued_with_billing_portal(
     parts = [
         f"FNS: {len(fns_docs)}",
         f"facturas nuevas facturacion.cl: {added_invoices}",
+        f"facturas portal omitidas (ya en FNS): {skipped_existing_invoices}",
         f"RUT enriquecidos desde portal: {enriched_ruts}",
         f"boletas FNS corroboradas en portal: {corroborated}/{len(fns_boleta_folios)}",
     ]
