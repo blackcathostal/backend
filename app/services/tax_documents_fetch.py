@@ -1105,9 +1105,8 @@ class TaxDocumentsFetchClient:
             company_name = _find_col(row, "Nombre", "Cliente", "Titular")
             channel = _find_col(row, "Canal")
             issued_at = _parse_date(_find_col(row, "Fecha", "Creado el"))
-            status_code = (
-                "pending_payment" if pending > 0.5 else "paid"
-            )
+            # Informe Cobros = payments already collected → always Imputada Pagada.
+            status_code = "paid"
             net_amount, exempt_amount, tax_amount = _split_cl_iva(
                 float(line_amount),
                 doc_type=raw_type,

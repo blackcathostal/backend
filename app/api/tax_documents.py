@@ -920,14 +920,24 @@ def _upsert_docs(
         payment_status_id = dte_catalog.status_id_from_payment_code(
             db, item.get("payment_status_code")
         )
-        # When FNS says paid and concepts were allocated, force Imputada Pagada.
-        if (
+        paid_id = dte_catalog.paid_status_id(db)
+        raw_payload = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+        item_source = str(item.get("source") or source or "").strip().lower()
+        # FNS Informe Cobros rows are collected payments → always Imputada Pagada.
+        is_fns_cobros = version_id == issued_id and (
+            item_source in {"extranet_web", "extranet_collections"}
+            or str(raw_payload.get("source_report") or "").strip().lower()
+            == "collections"
+            or str(raw_payload.get("fns_action") or "").strip().lower() == "cobros"
+            or str(item.get("pms_class") or "").strip().lower() == "fns collections"
+        )
+        if is_fns_cobros and paid_id is not None:
+            payment_status_id = int(paid_id)
+        elif (
             str(item.get("payment_status_code") or "").strip().lower() == "paid"
             and item.get("has_concepts")
         ):
-            payment_status_id = dte_catalog.paid_status_id(db) or payment_status_id
-
-        paid_id = dte_catalog.paid_status_id(db)
+            payment_status_id = paid_id or payment_status_id
         received_auto_paid = (
             version_id == received_id
             and issued_at is not None
@@ -1094,6 +1104,44 @@ def _backfill_unassigned_issued_to_lodging(
         return 0
     for row in rows:
         row.accounting_account_id = lodging_id
+    db.commit()
+    return len(rows)
+
+
+def _mark_issued_cobros_paid(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+) -> int:
+    """Force Imputada Pagada on FNS Cobros issued rows in the refresh window."""
+    issued_id = dte_catalog.version_id_by_code(db, dte_catalog.VERSION_CODE_ISSUED)
+    paid_id = dte_catalog.paid_status_id(db)
+    if issued_id is None or paid_id is None:
+        return 0
+    rows = (
+        db.query(TaxDocuments)
+        .filter(
+            TaxDocuments.dte_version_id == int(issued_id),
+            TaxDocuments.issued_at.isnot(None),
+            TaxDocuments.issued_at >= date_from,
+            TaxDocuments.issued_at <= date_to,
+            or_(
+                func.lower(TaxDocuments.source) == "extranet_web",
+                func.lower(TaxDocuments.source) == "extranet_collections",
+                TaxDocuments.pms_class == "FNS Collections",
+            ),
+            or_(
+                TaxDocuments.status_id.is_(None),
+                TaxDocuments.status_id != int(paid_id),
+            ),
+        )
+        .all()
+    )
+    if not rows:
+        return 0
+    for row in rows:
+        row.status_id = int(paid_id)
     db.commit()
     return len(rows)
 
@@ -1756,6 +1804,14 @@ async def refresh_tax_documents(
                 note = (
                     f"Se asignó Hospedaje a {accounts_assigned} documento(s) "
                     "sin cuenta contable."
+                )
+                warning = f"{warning} · {note}" if warning else note
+            cobros_paid = _mark_issued_cobros_paid(
+                db, date_from=date_from, date_to=date_to
+            )
+            if cobros_paid:
+                note = (
+                    f"Se marcó Imputada Pagada en {cobros_paid} cobro(s) FNS."
                 )
                 warning = f"{warning} · {note}" if warning else note
         if received_id is not None and int(version_id) == int(received_id):
