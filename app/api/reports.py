@@ -253,13 +253,12 @@ def _expense_rows_for_period(
     period_key: str,
     date_from: date,
     date_to: date,
-    use_remote: bool = True,
+    use_remote: bool = False,
 ) -> list[EerrAccountRow]:
     """
-    Egresos: all active gasto accounts.
+    Egresos: all active gasto accounts (DB only).
     Remuneraciones ← hr_period_amounts;
-    OTA commissions ← FNS Informes/Comisiones (Booking/Expedia/…) when use_remote;
-    other categories ← recibidas Imputada Pagada assigned totals.
+    other categories (incl. commissions) ← recibidas Imputada Pagada assigned totals.
     """
     accounts = load_expense_accounts(db)
     if not accounts:
@@ -770,11 +769,12 @@ def _build_eerr_report_for_month(
     db: Session,
     month_start: date,
     *,
-    use_remote: bool = True,
+    use_remote: bool = False,
 ) -> EerrReportOut:
     """
     Same rules as monthly EERR for one month (income + expenses + result).
-    use_remote=False skips FNS (Cobros/comisiones) and uses local DB only.
+    Always prefers DB (issued/received/HR). use_remote is kept for rare
+    diagnostics and must stay False in the admin EERR endpoints.
     Caller should run CoA / mapping / manual boleta ensures once per request.
     """
     today = date.today()
@@ -998,19 +998,20 @@ def get_eerr_report(
     _: Users = Depends(get_current_user),
 ) -> EerrReportOut:
     """
-    Income statement for one month.
+    Income statement for one month (DB only — no FNS).
 
-    Income ← issued tax documents by account (same idea as received docs for expenses).
-    Expenses ← received docs + HR + OTA commissions (FNS commissions report).
-    Collected/pending KPIs still come from FNS income-collections when available.
+    Income ← issued tax documents by account.
+    Expenses ← received docs + HR amounts already stored in DB.
     """
     month_start = _parse_period(period)
     ensure_concept_labels_from_coa(db)
     ensure_received_document_account_mappings_from_catalog(db)
     ensure_manual_received_boletas(db)
     _mark_received_through_cutoff_paid(db)
-    report = _remap_report_categories(db, _build_eerr_report_for_month(db, month_start))
-    # Cache for consolidated (DB-only; consolidated never calls FNS).
+    report = _remap_report_categories(
+        db, _build_eerr_report_for_month(db, month_start, use_remote=False)
+    )
+    # Cache for consolidated (also DB-only).
     try:
         save_eerr_month_snapshot(db, report)
     except Exception as exc:
@@ -1143,29 +1144,13 @@ def get_eerr_detail(
                     }
                 ]
         else:
+            # DB only — do not pull FNS Informes/Comisiones for detail.
             raw_lines = _received_tax_document_lines(
                 db,
                 date_from=month_start,
                 date_to=month_finish,
                 account_id=int(resolved_id) if resolved_id is not None else None,
             )
-            if resolved_id is not None:
-                commission_lines = _commission_detail_lines_for_account(
-                    date_from=month_start,
-                    date_to=month_finish,
-                    accounts=expense_accounts,
-                    account_id=int(resolved_id),
-                )
-                if commission_lines and not raw_lines:
-                    raw_lines = commission_lines
-                elif commission_lines and raw_lines:
-                    # Prefer document lines; keep commissions only when they exceed docs.
-                    docs_total = float(sum(float(item.get("amount") or 0) for item in raw_lines))
-                    fees_total = float(
-                        sum(float(item.get("amount") or 0) for item in commission_lines)
-                    )
-                    if fees_total > docs_total + 0.5:
-                        raw_lines = commission_lines
     elif kind == "fixed_asset":
         raw_lines = _received_tax_document_lines(
             db,
@@ -1200,19 +1185,18 @@ def get_eerr_detail(
             unassigned_only=True,
             exclude_invoice_types=True,
         )
+    elif kind in {"pending", "collected"}:
+        # DB only — issued Track lines (no FNS income-collections).
+        raw_lines = _issued_tax_document_lines(
+            db,
+            date_from=month_start,
+            date_to=month_finish,
+            account_id=int(resolved_id) if resolved_id is not None else None,
+            invoice_only=False,
+            exclude_invoice_types=True,
+        )
     else:
-        # pending / collected: still from FNS income-collections
-        try:
-            client = TaxDocumentsFetchClient()
-            raw_lines = client.fetch_income_detail_lines(
-                month_start,
-                month_finish,
-                accounts=income_accounts,
-                row_kind=kind,
-                account_code=code,
-            )
-        except ExtranetWebError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raw_lines = []
 
     lines = [EerrDetailLine.model_validate(item) for item in raw_lines]
     total = float(sum(float(item.amount or 0) for item in lines))
@@ -1229,11 +1213,11 @@ def get_eerr_detail(
 
 
 def _is_official_eerr_snapshot(report: EerrReportOut | None) -> bool:
-    """Snapshots saved by monthly EERR (with FNS) — not local-only fills."""
+    """Snapshots saved by opening monthly EERR (DB build)."""
     if report is None:
         return False
     source = str(report.source or "").strip().lower()
-    return source == "tax_documents_issued"
+    return source in {"tax_documents_issued", "tax_documents_issued_local"}
 
 
 def _remap_report_categories(db: Session, report: EerrReportOut) -> EerrReportOut:
